@@ -1,1 +1,6 @@
 /local/
+.idea
+
+# Added by cargo
+
+/target

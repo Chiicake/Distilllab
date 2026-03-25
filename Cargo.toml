@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "apps/desktop",
+    "crates/schema",
+    "crates/memory",
+    "crates/provider",
+    "crates/runtime",
+    "crates/observe",
+]
+resolver = "2"
