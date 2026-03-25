@@ -1,14 +1,9 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+// Distilllab 的共享数据结构入口。
+// 这里定义的类型会被 runtime、memory、desktop 等模块共同使用，
+// 用来保证不同模块对同一个业务对象的理解一致。
+pub mod run;
+pub mod source;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// 对外暴露当前阶段最小的一组核心记录类型。
+pub use run::{RunRecord, RunState};
+pub use source::{SourceRecord, SourceType};

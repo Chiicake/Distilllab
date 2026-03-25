@@ -2976,6 +2976,9 @@ dependencies = [
 [[package]]
 name = "schema"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "schemars"
