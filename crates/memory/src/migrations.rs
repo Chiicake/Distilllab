@@ -1,5 +1,6 @@
 use rusqlite::{Connection, Result};
 
+// 初始化 Distilllab 表结构
 pub fn run_migrations(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
@@ -24,6 +25,7 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
 mod tests {
     use super::*;
     use rusqlite::Connection;
+
     #[test]
     fn test_creates_tables() {
         let conn = Connection::open_in_memory().expect("failed to open in-memory database");

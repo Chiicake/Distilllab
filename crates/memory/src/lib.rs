@@ -1,17 +1,7 @@
-pub mod migrations;
+// memory crate 负责 Distilllab 的本地持久化基础设施。
+// - 打开 SQLite 数据库
+// - 初始化最小表结构
+
 pub mod db;
-
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub mod migrations;
+pub mod run_store;
