@@ -7,6 +7,7 @@
     <style>
       button {
         margin-top: 16px;
+        margin-right: 12px;
         padding: 10px 16px;
         border: none;
         border-radius: 10px;
@@ -52,14 +53,16 @@
       <p>Tauri shell initialized. This is the temporary Phase 0 desktop page.</p>
       <p>Next we will replace this with the <code>Home / Runtime Console</code>.</p>
       <button id="create-run-button">Create Demo Run</button>
+      <button id="create-source-button">Create Demo Source</button>
       <p id="result">No result yet.</p>
     </main>
     <script>
-      const button = document.getElementById("create-run-button");
+      const runButton = document.getElementById("create-run-button");
+      const sourceButton = document.getElementById("create-source-button");
       const result = document.getElementById("result");
 
-      button.addEventListener("click", async () => {
-        result.textContent = "Creating demo run...";
+      async function invokeCommand(commandName, loadingMessage) {
+        result.textContent = loadingMessage;
 
         try {
           const invoke = window.__TAURI_INTERNALS__?.invoke;
@@ -69,11 +72,19 @@
             return;
           }
 
-          const response = await invoke("create_demo_run");
+          const response = await invoke(commandName);
           result.textContent = response;
         } catch (error) {
           result.textContent = `Error: ${error}`;
         }
+      }
+
+      runButton.addEventListener("click", async () => {
+        await invokeCommand("create_demo_run", "Creating demo run...");
+      });
+
+      sourceButton.addEventListener("click", async () => {
+        await invokeCommand("create_demo_source", "Creating demo source...");
       });
     </script>
   </body>

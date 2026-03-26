@@ -1,10 +1,20 @@
 use runtime::AppRuntime;
 
 #[tauri::command]
-fn create_demo_run() -> Result<String, String>  {
+fn create_demo_run() -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
     let run = runtime::create_demo_run(&runtime).map_err(|e| e.to_string())?;
     Ok(format!("created run: {} ({:?})", run.id, run.run_type))
+}
+
+#[tauri::command]
+fn create_demo_source() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let source = runtime::create_demo_source(&runtime).map_err(|e| e.to_string())?;
+    Ok(format!(
+        "created source: {} ({:?})",
+        source.id, source.source_type
+    ))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -20,7 +30,10 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![create_demo_run])
+        .invoke_handler(tauri::generate_handler![
+            create_demo_run,
+            create_demo_source
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
