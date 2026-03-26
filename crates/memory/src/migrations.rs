@@ -10,6 +10,12 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             title TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS chunks (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            content TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS runs (
             id TEXT PRIMARY KEY,
             run_type TEXT NOT NULL,
@@ -46,7 +52,15 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("runs table should exist");
+        let chunks_exists: String = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chunks'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("chunks table should exist");
         assert_eq!(sources_exists, "sources");
         assert_eq!(runs_exists, "runs");
+        assert_eq!(chunks_exists, "chunks");
     }
 }

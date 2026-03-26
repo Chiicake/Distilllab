@@ -3,6 +3,7 @@
 // - 初始化最小表结构
 
 pub mod db;
+pub mod chunk_store;
 pub mod migrations;
 pub mod run_store;
 pub mod source_store;
