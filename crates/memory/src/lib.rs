@@ -7,3 +7,4 @@ pub mod chunk_store;
 pub mod migrations;
 pub mod run_store;
 pub mod source_store;
+pub mod work_item_store;

@@ -55,8 +55,10 @@
       <button id="create-run-button">Create Demo Run</button>
       <button id="create-source-button">Create Demo Source</button>
       <button id="chunk-source-button">Chunk Demo Source</button>
+      <button id="extract-work-items-button">Extract Demo Work Items</button>
       <button id="list-runs-button">List Runs</button>
       <button id="list-sources-button">List Sources</button>
+      <button id="list-work-items-button">List Work Items</button>
       <p>
         <label for="source-id-input">Source ID for chunk lookup:</label>
         <input id="source-id-input" type="text" placeholder="source-..." />
@@ -68,8 +70,10 @@
       const runButton = document.getElementById("create-run-button");
       const sourceButton = document.getElementById("create-source-button");
       const chunkSourceButton = document.getElementById("chunk-source-button");
+      const extractWorkItemsButton = document.getElementById("extract-work-items-button");
       const listRunsButton = document.getElementById("list-runs-button");
       const listSourcesButton = document.getElementById("list-sources-button");
+      const listWorkItemsButton = document.getElementById("list-work-items-button");
       const listChunksButton = document.getElementById("list-chunks-button");
       const sourceIdInput = document.getElementById("source-id-input");
       const result = document.getElementById("result");
@@ -104,12 +108,20 @@
         await invokeCommand("chunk_demo_source", "Chunking demo source...");
       });
 
+      extractWorkItemsButton.addEventListener("click", async () => {
+        await invokeCommand("extract_demo_work_items", "Extracting demo work items...");
+      });
+
       listRunsButton.addEventListener("click", async () => {
         await invokeCommand("list_runs", "Loading runs...");
       });
 
       listSourcesButton.addEventListener("click", async () => {
         await invokeCommand("list_sources", "Loading sources...");
+      });
+
+      listWorkItemsButton.addEventListener("click", async () => {
+        await invokeCommand("list_work_items", "Loading work items...");
       });
 
       listChunksButton.addEventListener("click", async () => {

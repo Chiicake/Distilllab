@@ -82,17 +82,58 @@ fn chunk_demo_source() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn list_chunks_for_source(sourceId: String) -> Result<String, String> {
+fn list_chunks_for_source(source_id: String) -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
-    let chunks = runtime::list_chunks_for_source(&runtime, &sourceId).map_err(|e| e.to_string())?;
+    let chunks =
+        runtime::list_chunks_for_source(&runtime, &source_id).map_err(|e| e.to_string())?;
 
     if chunks.is_empty() {
-        return Ok(format!("no chunks found for source {}", sourceId));
+        return Ok(format!("no chunks found for source {}", source_id));
     }
 
     let summary = chunks
         .iter()
         .map(|chunk| format!("{} [{}] {}", chunk.id, chunk.sequence, chunk.content))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(summary)
+}
+
+#[tauri::command]
+fn extract_demo_work_items() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let (source, chunks, work_items) =
+        runtime::extract_demo_work_items(&runtime).map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "extracted {} work items from {} chunks for source {}",
+        work_items.len(),
+        chunks.len(),
+        source.id
+    ))
+}
+
+#[tauri::command]
+fn list_work_items() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let work_items = runtime::list_work_items(&runtime).map_err(|e| e.to_string())?;
+
+    if work_items.is_empty() {
+        return Ok("no work items found".to_string());
+    }
+
+    let summary = work_items
+        .iter()
+        .map(|item| {
+            format!(
+                "{} [{}] {} -- {}",
+                item.id,
+                item.work_item_type.as_str(),
+                item.title,
+                item.summary
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -118,7 +159,9 @@ pub fn run() {
             list_runs,
             list_sources,
             chunk_demo_source,
-            list_chunks_for_source
+            list_chunks_for_source,
+            extract_demo_work_items,
+            list_work_items
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
