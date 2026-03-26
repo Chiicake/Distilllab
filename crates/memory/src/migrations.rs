@@ -28,6 +28,13 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             name TEXT NOT NULL,
             summary TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS assets (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            asset_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS runs (
             id TEXT PRIMARY KEY,
             run_type TEXT NOT NULL,
@@ -85,10 +92,18 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("projects table should exist");
+        let assets_exists: String = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'assets'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("assets table should exist");
         assert_eq!(sources_exists, "sources");
         assert_eq!(runs_exists, "runs");
         assert_eq!(chunks_exists, "chunks");
         assert_eq!(work_items_exists, "work_items");
         assert_eq!(projects_exists, "projects");
+        assert_eq!(assets_exists, "assets");
     }
 }

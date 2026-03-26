@@ -2,6 +2,7 @@
 // - 打开 SQLite 数据库
 // - 初始化最小表结构
 
+pub mod asset_store;
 pub mod db;
 pub mod chunk_store;
 pub mod migrations;

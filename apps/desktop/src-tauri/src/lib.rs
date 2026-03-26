@@ -171,6 +171,45 @@ fn list_projects() -> Result<String, String> {
     Ok(summary)
 }
 
+#[tauri::command]
+fn build_demo_assets() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let (_source, _chunks, _work_items, project, assets) =
+        runtime::build_demo_assets(&runtime).map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "built {} asset(s) for project {}",
+        assets.len(),
+        project.name
+    ))
+}
+
+#[tauri::command]
+fn list_assets() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let assets = runtime::list_assets(&runtime).map_err(|e| e.to_string())?;
+
+    if assets.is_empty() {
+        return Ok("no assets found".to_string());
+    }
+
+    let summary = assets
+        .iter()
+        .map(|asset| {
+            format!(
+                "{} [{}] {} -- {}",
+                asset.id,
+                asset.asset_type.as_str(),
+                asset.title,
+                asset.summary
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(summary)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -194,7 +233,9 @@ pub fn run() {
             extract_demo_work_items,
             list_work_items,
             group_demo_project,
-            list_projects
+            list_projects,
+            build_demo_assets,
+            list_assets
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
