@@ -1,4 +1,5 @@
 use crate::app::AppRuntime;
+use chrono::Utc;
 use memory::db::open_database;
 use memory::migrations::run_migrations;
 use memory::run_store::insert_run;
@@ -17,7 +18,7 @@ pub fn create_demo_source(
         id: format!("source-{}", Uuid::new_v4()),
         source_type: SourceType::Document,
         title: "Demo Source".to_string(),
-        created_at: "2026-03-25T00:00:00Z".to_string(),
+        created_at: Utc::now().to_string(),
     };
 
     insert_source(&conn, &source)?;
@@ -26,7 +27,7 @@ pub fn create_demo_source(
         id: format!("demo-source-run-{}", Uuid::new_v4()),
         run_type: RunType::Demo,
         status: RunState::Completed,
-        created_at: "2026-03-25T00:00:00Z".to_string(),
+        created_at: Utc::now().to_string(),
     };
 
     insert_run(&conn, &run)?;

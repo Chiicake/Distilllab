@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Result};
+use rusqlite::{Connection, Result, params};
 use schema::RunRecord;
 
 pub fn insert_run(conn: &Connection, run: &RunRecord) -> Result<()> {

@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Result};
+use rusqlite::{Connection, Result, params};
 use schema::SourceRecord;
 
 pub fn insert_source(conn: &Connection, source: &SourceRecord) -> Result<()> {
