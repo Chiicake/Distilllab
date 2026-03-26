@@ -27,6 +27,8 @@ pub fn create_demo_source(
         id: format!("demo-source-run-{}", Uuid::new_v4()),
         run_type: RunType::Demo,
         status: RunState::Completed,
+        primary_object_type: "source".to_string(),
+        primary_object_id: source.id.to_string(),
         created_at: Utc::now().to_string(),
     };
 

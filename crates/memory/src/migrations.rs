@@ -14,6 +14,8 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             id TEXT PRIMARY KEY,
             run_type TEXT NOT NULL,
             status TEXT NOT NULL,
+            primary_object_type TEXT NOT NULL,
+            primary_object_id TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
         "#,

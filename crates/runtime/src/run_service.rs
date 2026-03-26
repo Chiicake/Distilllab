@@ -15,6 +15,8 @@ pub fn create_demo_run(runtime: &AppRuntime) -> Result<RunRecord, Box<dyn std::e
         id: format!("demo-run-{}", Uuid::new_v4()),
         run_type: RunType::Demo,
         status: RunState::Completed,
+        primary_object_type: "".to_string(),
+        primary_object_id: "".to_string(),
         created_at: Utc::now().to_string(),
     };
     insert_run(&conn, &run)?;

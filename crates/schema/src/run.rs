@@ -43,5 +43,7 @@ pub struct RunRecord {
     pub id: String,
     pub run_type: RunType,
     pub status: RunState,
+    pub primary_object_type: String,
+    pub primary_object_id: String,
     pub created_at: String,
 }
