@@ -54,6 +54,7 @@
       <p>Next we will replace this with the <code>Home / Runtime Console</code>.</p>
       <button id="create-run-button">Create Demo Run</button>
       <button id="create-source-button">Create Demo Source</button>
+      <button id="chunk-source-button">Chunk Demo Source</button>
       <button id="list-runs-button">List Runs</button>
       <button id="list-sources-button">List Sources</button>
       <p id="result">No result yet.</p>
@@ -61,6 +62,7 @@
     <script>
       const runButton = document.getElementById("create-run-button");
       const sourceButton = document.getElementById("create-source-button");
+      const chunkSourceButton = document.getElementById("chunk-source-button");
       const listRunsButton = document.getElementById("list-runs-button");
       const listSourcesButton = document.getElementById("list-sources-button");
       const result = document.getElementById("result");
@@ -89,6 +91,10 @@
 
       sourceButton.addEventListener("click", async () => {
         await invokeCommand("create_demo_source", "Creating demo source...");
+      });
+
+      chunkSourceButton.addEventListener("click", async () => {
+        await invokeCommand("chunk_demo_source", "Chunking demo source...");
       });
 
       listRunsButton.addEventListener("click", async () => {
