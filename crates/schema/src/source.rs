@@ -13,6 +13,14 @@ impl SourceType {
             SourceType::Session => "session",
         }
     }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "document" => Some(SourceType::Document),
+            "session" => Some(SourceType::Session),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -3,7 +3,7 @@ use chrono::Utc;
 use memory::db::open_database;
 use memory::migrations::run_migrations;
 use memory::run_store::insert_run;
-use memory::source_store::insert_source;
+use memory::source_store::{insert_source, list_sources as memory_list_sources};
 use schema::run::RunType;
 use schema::{RunRecord, RunState, SourceRecord, SourceType};
 use uuid::Uuid;
@@ -35,4 +35,12 @@ pub fn create_demo_source(
     insert_run(&conn, &run)?;
 
     Ok(source)
+}
+
+pub fn list_sources(runtime: &AppRuntime) -> Result<Vec<SourceRecord>, Box<dyn std::error::Error>> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    let sources = memory_list_sources(&conn)?;
+    Ok(sources)
 }

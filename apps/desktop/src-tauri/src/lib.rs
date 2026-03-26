@@ -17,6 +17,57 @@ fn create_demo_source() -> Result<String, String> {
     ))
 }
 
+#[tauri::command]
+fn list_sources() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let sources = runtime::list_sources(&runtime).map_err(|e| e.to_string())?;
+
+    if sources.is_empty() {
+        return Ok("no sources found".to_string());
+    }
+
+    let summary = sources
+        .iter()
+        .map(|source| {
+            format!(
+                "{} [{}] {}",
+                source.id,
+                source.source_type.as_str(),
+                source.title
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(summary)
+}
+
+#[tauri::command]
+fn list_runs() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let runs = runtime::list_runs(&runtime).map_err(|e| e.to_string())?;
+
+    if runs.is_empty() {
+        return Ok("no runs found".to_string());
+    }
+
+    let summary = runs
+        .iter()
+        .map(|run| {
+            format!(
+                "{} [{}] {}:{}",
+                run.id,
+                run.run_type.as_str(),
+                run.primary_object_type,
+                run.primary_object_id
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(summary)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -32,7 +83,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             create_demo_run,
-            create_demo_source
+            create_demo_source,
+            list_runs,
+            list_sources
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
