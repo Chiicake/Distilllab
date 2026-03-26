@@ -20,12 +20,17 @@
       }
       body {
         margin: 0;
-        font-family: "Noto Sans", "DejaVu Sans", "Liberation Sans", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-family: "Noto Sans", "DejaVu Sans", "Liberation Sans", Arial, sans-serif;
         background: #0f172a;
         color: #e2e8f0;
         display: grid;
         place-items: center;
         min-height: 100vh;
+      }
+      button,
+      p,
+      h1 {
+        font-family: "Noto Sans", "DejaVu Sans", "Liberation Sans", Arial, sans-serif;
       }
       main {
         max-width: 720px;
@@ -34,6 +39,7 @@
       h1 { margin-top: 0; font-size: 2.2rem; }
       p { line-height: 1.6; color: #cbd5e1; }
       code {
+        font-family: "DejaVu Sans Mono", "Liberation Mono", monospace;
         background: #1e293b;
         padding: 2px 6px;
         border-radius: 6px;
@@ -56,7 +62,14 @@
         result.textContent = "Creating demo run...";
 
         try {
-          const response = await window.__TAURI_INTERNALS__.invoke("create_demo_run");
+          const invoke = window.__TAURI_INTERNALS__?.invoke;
+
+          if (!invoke) {
+            result.textContent = "Error: Tauri bridge is not available in the current page context.";
+            return;
+          }
+
+          const response = await invoke("create_demo_run");
           result.textContent = response;
         } catch (error) {
           result.textContent = `Error: ${error}`;

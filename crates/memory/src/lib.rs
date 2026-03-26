@@ -5,3 +5,4 @@
 pub mod db;
 pub mod migrations;
 pub mod run_store;
+pub mod source_store;
