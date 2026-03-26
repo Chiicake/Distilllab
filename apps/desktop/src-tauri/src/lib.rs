@@ -140,6 +140,37 @@ fn list_work_items() -> Result<String, String> {
     Ok(summary)
 }
 
+#[tauri::command]
+fn group_demo_project() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let (_source, _chunks, work_items, project) =
+        runtime::group_demo_project(&runtime).map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "grouped project: {} with {} work items",
+        project.name,
+        work_items.len()
+    ))
+}
+
+#[tauri::command]
+fn list_projects() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let projects = runtime::list_projects(&runtime).map_err(|e| e.to_string())?;
+
+    if projects.is_empty() {
+        return Ok("no projects found".to_string());
+    }
+
+    let summary = projects
+        .iter()
+        .map(|project| format!("{} -- {}", project.id, project.name))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(summary)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -161,7 +192,9 @@ pub fn run() {
             chunk_demo_source,
             list_chunks_for_source,
             extract_demo_work_items,
-            list_work_items
+            list_work_items,
+            group_demo_project,
+            list_projects
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

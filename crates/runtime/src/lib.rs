@@ -8,4 +8,6 @@ pub use app::AppRuntime;
 pub use chunk_service::{chunk_demo_source, list_chunks_for_source};
 pub use run_service::{create_demo_run, list_runs};
 pub use source_service::{create_demo_source, list_sources};
-pub use work_item_service::{extract_demo_work_items, list_work_items};
+pub use work_item_service::{
+    extract_demo_work_items, group_demo_project, list_projects, list_work_items,
+};

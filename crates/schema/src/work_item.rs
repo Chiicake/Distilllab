@@ -20,8 +20,6 @@ impl WorkItemType {
     }
 }
 
-// WorkItem 表示从 Chunk 中抽取出的最小结构化项。
-// Phase 1 先只做最小版，用于证明 Chunk -> WorkItem 这条链路成立。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkItem {
     pub id: String,

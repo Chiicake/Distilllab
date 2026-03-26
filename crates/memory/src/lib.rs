@@ -5,6 +5,7 @@
 pub mod db;
 pub mod chunk_store;
 pub mod migrations;
+pub mod project_store;
 pub mod run_store;
 pub mod source_store;
 pub mod work_item_store;
