@@ -10,6 +10,14 @@ pub enum RunState {
     Failed,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum RunType{
+    Demo,
+    ImportAndDistill,
+    Deepening,
+    ComposeAndVerify,
+}
+
 // RunRecord 是 Distilllab 中“运行一次任务”的最小记录。
 // 后续 import、inquiry、compose 等流程都会先落成 run，再逐步扩展 trace 和 step 信息。
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -18,7 +26,7 @@ pub struct RunRecord {
     pub id: String,
 
     // 运行类型，例如 ImportAndDistillRun、DeepeningRun。
-    pub run_type: String,
+    pub run_type: RunType,
 
     // 当前运行状态。
     pub status: RunState,

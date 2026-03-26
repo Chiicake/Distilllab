@@ -5,9 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Distilllab</title>
     <style>
+      button {
+        margin-top: 16px;
+        padding: 10px 16px;
+        border: none;
+        border-radius: 10px;
+        background: #38bdf8;
+        color: #0f172a;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #7dd3fc;
+      }
       body {
         margin: 0;
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: "Noto Sans", "DejaVu Sans", "Liberation Sans", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
         background: #0f172a;
         color: #e2e8f0;
         display: grid;
@@ -32,6 +45,23 @@
       <h1>Distilllab</h1>
       <p>Tauri shell initialized. This is the temporary Phase 0 desktop page.</p>
       <p>Next we will replace this with the <code>Home / Runtime Console</code>.</p>
+      <button id="create-run-button">Create Demo Run</button>
+      <p id="result">No result yet.</p>
     </main>
+    <script>
+      const button = document.getElementById("create-run-button");
+      const result = document.getElementById("result");
+
+      button.addEventListener("click", async () => {
+        result.textContent = "Creating demo run...";
+
+        try {
+          const response = await window.__TAURI_INTERNALS__.invoke("create_demo_run");
+          result.textContent = response;
+        } catch (error) {
+          result.textContent = `Error: ${error}`;
+        }
+      });
+    </script>
   </body>
 </html>

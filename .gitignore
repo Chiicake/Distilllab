@@ -1,6 +1,6 @@
 /local/
 .idea
-
+*.db
 # Added by cargo
 
 /target

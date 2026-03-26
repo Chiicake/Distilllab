@@ -717,6 +717,8 @@ dependencies = [
 name = "distilllab-desktop"
 version = "0.1.0"
 dependencies = [
+ "distilllab-runtime",
+ "distilllab-schema",
  "log",
  "serde",
  "serde_json",
