@@ -1,7 +1,7 @@
 use rusqlite::{params, types::Type, Connection, Error, Result};
-use schema::{SourceRecord, SourceType};
+use schema::{Source, SourceType};
 
-pub fn insert_source(conn: &Connection, source: &SourceRecord) -> Result<()> {
+pub fn insert_source(conn: &Connection, source: &Source) -> Result<()> {
     conn.execute(
         "INSERT INTO sources (id, source_type, title, created_at) VALUES (?1, ?2, ?3, ?4)",
         params![
@@ -15,7 +15,7 @@ pub fn insert_source(conn: &Connection, source: &SourceRecord) -> Result<()> {
     Ok(())
 }
 
-pub fn list_sources(conn: &Connection) -> Result<Vec<SourceRecord>> {
+pub fn list_sources(conn: &Connection) -> Result<Vec<Source>> {
     let mut stmt = conn.prepare(
         "SELECT id, source_type, title, created_at FROM sources ORDER BY created_at DESC",
     )?;
@@ -33,7 +33,7 @@ pub fn list_sources(conn: &Connection) -> Result<Vec<SourceRecord>> {
             )
         })?;
 
-        Ok(SourceRecord {
+        Ok(Source {
             id: row.get(0)?,
             source_type,
             title: row.get(2)?,
@@ -61,7 +61,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("failed to open in-memory database");
         run_migrations(&conn).expect("failed to run migrations");
 
-        let source = SourceRecord {
+        let source = Source {
             id: "source-1".to_string(),
             source_type: SourceType::Document,
             title: "Test Source".to_string(),
@@ -86,14 +86,14 @@ mod tests {
         let conn = Connection::open_in_memory().expect("failed to open in-memory database");
         run_migrations(&conn).expect("failed to run migrations");
 
-        let source_one = SourceRecord {
+        let source_one = Source {
             id: "source-1".to_string(),
             source_type: SourceType::Document,
             title: "First Source".to_string(),
             created_at: "2026-03-25T00:00:00Z".to_string(),
         };
 
-        let source_two = SourceRecord {
+        let source_two = Source {
             id: "source-2".to_string(),
             source_type: SourceType::Session,
             title: "Second Source".to_string(),

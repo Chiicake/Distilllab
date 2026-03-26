@@ -5,16 +5,14 @@ use memory::migrations::run_migrations;
 use memory::run_store::insert_run;
 use memory::source_store::{insert_source, list_sources as memory_list_sources};
 use schema::run::RunType;
-use schema::{RunRecord, RunState, SourceRecord, SourceType};
+use schema::{Run, RunState, Source, SourceType};
 use uuid::Uuid;
 
-pub fn create_demo_source(
-    runtime: &AppRuntime,
-) -> Result<SourceRecord, Box<dyn std::error::Error>> {
+pub fn create_demo_source(runtime: &AppRuntime) -> Result<Source, Box<dyn std::error::Error>> {
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
 
-    let source = SourceRecord {
+    let source = Source {
         id: format!("source-{}", Uuid::new_v4()),
         source_type: SourceType::Document,
         title: "Demo Source".to_string(),
@@ -23,7 +21,7 @@ pub fn create_demo_source(
 
     insert_source(&conn, &source)?;
 
-    let run = RunRecord {
+    let run = Run {
         id: format!("demo-source-run-{}", Uuid::new_v4()),
         run_type: RunType::Demo,
         status: RunState::Completed,
@@ -37,7 +35,7 @@ pub fn create_demo_source(
     Ok(source)
 }
 
-pub fn list_sources(runtime: &AppRuntime) -> Result<Vec<SourceRecord>, Box<dyn std::error::Error>> {
+pub fn list_sources(runtime: &AppRuntime) -> Result<Vec<Source>, Box<dyn std::error::Error>> {
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
 

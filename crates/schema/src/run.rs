@@ -59,7 +59,7 @@ impl RunType {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct RunRecord {
+pub struct Run {
     pub id: String,
     pub run_type: RunType,
     pub status: RunState,

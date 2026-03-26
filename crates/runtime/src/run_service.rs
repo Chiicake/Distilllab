@@ -4,15 +4,15 @@ use memory::db::open_database;
 use memory::migrations::run_migrations;
 use memory::run_store::{insert_run, list_runs as memory_list_runs};
 use schema::run::RunType;
-use schema::{RunRecord, RunState};
+use schema::{Run, RunState};
 use uuid::Uuid;
 
-pub fn create_demo_run(runtime: &AppRuntime) -> Result<RunRecord, Box<dyn std::error::Error>> {
+pub fn create_demo_run(runtime: &AppRuntime) -> Result<Run, Box<dyn std::error::Error>> {
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
 
     let run_id = format!("demo-run-{}", Uuid::new_v4());
-    let run = RunRecord {
+    let run = Run {
         id: run_id.clone(),
         run_type: RunType::Demo,
         status: RunState::Completed,
@@ -24,7 +24,7 @@ pub fn create_demo_run(runtime: &AppRuntime) -> Result<RunRecord, Box<dyn std::e
     Ok(run)
 }
 
-pub fn list_runs(runtime: &AppRuntime) -> Result<Vec<RunRecord>, Box<dyn std::error::Error>> {
+pub fn list_runs(runtime: &AppRuntime) -> Result<Vec<Run>, Box<dyn std::error::Error>> {
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
 

@@ -1,8 +1,8 @@
 use rusqlite::{params, types::Type, Connection, Error, Result};
 use schema::run::RunType;
-use schema::{RunRecord, RunState};
+use schema::{Run, RunState};
 
-pub fn insert_run(conn: &Connection, run: &RunRecord) -> Result<()> {
+pub fn insert_run(conn: &Connection, run: &Run) -> Result<()> {
     conn.execute(
         "INSERT INTO runs (id, run_type, status, primary_object_type, primary_object_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
@@ -17,7 +17,7 @@ pub fn insert_run(conn: &Connection, run: &RunRecord) -> Result<()> {
     Ok(())
 }
 
-pub fn list_runs(conn: &Connection) -> Result<Vec<RunRecord>> {
+pub fn list_runs(conn: &Connection) -> Result<Vec<Run>> {
     let mut stmt = conn.prepare(
         "SELECT id, run_type, status, primary_object_type, primary_object_id, created_at FROM runs ORDER BY created_at DESC",
     )?;
@@ -48,7 +48,7 @@ pub fn list_runs(conn: &Connection) -> Result<Vec<RunRecord>> {
             )
         })?;
 
-        Ok(RunRecord {
+        Ok(Run {
             id: row.get(0)?,
             run_type,
             status,
@@ -76,7 +76,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("failed to open in-memory database");
         run_migrations(&conn).expect("failed to run migrations");
 
-        let run = RunRecord {
+        let run = Run {
             id: "run-1".to_string(),
             run_type: RunType::Demo,
             status: RunState::Completed,

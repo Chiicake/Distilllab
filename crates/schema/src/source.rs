@@ -24,7 +24,7 @@ impl SourceType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SourceRecord {
+pub struct Source {
     pub id: String,
     pub source_type: SourceType,
     pub title: String,
