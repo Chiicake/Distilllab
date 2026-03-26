@@ -81,6 +81,24 @@ fn chunk_demo_source() -> Result<String, String> {
     ))
 }
 
+#[tauri::command]
+fn list_chunks_for_source(sourceId: String) -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let chunks = runtime::list_chunks_for_source(&runtime, &sourceId).map_err(|e| e.to_string())?;
+
+    if chunks.is_empty() {
+        return Ok(format!("no chunks found for source {}", sourceId));
+    }
+
+    let summary = chunks
+        .iter()
+        .map(|chunk| format!("{} [{}] {}", chunk.id, chunk.sequence, chunk.content))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(summary)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -99,7 +117,8 @@ pub fn run() {
             create_demo_source,
             list_runs,
             list_sources,
-            chunk_demo_source
+            chunk_demo_source,
+            list_chunks_for_source
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

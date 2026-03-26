@@ -57,6 +57,11 @@
       <button id="chunk-source-button">Chunk Demo Source</button>
       <button id="list-runs-button">List Runs</button>
       <button id="list-sources-button">List Sources</button>
+      <p>
+        <label for="source-id-input">Source ID for chunk lookup:</label>
+        <input id="source-id-input" type="text" placeholder="source-..." />
+        <button id="list-chunks-button">List Chunks</button>
+      </p>
       <p id="result">No result yet.</p>
     </main>
     <script>
@@ -65,6 +70,8 @@
       const chunkSourceButton = document.getElementById("chunk-source-button");
       const listRunsButton = document.getElementById("list-runs-button");
       const listSourcesButton = document.getElementById("list-sources-button");
+      const listChunksButton = document.getElementById("list-chunks-button");
+      const sourceIdInput = document.getElementById("source-id-input");
       const result = document.getElementById("result");
 
       async function invokeCommand(commandName, loadingMessage) {
@@ -103,6 +110,31 @@
 
       listSourcesButton.addEventListener("click", async () => {
         await invokeCommand("list_sources", "Loading sources...");
+      });
+
+      listChunksButton.addEventListener("click", async () => {
+        const sourceId = sourceIdInput.value.trim();
+
+        if (!sourceId) {
+          result.textContent = "Error: please enter a source id first.";
+          return;
+        }
+
+        result.textContent = "Loading chunks...";
+
+        try {
+          const invoke = window.__TAURI_INTERNALS__?.invoke;
+
+          if (!invoke) {
+            result.textContent = "Error: Tauri bridge is not available in the current page context.";
+            return;
+          }
+
+          const response = await invoke("list_chunks_for_source", { sourceId });
+          result.textContent = response;
+        } catch (error) {
+          result.textContent = `Error: ${error}`;
+        }
       });
     </script>
   </body>

@@ -58,6 +58,17 @@ pub fn chunk_demo_source(
     Ok((source, persisted_chunks))
 }
 
+pub fn list_chunks_for_source(
+    runtime: &AppRuntime,
+    source_id: &str,
+) -> Result<Vec<Chunk>, Box<dyn std::error::Error>> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    let chunks = list_chunks_by_source(&conn, source_id)?;
+    Ok(chunks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
