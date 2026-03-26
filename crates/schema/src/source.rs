@@ -8,6 +8,15 @@ pub enum SourceType {
     Session,
 }
 
+impl SourceType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SourceType::Document => "document",
+            SourceType::Session => "session",
+        }
+    }
+}
+
 // SourceRecord 是 Distilllab 接收到的一条原始输入记录。
 // 它是后续 chunk、work item、project grouping 的起点。
 #[derive(Debug, Clone, Serialize, Deserialize)]

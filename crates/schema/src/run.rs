@@ -10,12 +10,34 @@ pub enum RunState {
     Failed,
 }
 
+impl RunState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RunState::Pending => "pending",
+            RunState::Running => "running",
+            RunState::Completed => "completed",
+            RunState::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum RunType{
+pub enum RunType {
     Demo,
     ImportAndDistill,
     Deepening,
     ComposeAndVerify,
+}
+
+impl RunType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RunType::Demo => "demo",
+            RunType::ImportAndDistill => "import_and_distill",
+            RunType::Deepening => "deepening",
+            RunType::ComposeAndVerify => "compose_and_verify",
+        }
+    }
 }
 
 // RunRecord 是 Distilllab 中“运行一次任务”的最小记录。

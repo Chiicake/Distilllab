@@ -1,16 +1,15 @@
 use rusqlite::{params, Connection, Result};
-use schema::{SourceRecord, SourceType};
-
+use schema::SourceRecord;
 
 pub fn insert_source(conn: &Connection, source: &SourceRecord) -> Result<()> {
-    let source_type = match source.source_type {
-        SourceType::Document => "document",
-        SourceType::Session => "session",
-    };
-
     conn.execute(
         "INSERT INTO sources (id, source_type, title, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![source.id, source_type, source.title, source.created_at],
+        params![
+            source.id,
+            source.source_type.as_str(),
+            source.title,
+            source.created_at
+        ],
     )?;
 
     Ok(())
@@ -21,6 +20,7 @@ mod tests {
     use super::*;
     use crate::migrations::run_migrations;
     use rusqlite::Connection;
+    use schema::SourceType;
 
     #[test]
     fn inserts_source_record() {
