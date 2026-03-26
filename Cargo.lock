@@ -744,6 +744,10 @@ version = "0.1.0"
 [[package]]
 name = "distilllab-runtime"
 version = "0.1.0"
+dependencies = [
+ "distilllab-memory",
+ "distilllab-schema",
+]
 
 [[package]]
 name = "distilllab-schema"
