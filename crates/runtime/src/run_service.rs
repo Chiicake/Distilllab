@@ -11,12 +11,13 @@ pub fn create_demo_run(runtime: &AppRuntime) -> Result<RunRecord, Box<dyn std::e
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
 
+    let run_id = format!("demo-run-{}", Uuid::new_v4());
     let run = RunRecord {
-        id: format!("demo-run-{}", Uuid::new_v4()),
+        id: run_id.clone(),
         run_type: RunType::Demo,
         status: RunState::Completed,
-        primary_object_type: "".to_string(),
-        primary_object_id: "".to_string(),
+        primary_object_type: "run".to_string(),
+        primary_object_id: run_id,
         created_at: Utc::now().to_string(),
     };
     insert_run(&conn, &run)?;

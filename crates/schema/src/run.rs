@@ -17,6 +17,16 @@ impl RunState {
             RunState::Failed => "failed",
         }
     }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "pending" => Some(RunState::Pending),
+            "running" => Some(RunState::Running),
+            "completed" => Some(RunState::Completed),
+            "failed" => Some(RunState::Failed),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -34,6 +44,16 @@ impl RunType {
             RunType::ImportAndDistill => "import_and_distill",
             RunType::Deepening => "deepening",
             RunType::ComposeAndVerify => "compose_and_verify",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "demo" => Some(RunType::Demo),
+            "import_and_distill" => Some(RunType::ImportAndDistill),
+            "deepening" => Some(RunType::Deepening),
+            "compose_and_verify" => Some(RunType::ComposeAndVerify),
+            _ => None,
         }
     }
 }
