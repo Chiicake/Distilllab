@@ -10,6 +10,21 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             title TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL,
+            current_intent TEXT NOT NULL,
+            current_object_type TEXT NOT NULL,
+            current_object_id TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_user_message_at TEXT NOT NULL,
+            last_run_at TEXT NOT NULL,
+            last_compacted_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS chunks (
             id TEXT PRIMARY KEY,
             source_id TEXT NOT NULL,
@@ -64,6 +79,13 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("sources table should exist");
+        let sessions_exists: String = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("sessions table should exist");
         let runs_exists: String = conn
             .query_row(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'runs'",
@@ -100,6 +122,7 @@ mod tests {
             )
             .expect("assets table should exist");
         assert_eq!(sources_exists, "sources");
+        assert_eq!(sessions_exists, "sessions");
         assert_eq!(runs_exists, "runs");
         assert_eq!(chunks_exists, "chunks");
         assert_eq!(work_items_exists, "work_items");

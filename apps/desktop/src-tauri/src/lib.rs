@@ -18,6 +18,17 @@ fn create_demo_source() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn create_demo_session() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let session = runtime::create_demo_session(&runtime).map_err(|e| e.to_string())?;
+    Ok(format!(
+        "created session: {} [{}]",
+        session.id,
+        session.status.as_str()
+    ))
+}
+
+#[tauri::command]
 fn list_sources() -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
     let sources = runtime::list_sources(&runtime).map_err(|e| e.to_string())?;
@@ -34,6 +45,31 @@ fn list_sources() -> Result<String, String> {
                 source.id,
                 source.source_type.as_str(),
                 source.title
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(summary)
+}
+
+#[tauri::command]
+fn list_sessions() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let sessions = runtime::list_sessions(&runtime).map_err(|e| e.to_string())?;
+
+    if sessions.is_empty() {
+        return Ok("no sessions found".to_string());
+    }
+
+    let summary = sessions
+        .iter()
+        .map(|session| {
+            format!(
+                "{} [{}] {}",
+                session.id,
+                session.status.as_str(),
+                session.title
             )
         })
         .collect::<Vec<_>>()
@@ -225,8 +261,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             create_demo_run,
+            create_demo_session,
             create_demo_source,
             list_runs,
+            list_sessions,
             list_sources,
             chunk_demo_source,
             list_chunks_for_source,
