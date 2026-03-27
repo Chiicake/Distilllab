@@ -716,6 +716,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "distilllab-agent"
+version = "0.1.0"
+dependencies = [
+ "distilllab-schema",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "distilllab-desktop"
 version = "0.1.0"
 dependencies = [
