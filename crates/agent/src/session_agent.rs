@@ -1,4 +1,5 @@
 use crate::{AgentDefinition, AgentError};
+use schema::{Session, SessionMessage};
 
 pub fn session_agent_definition() -> AgentDefinition {
     AgentDefinition {
@@ -44,6 +45,13 @@ pub enum SessionActionType {
 }
 
 #[derive(Debug, Clone)]
+pub struct SessionAgentInput {
+    pub session: Session,
+    pub recent_messages: Vec<SessionMessage>,
+    pub user_message: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct SessionAgentDecision {
     pub intent: String,
     pub primary_object_type: Option<String>,
@@ -55,12 +63,15 @@ pub struct SessionAgentDecision {
 }
 
 pub trait SessionAgent {
-    fn decide(&self, user_message: &str) -> Result<SessionAgentDecision, AgentError>;
+    fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError>;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{session_agent_definition, SessionActionType, SessionAgentDecision};
+    use super::{
+        session_agent_definition, SessionActionType, SessionAgentDecision, SessionAgentInput,
+    };
+    use schema::{Session, SessionMessage, SessionMessageRole, SessionStatus};
 
     #[test]
     fn session_agent_definition_exposes_expected_defaults() {
@@ -87,5 +98,45 @@ mod tests {
         };
 
         assert_eq!(decision.action_type, SessionActionType::CreateRun);
+    }
+
+    #[test]
+    fn session_agent_input_preserves_structured_session_context() {
+        let session = Session {
+            id: "session-1".to_string(),
+            title: "Test Session".to_string(),
+            status: SessionStatus::Active,
+            current_intent: "idle".to_string(),
+            current_object_type: "none".to_string(),
+            current_object_id: "none".to_string(),
+            summary: "Testing session agent input".to_string(),
+            started_at: "2026-03-28T00:00:00Z".to_string(),
+            updated_at: "2026-03-28T00:00:00Z".to_string(),
+            last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+            last_run_at: "2026-03-28T00:00:00Z".to_string(),
+            last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+            metadata_json: "{}".to_string(),
+        };
+
+        let recent_messages = vec![SessionMessage {
+            id: "message-1".to_string(),
+            session_id: "session-1".to_string(),
+            run_id: None,
+            message_type: "user_message".to_string(),
+            role: SessionMessageRole::User,
+            content: "Help me import my notes".to_string(),
+            data_json: "{}".to_string(),
+            created_at: "2026-03-28T00:00:00Z".to_string(),
+        }];
+
+        let input = SessionAgentInput {
+            session,
+            recent_messages,
+            user_message: "Import these notes".to_string(),
+        };
+
+        assert_eq!(input.session.id, "session-1");
+        assert_eq!(input.recent_messages.len(), 1);
+        assert_eq!(input.user_message, "Import these notes");
     }
 }
