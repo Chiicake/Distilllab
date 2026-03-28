@@ -13,5 +13,4 @@ pub struct AgentDefinition {
     pub input_object_types: Vec<String>,
     pub output_object_types: Vec<String>,
     pub can_create_run_types: Vec<String>,
-    pub config_json: String,
 }
