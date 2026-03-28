@@ -69,7 +69,21 @@ pub trait SessionAgent {
 pub struct BasicSessionAgent;
 
 impl SessionAgent for BasicSessionAgent {
-    fn decide(&self, _input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError> {
+    fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError> {
+        let normalized_message = input.user_message.to_lowercase();
+
+        if normalized_message.contains("import") {
+            return Ok(SessionAgentDecision {
+                intent: "import_material".to_string(),
+                primary_object_type: None,
+                primary_object_id: None,
+                action_type: SessionActionType::CreateRun,
+                reply_text: "I will start an import and distill run.".to_string(),
+                suggested_run_type: Some("import_and_distill".to_string()),
+                session_summary: Some("Preparing to import material".to_string()),
+            });
+        }
+
         Ok(SessionAgentDecision {
             intent: "general_reply".to_string(),
             primary_object_type: None,
@@ -85,8 +99,8 @@ impl SessionAgent for BasicSessionAgent {
 #[cfg(test)]
 mod tests {
     use super::{
-        BasicSessionAgent, SessionActionType, SessionAgent, SessionAgentDecision,
-        SessionAgentInput, session_agent_definition,
+        session_agent_definition, BasicSessionAgent, SessionActionType, SessionAgent,
+        SessionAgentDecision, SessionAgentInput,
     };
     use schema::{Session, SessionMessage, SessionMessageRole, SessionStatus};
 
@@ -97,11 +111,9 @@ mod tests {
         assert_eq!(definition.key, "session_agent");
         assert_eq!(definition.kind, "session");
         assert_eq!(definition.default_model_profile, "reasoning_default");
-        assert!(
-            definition
-                .can_create_run_types
-                .contains(&"import_and_distill".to_string())
-        );
+        assert!(definition
+            .can_create_run_types
+            .contains(&"import_and_distill".to_string()));
     }
 
     #[test]
@@ -192,6 +204,42 @@ mod tests {
         assert_eq!(
             decision.reply_text,
             "Hello! I am ready to help with your Distilllab session."
+        );
+    }
+
+    #[test]
+    fn basic_session_agent_returns_create_run_for_import_requests() {
+        let agent = BasicSessionAgent;
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Import Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing import routing".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            user_message: "Please import these notes into Distilllab".to_string(),
+        };
+
+        let decision = agent
+            .decide(input)
+            .expect("basic session agent should decide");
+
+        assert_eq!(decision.action_type, SessionActionType::CreateRun);
+        assert_eq!(decision.intent, "import_material");
+        assert_eq!(
+            decision.suggested_run_type,
+            Some("import_and_distill".to_string())
         );
     }
 }
