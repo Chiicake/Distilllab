@@ -1,4 +1,4 @@
-use rusqlite::{params, types::Type, Connection, Error, Result};
+use rusqlite::{Connection, Error, Result, params, types::Type};
 use schema::{Source, SourceType};
 
 pub fn insert_source(conn: &Connection, source: &Source) -> Result<()> {

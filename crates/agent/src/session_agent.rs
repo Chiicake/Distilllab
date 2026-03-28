@@ -66,10 +66,27 @@ pub trait SessionAgent {
     fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError>;
 }
 
+pub struct BasicSessionAgent;
+
+impl SessionAgent for BasicSessionAgent {
+    fn decide(&self, _input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError> {
+        Ok(SessionAgentDecision {
+            intent: "general_reply".to_string(),
+            primary_object_type: None,
+            primary_object_id: None,
+            action_type: SessionActionType::DirectReply,
+            reply_text: "Hello! I am ready to help with your Distilllab session.".to_string(),
+            suggested_run_type: None,
+            session_summary: Some("General session assistance".to_string()),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        session_agent_definition, SessionActionType, SessionAgentDecision, SessionAgentInput,
+        BasicSessionAgent, SessionActionType, SessionAgent, SessionAgentDecision,
+        SessionAgentInput, session_agent_definition,
     };
     use schema::{Session, SessionMessage, SessionMessageRole, SessionStatus};
 
@@ -80,9 +97,11 @@ mod tests {
         assert_eq!(definition.key, "session_agent");
         assert_eq!(definition.kind, "session");
         assert_eq!(definition.default_model_profile, "reasoning_default");
-        assert!(definition
-            .can_create_run_types
-            .contains(&"import_and_distill".to_string()));
+        assert!(
+            definition
+                .can_create_run_types
+                .contains(&"import_and_distill".to_string())
+        );
     }
 
     #[test]
@@ -138,5 +157,41 @@ mod tests {
         assert_eq!(input.session.id, "session-1");
         assert_eq!(input.recent_messages.len(), 1);
         assert_eq!(input.user_message, "Import these notes");
+    }
+
+    #[test]
+    fn basic_session_agent_returns_structured_direct_reply_decision() {
+        let agent = BasicSessionAgent;
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Test Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing basic session agent".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            user_message: "Hello Distilllab".to_string(),
+        };
+
+        let decision = agent
+            .decide(input)
+            .expect("basic session agent should decide");
+
+        assert_eq!(decision.action_type, SessionActionType::DirectReply);
+        assert_eq!(decision.intent, "general_reply");
+        assert_eq!(
+            decision.reply_text,
+            "Hello! I am ready to help with your Distilllab session."
+        );
     }
 }

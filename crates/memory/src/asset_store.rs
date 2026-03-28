@@ -1,4 +1,4 @@
-use rusqlite::{params, types::Type, Connection, Error, Result};
+use rusqlite::{Connection, Error, Result, params, types::Type};
 use schema::{Asset, AssetType};
 
 pub fn insert_asset(conn: &Connection, asset: &Asset) -> Result<()> {

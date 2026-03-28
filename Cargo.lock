@@ -759,6 +759,7 @@ name = "distilllab-runtime"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "distilllab-agent",
  "distilllab-memory",
  "distilllab-schema",
  "uuid",

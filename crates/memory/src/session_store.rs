@@ -1,4 +1,4 @@
-use rusqlite::{params, types::Type, Connection, Error, Result};
+use rusqlite::{Connection, Error, Result, params, types::Type};
 use schema::{Session, SessionStatus};
 
 pub fn insert_session(conn: &Connection, session: &Session) -> Result<()> {

@@ -1,4 +1,4 @@
-use rusqlite::{params, types::Type, Connection, Error, Result};
+use rusqlite::{Connection, Error, Result, params, types::Type};
 use schema::run::RunType;
 use schema::{Run, RunState};
 

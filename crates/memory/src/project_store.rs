@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Result};
+use rusqlite::{Connection, Result, params};
 use schema::Project;
 
 pub fn insert_project(conn: &Connection, project: &Project) -> Result<()> {

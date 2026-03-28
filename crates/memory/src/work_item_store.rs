@@ -1,4 +1,4 @@
-use rusqlite::{params, types::Type, Connection, Error, Result};
+use rusqlite::{Connection, Error, Result, params, types::Type};
 use schema::{WorkItem, WorkItemType};
 
 pub fn insert_work_item(conn: &Connection, work_item: &WorkItem) -> Result<()> {
