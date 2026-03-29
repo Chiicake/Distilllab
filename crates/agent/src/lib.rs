@@ -5,7 +5,11 @@ pub mod session_agent;
 
 pub use definition::AgentDefinition;
 pub use error::AgentError;
-pub use llm::{LlmProviderConfig, OpenAiCompatibleChatMessage};
+pub use llm::{
+    send_chat_completion_request, LlmProviderConfig, OpenAiCompatibleChatMessage,
+    OpenAiCompatibleChatRequest, OpenAiCompatibleChatResponse,
+};
 pub use session_agent::{
-    BasicSessionAgent, SessionActionType, SessionAgent, SessionAgentDecision, SessionAgentInput,
+    BasicSessionAgent, LlmSessionAgent, SessionActionType, SessionAgent, SessionAgentDecision,
+    SessionAgentInput,
 };

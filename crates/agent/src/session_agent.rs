@@ -1,4 +1,7 @@
-use crate::{AgentDefinition, AgentError, LlmProviderConfig};
+use crate::{
+    send_chat_completion_request, AgentDefinition, AgentError, LlmProviderConfig,
+    OpenAiCompatibleChatMessage, OpenAiCompatibleChatRequest,
+};
 use async_trait::async_trait;
 use schema::{Session, SessionMessage};
 
@@ -100,16 +103,70 @@ impl SessionAgent for BasicSessionAgent {
 }
 
 pub struct LlmSessionAgent {
+    pub client: reqwest::Client,
     pub config: LlmProviderConfig,
+}
+
+impl LlmSessionAgent {
+    pub fn new(config: LlmProviderConfig) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            config,
+        }
+    }
+
+    fn build_chat_messages(&self, input: &SessionAgentInput) -> Vec<OpenAiCompatibleChatMessage> {
+        vec![
+            OpenAiCompatibleChatMessage {
+                role: "system".to_string(),
+                content: session_agent_definition().system_prompt,
+            },
+            OpenAiCompatibleChatMessage {
+                role: "user".to_string(),
+                content: input.user_message.clone(),
+            },
+        ]
+    }
+}
+
+#[async_trait]
+impl SessionAgent for LlmSessionAgent {
+    async fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError> {
+        let messages = self.build_chat_messages(&input);
+
+        let request = OpenAiCompatibleChatRequest {
+            model: self.config.model.clone(),
+            messages,
+        };
+
+        let response = send_chat_completion_request(&self.client, &self.config, &request).await?;
+
+        let reply_text = response.first_message_content().ok_or_else(|| {
+            AgentError::Response("llm response did not contain assistant content".to_string())
+        })?;
+
+        Ok(SessionAgentDecision {
+            intent: "llm_direct_reply".to_string(),
+            primary_object_type: None,
+            primary_object_id: None,
+            action_type: SessionActionType::DirectReply,
+            reply_text: reply_text.to_string(),
+            suggested_run_type: None,
+            session_summary: Some("LLM replied to the current session message".to_string()),
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        BasicSessionAgent, SessionActionType, SessionAgent, SessionAgentDecision,
-        SessionAgentInput, session_agent_definition,
+        BasicSessionAgent, LlmSessionAgent, SessionActionType, SessionAgent,
+        SessionAgentDecision, SessionAgentInput, session_agent_definition,
     };
+    use crate::LlmProviderConfig;
     use schema::{Session, SessionMessage, SessionMessageRole, SessionStatus};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     #[test]
     fn session_agent_definition_exposes_expected_defaults() {
@@ -252,5 +309,119 @@ mod tests {
             decision.suggested_run_type,
             Some("import_and_distill".to_string())
         );
+    }
+
+    #[test]
+    fn llm_session_agent_builds_minimal_system_and_user_messages() {
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: "http://localhost:11434/v1".to_string(),
+            model: "qwen-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "LLM Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing llm session agent message assembly".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            user_message: "Hello from the user".to_string(),
+        };
+
+        let messages = agent.build_chat_messages(&input);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "system");
+        assert_eq!(messages[1].role, "user");
+        assert_eq!(messages[1].content, "Hello from the user");
+    }
+
+    #[tokio::test]
+    async fn llm_session_agent_returns_direct_reply_from_llm_response() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("server should accept connection");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream
+                .read(&mut buffer)
+                .await
+                .expect("server should read request");
+
+            let response_body = r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Hello from fake llm"
+                        }
+                    }
+                ]
+            }"#;
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("server should write response");
+        });
+
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: format!("http://{}", address),
+            model: "gpt-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "LLM Reply Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing llm session agent decision".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            user_message: "Say hello".to_string(),
+        };
+
+        let decision = agent.decide(input).await.expect("llm session agent should decide");
+
+        assert_eq!(decision.action_type, SessionActionType::DirectReply);
+        assert_eq!(decision.intent, "llm_direct_reply");
+        assert_eq!(decision.reply_text, "Hello from fake llm");
     }
 }
