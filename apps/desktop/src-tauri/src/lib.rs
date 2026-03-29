@@ -1,5 +1,8 @@
 use agent::{SessionActionType, SessionAgentDecision};
-use runtime::{AppRuntime, LlmSessionDebugRequest, SessionMessageRequest};
+use runtime::{
+    AppRuntime, LlmSessionDebugRequest, SessionMessageRequest, default_app_config_path,
+    load_app_config_from_path,
+};
 use schema::SessionMessage;
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -73,6 +76,32 @@ fn format_session_messages_text(messages: &[SessionMessage]) -> String {
         .map(|message| format!("[{}] {}", message.role.as_str(), message.content))
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn format_app_config_text(config_json: &str) -> Result<String, String> {
+    let value: serde_json::Value = serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+    let current_provider = value
+        .get("distilllab")
+        .and_then(|v| v.get("currentProvider"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("none");
+    let current_model = value
+        .get("distilllab")
+        .and_then(|v| v.get("currentModel"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("none");
+    let providers = value
+        .get("provider")
+        .and_then(|v| v.as_object())
+        .map(|map| map.keys().cloned().collect::<Vec<_>>().join(", "))
+        .unwrap_or_else(|| "none".to_string());
+
+    Ok([
+        format!("current provider: {}", current_provider),
+        format!("current model: {}", current_model),
+        format!("providers: {}", providers),
+    ]
+    .join("\n"))
 }
 
 #[tauri::command]
@@ -360,6 +389,15 @@ async fn send_session_message_command(form: SessionMessageForm) -> Result<String
 }
 
 #[tauri::command]
+fn load_llm_config_command() -> Result<String, String> {
+    let config_path = default_app_config_path().map_err(|e| e.to_string())?;
+    let config = load_app_config_from_path(&config_path).map_err(|e| e.to_string())?;
+    let config_json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+
+    format_app_config_text(&config_json)
+}
+
+#[tauri::command]
 fn list_session_messages_command(session_id: String) -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
     let messages = runtime::list_session_messages(&runtime, &session_id).map_err(|e| e.to_string())?;
@@ -397,7 +435,8 @@ pub fn run() {
             list_assets,
             decide_llm_session_message_debug,
             send_session_message_command,
-            list_session_messages_command
+            list_session_messages_command,
+            load_llm_config_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -405,7 +444,9 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_session_agent_decision_text, format_session_messages_text};
+    use super::{
+        format_app_config_text, format_session_agent_decision_text, format_session_messages_text,
+    };
     use agent::{SessionActionType, SessionAgentDecision};
     use schema::{SessionMessage, SessionMessageRole};
 
@@ -455,5 +496,30 @@ mod tests {
 
         assert!(text.contains("[user] Hello timeline"));
         assert!(text.contains("[assistant] Hello back"));
+    }
+
+    #[test]
+    fn formats_app_config_as_readable_text() {
+        let text = format_app_config_text(
+            r#"{
+                "provider": {
+                    "ice": {
+                        "name": "Ice",
+                        "models": {
+                            "gpt-5.4": { "name": "GPT-5.4" }
+                        }
+                    }
+                },
+                "distilllab": {
+                    "currentProvider": "ice",
+                    "currentModel": "gpt-5.4"
+                }
+            }"#,
+        )
+        .expect("config text should format");
+
+        assert!(text.contains("current provider: ice"));
+        assert!(text.contains("current model: gpt-5.4"));
+        assert!(text.contains("providers: ice"));
     }
 }
