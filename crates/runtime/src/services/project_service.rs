@@ -8,7 +8,7 @@ use schema::run::RunType;
 use schema::{Chunk, Project, Run, RunState, Source, WorkItem};
 use uuid::Uuid;
 
-use crate::work_item_service::extract_demo_work_items;
+use super::work_item_service::extract_demo_work_items;
 
 pub fn group_demo_project(
     runtime: &AppRuntime,

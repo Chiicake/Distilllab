@@ -8,7 +8,7 @@ use schema::run::RunType;
 use schema::{Asset, AssetType, Chunk, Project, Run, RunState, Source, WorkItem};
 use uuid::Uuid;
 
-use crate::project_service::group_demo_project;
+use super::project_service::group_demo_project;
 
 pub fn build_demo_assets(
     runtime: &AppRuntime,

@@ -1,4 +1,5 @@
 use crate::app::AppRuntime;
+use crate::contracts::{LlmSessionDebugRequest, SessionMessageRequest};
 use agent::{
     BasicSessionAgent, LlmProviderConfig, LlmSessionAgent, SessionAgent, SessionAgentDecision,
     SessionAgentInput,
@@ -16,25 +17,6 @@ use schema::{Session, SessionMessage, SessionMessageRole, SessionStatus};
 use uuid::Uuid;
 
 type RuntimeError = Box<dyn std::error::Error + Send + Sync>;
-
-#[derive(Debug, Clone)]
-pub struct LlmSessionDebugRequest {
-    pub provider_kind: String,
-    pub base_url: String,
-    pub model: String,
-    pub api_key: Option<String>,
-    pub user_message: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct SessionMessageRequest {
-    pub session_id: String,
-    pub user_message: String,
-    pub provider_kind: String,
-    pub base_url: String,
-    pub model: String,
-    pub api_key: Option<String>,
-}
 
 fn build_demo_agent_session(session_id: &str, title: &str, summary: &str) -> Session {
     let now = Utc::now().to_string();
