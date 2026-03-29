@@ -1,18 +1,28 @@
 use agent::{SessionActionType, SessionAgentDecision};
 use runtime::{
-    AppRuntime, LlmSessionDebugRequest, SessionMessageRequest, default_app_config_path,
-    load_app_config_from_path,
+    AppConfig, AppRuntime, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
+    ProviderOptions, SessionMessageRequest, default_app_config_path,
+    delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
+    resolve_current_provider_model, set_current_provider_model, upsert_provider_entry,
 };
 use schema::SessionMessage;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LlmDebugForm {
-    provider_kind: String,
+struct ConfigBarForm {
+    current_provider: String,
+    current_model: String,
+    provider_name: String,
+    provider_npm: String,
     base_url: String,
-    model: String,
     api_key: Option<String>,
-    user_message: String,
+    raw_provider_json: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportProvidersForm {
+    source_path: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -20,10 +30,6 @@ struct LlmDebugForm {
 struct SessionMessageForm {
     session_id: String,
     user_message: String,
-    provider_kind: String,
-    base_url: String,
-    model: String,
-    api_key: Option<String>,
 }
 
 fn format_action_type(action_type: &SessionActionType) -> &'static str {
@@ -102,6 +108,73 @@ fn format_app_config_text(config_json: &str) -> Result<String, String> {
         format!("providers: {}", providers),
     ]
     .join("\n"))
+}
+
+fn format_provider_test_text(
+    provider_id: &str,
+    model_id: &str,
+    status: &str,
+    message: &str,
+) -> String {
+    [
+        format!("provider: {}", provider_id),
+        format!("model: {}", model_id),
+        format!("status: {}", status),
+        format!("message: {}", message),
+    ]
+    .join("\n")
+}
+
+fn load_or_create_app_config() -> Result<(std::path::PathBuf, AppConfig), String> {
+    let config_path = default_app_config_path().map_err(|e| e.to_string())?;
+
+    match load_app_config_from_path(&config_path) {
+        Ok(config) => Ok((config_path, config)),
+        Err(_) => {
+            let mut config = AppConfig::default();
+            config.schema = Some("https://opencode.ai/config.json".to_string());
+            Ok((config_path, config))
+        }
+    }
+}
+
+fn default_opencode_config_path() -> Result<std::path::PathBuf, String> {
+    let home_dir = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .map_err(|e| e.to_string())?;
+
+    Ok(home_dir.join(".config/opencode/opencode.json"))
+}
+
+fn build_provider_entry_from_form(form: &ConfigBarForm) -> Result<ProviderConfigEntry, String> {
+    if !form.raw_provider_json.trim().is_empty() {
+        return serde_json::from_str::<ProviderConfigEntry>(&form.raw_provider_json)
+            .map_err(|e| e.to_string());
+    }
+
+    let model_key = form.current_model.trim();
+    if model_key.is_empty() {
+        return Err("current model is required".to_string());
+    }
+
+    let provider = ProviderConfigEntry {
+        npm: Some(form.provider_npm.trim().to_string()),
+        name: form.provider_name.trim().to_string(),
+        options: ProviderOptions {
+            base_url: Some(form.base_url.trim().to_string()),
+            api_key: form.api_key.clone().map(|value| value.trim().to_string()),
+        },
+        models: std::collections::BTreeMap::from([(
+            model_key.to_string(),
+            ModelConfigEntry {
+                name: model_key.to_string(),
+                ..Default::default()
+            },
+        )]),
+    };
+
+    Ok(provider)
 }
 
 #[tauri::command]
@@ -351,14 +424,17 @@ fn list_assets() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn decide_llm_session_message_debug(form: LlmDebugForm) -> Result<String, String> {
+async fn decide_llm_session_message_using_current_config(user_message: String) -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let (config_path, config) = load_or_create_app_config()?;
+    let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
+
     let request = LlmSessionDebugRequest {
-        provider_kind: form.provider_kind,
-        base_url: form.base_url,
-        model: form.model,
-        api_key: form.api_key,
-        user_message: form.user_message,
+        provider_kind: resolved.provider_type.replace('-', "_"),
+        base_url: resolved.base_url,
+        model: resolved.model_id,
+        api_key: resolved.api_key,
+        user_message,
     };
 
     let decision = runtime::decide_llm_session_message_with_config(&runtime, request)
@@ -369,17 +445,50 @@ async fn decide_llm_session_message_debug(form: LlmDebugForm) -> Result<String, 
 }
 
 #[tauri::command]
+async fn test_current_provider_command() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let (config_path, config) = load_or_create_app_config()?;
+    let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
+
+    let request = LlmSessionDebugRequest {
+        provider_kind: resolved.provider_type.replace('-', "_"),
+        base_url: resolved.base_url,
+        model: resolved.model_id.clone(),
+        api_key: resolved.api_key,
+        user_message: "Reply with a short connectivity acknowledgement.".to_string(),
+    };
+
+    match runtime::decide_llm_session_message_with_config(&runtime, request).await {
+        Ok(_) => Ok(format_provider_test_text(
+            &resolved.provider_id,
+            &resolved.model_id,
+            "ok",
+            "connected successfully",
+        )),
+        Err(error) => Ok(format_provider_test_text(
+            &resolved.provider_id,
+            &resolved.model_id,
+            "error",
+            &error.to_string(),
+        )),
+    }
+}
+
+#[tauri::command]
 async fn send_session_message_command(form: SessionMessageForm) -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let (config_path, config) = load_or_create_app_config()?;
+    let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
+
     let decision = runtime::send_session_message_with_config(
         &runtime,
         SessionMessageRequest {
             session_id: form.session_id,
             user_message: form.user_message,
-            provider_kind: form.provider_kind,
-            base_url: form.base_url,
-            model: form.model,
-            api_key: form.api_key,
+            provider_kind: resolved.provider_type.replace('-', "_"),
+            base_url: resolved.base_url,
+            model: resolved.model_id,
+            api_key: resolved.api_key,
         },
     )
         .await
@@ -390,8 +499,102 @@ async fn send_session_message_command(form: SessionMessageForm) -> Result<String
 
 #[tauri::command]
 fn load_llm_config_command() -> Result<String, String> {
+    let (_, config) = load_or_create_app_config()?;
+    let config_json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+
+    format_app_config_text(&config_json)
+}
+
+#[tauri::command]
+fn load_llm_config_json_command() -> Result<String, String> {
+    let (_, config) = load_or_create_app_config()?;
+    serde_json::to_string_pretty(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_llm_config_command(form: ConfigBarForm) -> Result<String, String> {
+    let (config_path, _) = load_or_create_app_config()?;
+    let provider_key = form.current_provider.trim();
+    if provider_key.is_empty() {
+        return Err("current provider is required".to_string());
+    }
+
+    let provider_entry = build_provider_entry_from_form(&form)?;
+    let config = upsert_provider_entry(
+        &config_path,
+        provider_key,
+        provider_entry,
+        Some(form.current_model.trim().to_string()),
+    )
+    .map_err(|e| e.to_string())?;
+    let config_json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+
+    format_app_config_text(&config_json)
+}
+
+#[tauri::command]
+fn create_provider_command(provider_id: String) -> Result<String, String> {
+    let provider_key = provider_id.trim();
+    if provider_key.is_empty() {
+        return Err("provider id is required".to_string());
+    }
+
     let config_path = default_app_config_path().map_err(|e| e.to_string())?;
-    let config = load_app_config_from_path(&config_path).map_err(|e| e.to_string())?;
+    let config = upsert_provider_entry(
+        &config_path,
+        provider_key,
+        ProviderConfigEntry {
+            npm: Some("@ai-sdk/openai-compatible".to_string()),
+            name: provider_key.to_string(),
+            options: ProviderOptions::default(),
+            models: std::collections::BTreeMap::from([(
+                "gpt-5.4".to_string(),
+                ModelConfigEntry {
+                    name: "GPT-5.4".to_string(),
+                    ..Default::default()
+                },
+            )]),
+        },
+        Some("gpt-5.4".to_string()),
+    )
+    .map_err(|e| e.to_string())?;
+
+    let config_json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    format_app_config_text(&config_json)
+}
+
+#[tauri::command]
+fn delete_provider_command(provider_id: String) -> Result<String, String> {
+    let provider_key = provider_id.trim();
+    if provider_key.is_empty() {
+        return Err("provider id is required".to_string());
+    }
+
+    let config_path = default_app_config_path().map_err(|e| e.to_string())?;
+    let config = delete_provider_entry(&config_path, provider_key).map_err(|e| e.to_string())?;
+    let config_json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    format_app_config_text(&config_json)
+}
+
+#[tauri::command]
+fn set_current_provider_model_command(provider_id: String, model_id: String) -> Result<String, String> {
+    let config_path = default_app_config_path().map_err(|e| e.to_string())?;
+    let config = set_current_provider_model(&config_path, &provider_id, &model_id)
+        .map_err(|e| e.to_string())?;
+    let config_json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    format_app_config_text(&config_json)
+}
+
+#[tauri::command]
+fn import_opencode_providers_command(form: Option<ImportProvidersForm>) -> Result<String, String> {
+    let source_path = match form.and_then(|value| value.source_path) {
+        Some(path) if !path.trim().is_empty() => std::path::PathBuf::from(path),
+        _ => default_opencode_config_path()?,
+    };
+
+    let config_path = default_app_config_path().map_err(|e| e.to_string())?;
+    let config =
+        import_providers_from_opencode_path(&source_path, &config_path).map_err(|e| e.to_string())?;
     let config_json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
 
     format_app_config_text(&config_json)
@@ -433,10 +636,17 @@ pub fn run() {
             list_projects,
             build_demo_assets,
             list_assets,
-            decide_llm_session_message_debug,
+            decide_llm_session_message_using_current_config,
+            test_current_provider_command,
             send_session_message_command,
             list_session_messages_command,
-            load_llm_config_command
+            load_llm_config_command,
+            load_llm_config_json_command,
+            save_llm_config_command,
+            import_opencode_providers_command,
+            create_provider_command,
+            delete_provider_command,
+            set_current_provider_model_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -445,7 +655,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_app_config_text, format_session_agent_decision_text, format_session_messages_text,
+        format_app_config_text, format_provider_test_text, format_session_agent_decision_text,
+        format_session_messages_text,
     };
     use agent::{SessionActionType, SessionAgentDecision};
     use schema::{SessionMessage, SessionMessageRole};
@@ -508,6 +719,18 @@ mod tests {
                         "models": {
                             "gpt-5.4": { "name": "GPT-5.4" }
                         }
+                    },
+                    "openai": {
+                        "name": "OpenAI",
+                        "models": {
+                            "gpt-5": { "name": "GPT-5" }
+                        }
+                    },
+                    "copilot": {
+                        "name": "GitHub Copilot",
+                        "models": {
+                            "gpt-4.1": { "name": "GPT-4.1" }
+                        }
                     }
                 },
                 "distilllab": {
@@ -520,6 +743,16 @@ mod tests {
 
         assert!(text.contains("current provider: ice"));
         assert!(text.contains("current model: gpt-5.4"));
-        assert!(text.contains("providers: ice"));
+        assert!(text.contains("providers: copilot, ice, openai"));
+    }
+
+    #[test]
+    fn formats_current_provider_test_result_as_readable_text() {
+        let text = format_provider_test_text("ice", "gpt-5.4", "ok", "connected successfully");
+
+        assert!(text.contains("provider: ice"));
+        assert!(text.contains("model: gpt-5.4"));
+        assert!(text.contains("status: ok"));
+        assert!(text.contains("message: connected successfully"));
     }
 }

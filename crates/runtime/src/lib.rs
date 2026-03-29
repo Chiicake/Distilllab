@@ -12,7 +12,11 @@ pub use app::AppRuntime;
 pub use asset_service::{build_demo_assets, list_assets};
 pub use chunk_service::{chunk_demo_source, list_chunks_for_source};
 pub use config::{
-    default_app_config_path, load_app_config_from_path, resolve_current_model_selection,
+    AppConfig, CurrentModelSelection, DistilllabConfigSection, ModelConfigEntry,
+    ProviderConfigEntry, ProviderOptions, ResolvedProviderModel, default_app_config_path,
+    delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
+    resolve_current_model_selection, resolve_current_provider_model, save_app_config_to_path,
+    set_current_provider_model, upsert_provider_entry,
 };
 pub use project_service::{group_demo_project, list_projects};
 pub use run_service::{create_demo_run, list_runs};

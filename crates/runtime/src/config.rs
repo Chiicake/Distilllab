@@ -93,6 +93,130 @@ pub fn save_app_config_to_path(config: &AppConfig, path: &Path) -> Result<(), Co
     Ok(())
 }
 
+pub fn import_providers_from_opencode_path(
+    source_path: &Path,
+    target_path: &Path,
+) -> Result<AppConfig, ConfigError> {
+    let source_config = load_app_config_from_path(source_path)?;
+
+    let mut target_config = if target_path.exists() {
+        load_app_config_from_path(target_path)?
+    } else {
+        let config = AppConfig {
+            schema: Some("https://opencode.ai/config.json".to_string()),
+            ..Default::default()
+        };
+        save_app_config_to_path(&config, target_path)?;
+        config
+    };
+
+    let had_current_provider = target_config.distilllab.current_provider.is_some();
+
+    for (provider_id, provider_entry) in source_config.provider {
+        let first_model_id = provider_entry.models.keys().next().cloned();
+        target_config
+            .provider
+            .insert(provider_id.clone(), provider_entry);
+
+        if !had_current_provider {
+            target_config.distilllab.current_provider = Some(provider_id.clone());
+            if target_config.distilllab.current_model.is_none() {
+                target_config.distilllab.current_model = first_model_id;
+            }
+        }
+    }
+
+    if target_config.schema.is_none() {
+        target_config.schema = Some("https://opencode.ai/config.json".to_string());
+    }
+
+    save_app_config_to_path(&target_config, target_path)?;
+    Ok(target_config)
+}
+
+pub fn upsert_provider_entry(
+    config_path: &Path,
+    provider_id: &str,
+    provider_entry: ProviderConfigEntry,
+    current_model: Option<String>,
+) -> Result<AppConfig, ConfigError> {
+    let mut config = if config_path.exists() {
+        load_app_config_from_path(config_path)?
+    } else {
+        AppConfig {
+            schema: Some("https://opencode.ai/config.json".to_string()),
+            ..Default::default()
+        }
+    };
+
+    let selected_model = current_model.or_else(|| provider_entry.models.keys().next().cloned());
+    config
+        .provider
+        .insert(provider_id.to_string(), provider_entry);
+    config.distilllab.current_provider = Some(provider_id.to_string());
+    config.distilllab.current_model = selected_model;
+    if config.schema.is_none() {
+        config.schema = Some("https://opencode.ai/config.json".to_string());
+    }
+
+    save_app_config_to_path(&config, config_path)?;
+    Ok(config)
+}
+
+pub fn delete_provider_entry(
+    config_path: &Path,
+    provider_id: &str,
+) -> Result<AppConfig, ConfigError> {
+    let mut config = load_app_config_from_path(config_path)?;
+    config.provider.remove(provider_id);
+
+    let next_provider = config.provider.keys().next().cloned();
+    let next_model = next_provider
+        .as_ref()
+        .and_then(|id| config.provider[id].models.keys().next().cloned());
+
+    match next_provider {
+        Some(provider) => {
+            config.distilllab.current_provider = Some(provider);
+            config.distilllab.current_model = next_model;
+        }
+        None => {
+            config.distilllab.current_provider = None;
+            config.distilllab.current_model = None;
+        }
+    }
+
+    save_app_config_to_path(&config, config_path)?;
+    Ok(config)
+}
+
+pub fn set_current_provider_model(
+    config_path: &Path,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<AppConfig, ConfigError> {
+    let mut config = load_app_config_from_path(config_path)?;
+
+    let provider = config.provider.get(provider_id).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("provider not found: {provider_id}"),
+        )
+    })?;
+
+    if !provider.models.contains_key(model_id) {
+        return Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("model not found for provider {provider_id}: {model_id}"),
+        )));
+    }
+
+    config.distilllab.current_provider = Some(provider_id.to_string());
+    config.distilllab.current_model = Some(model_id.to_string());
+    save_app_config_to_path(&config, config_path)?;
+    Ok(config)
+}
+
 pub fn resolve_current_model_selection(
     config: &AppConfig,
 ) -> Result<CurrentModelSelection, ConfigError> {
@@ -206,8 +330,8 @@ pub fn resolve_current_provider_model(
 #[cfg(test)]
 mod tests {
     use super::{
-        load_app_config_from_path, resolve_current_model_selection, resolve_current_provider_model,
-        save_app_config_to_path,
+        import_providers_from_opencode_path, load_app_config_from_path,
+        resolve_current_model_selection, resolve_current_provider_model, save_app_config_to_path,
     };
     use std::collections::BTreeMap;
     use std::fs;
@@ -393,5 +517,196 @@ mod tests {
             Some("config.json")
         );
         assert!(path.to_string_lossy().to_lowercase().contains("distilllab"));
+    }
+
+    #[test]
+    fn imports_provider_entries_from_opencode_config_file() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let source_path = temp_dir.join("opencode.json");
+        let target_path = temp_dir.join("distilllab-config.json");
+
+        fs::write(
+            &source_path,
+            r#"{
+                "$schema": "https://opencode.ai/config.json",
+                "provider": {
+                    "ice": {
+                        "npm": "@ai-sdk/openai-compatible",
+                        "name": "Ice",
+                        "options": {
+                            "baseURL": "https://ice.v.ua/v1",
+                            "apiKey": "{file:~/.config/opencode/ice.key}"
+                        },
+                        "models": {
+                            "gpt-5.4": {
+                                "name": "GPT-5.4"
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("source config should be written");
+
+        let mut target = super::AppConfig::default();
+        target.schema = Some("https://opencode.ai/config.json".to_string());
+        super::save_app_config_to_path(&target, &target_path).expect("target config should save");
+
+        import_providers_from_opencode_path(&source_path, &target_path)
+            .expect("providers should import from opencode file");
+
+        let imported =
+            load_app_config_from_path(&target_path).expect("imported config should load");
+        assert!(imported.provider.contains_key("ice"));
+        assert_eq!(imported.provider["ice"].name, "Ice");
+        assert_eq!(
+            imported.provider["ice"].options.base_url.as_deref(),
+            Some("https://ice.v.ua/v1")
+        );
+        assert!(imported.provider["ice"].models.contains_key("gpt-5.4"));
+    }
+
+    #[test]
+    fn upserts_provider_entry_and_sets_current_selection() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.json");
+
+        let config = super::upsert_provider_entry(
+            &config_path,
+            "copilot",
+            super::ProviderConfigEntry {
+                npm: Some("@ai-sdk/openai-compatible".to_string()),
+                name: "GitHub Copilot".to_string(),
+                options: super::ProviderOptions {
+                    base_url: Some("https://api.githubcopilot.com".to_string()),
+                    api_key: Some("token".to_string()),
+                },
+                models: BTreeMap::from([(
+                    "gpt-4.1".to_string(),
+                    super::ModelConfigEntry {
+                        name: "GPT-4.1".to_string(),
+                        ..Default::default()
+                    },
+                )]),
+            },
+            Some("gpt-4.1".to_string()),
+        )
+        .expect("provider should upsert");
+
+        assert!(config.provider.contains_key("copilot"));
+        assert_eq!(
+            config.distilllab.current_provider.as_deref(),
+            Some("copilot")
+        );
+        assert_eq!(config.distilllab.current_model.as_deref(), Some("gpt-4.1"));
+    }
+
+    #[test]
+    fn deletes_provider_entry_and_reselects_remaining_provider() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.json");
+
+        let mut config = super::AppConfig::default();
+        config.schema = Some("https://opencode.ai/config.json".to_string());
+        config.distilllab.current_provider = Some("ice".to_string());
+        config.distilllab.current_model = Some("gpt-5.4".to_string());
+        config.provider.insert(
+            "ice".to_string(),
+            super::ProviderConfigEntry {
+                npm: Some("@ai-sdk/openai-compatible".to_string()),
+                name: "Ice".to_string(),
+                options: super::ProviderOptions::default(),
+                models: BTreeMap::from([(
+                    "gpt-5.4".to_string(),
+                    super::ModelConfigEntry {
+                        name: "GPT-5.4".to_string(),
+                        ..Default::default()
+                    },
+                )]),
+            },
+        );
+        config.provider.insert(
+            "openai".to_string(),
+            super::ProviderConfigEntry {
+                npm: Some("@ai-sdk/openai-compatible".to_string()),
+                name: "OpenAI".to_string(),
+                options: super::ProviderOptions::default(),
+                models: BTreeMap::from([(
+                    "gpt-5".to_string(),
+                    super::ModelConfigEntry {
+                        name: "GPT-5".to_string(),
+                        ..Default::default()
+                    },
+                )]),
+            },
+        );
+        super::save_app_config_to_path(&config, &config_path).expect("seed config should save");
+
+        let updated =
+            super::delete_provider_entry(&config_path, "ice").expect("provider should delete");
+
+        assert!(!updated.provider.contains_key("ice"));
+        assert_eq!(
+            updated.distilllab.current_provider.as_deref(),
+            Some("openai")
+        );
+        assert_eq!(updated.distilllab.current_model.as_deref(), Some("gpt-5"));
+    }
+
+    #[test]
+    fn updates_current_provider_and_model_selection() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.json");
+
+        let mut config = super::AppConfig::default();
+        config.schema = Some("https://opencode.ai/config.json".to_string());
+        config.provider.insert(
+            "ice".to_string(),
+            super::ProviderConfigEntry {
+                npm: Some("@ai-sdk/openai-compatible".to_string()),
+                name: "Ice".to_string(),
+                options: super::ProviderOptions::default(),
+                models: BTreeMap::from([(
+                    "gpt-5.4".to_string(),
+                    super::ModelConfigEntry {
+                        name: "GPT-5.4".to_string(),
+                        ..Default::default()
+                    },
+                )]),
+            },
+        );
+        config.provider.insert(
+            "copilot".to_string(),
+            super::ProviderConfigEntry {
+                npm: Some("@ai-sdk/openai-compatible".to_string()),
+                name: "GitHub Copilot".to_string(),
+                options: super::ProviderOptions::default(),
+                models: BTreeMap::from([(
+                    "gpt-4.1".to_string(),
+                    super::ModelConfigEntry {
+                        name: "GPT-4.1".to_string(),
+                        ..Default::default()
+                    },
+                )]),
+            },
+        );
+        super::save_app_config_to_path(&config, &config_path).expect("seed config should save");
+
+        let updated = super::set_current_provider_model(&config_path, "copilot", "gpt-4.1")
+            .expect("current selection should update");
+
+        assert_eq!(
+            updated.distilllab.current_provider.as_deref(),
+            Some("copilot")
+        );
+        assert_eq!(updated.distilllab.current_model.as_deref(), Some("gpt-4.1"));
     }
 }
