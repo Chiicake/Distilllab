@@ -1,4 +1,55 @@
-use runtime::AppRuntime;
+use agent::{SessionActionType, SessionAgentDecision};
+use runtime::{AppRuntime, LlmSessionDebugRequest};
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LlmDebugForm {
+    provider_kind: String,
+    base_url: String,
+    model: String,
+    api_key: Option<String>,
+    user_message: String,
+}
+
+fn format_action_type(action_type: &SessionActionType) -> &'static str {
+    match action_type {
+        SessionActionType::DirectReply => "direct_reply",
+        SessionActionType::RequestClarification => "request_clarification",
+        SessionActionType::CreateRun => "create_run",
+    }
+}
+
+fn format_optional_text(value: Option<&str>) -> &str {
+    value.unwrap_or("none")
+}
+
+fn format_session_agent_decision_text(decision: &SessionAgentDecision) -> String {
+    [
+        format!("intent: {}", decision.intent),
+        format!(
+            "action_type: {}",
+            format_action_type(&decision.action_type)
+        ),
+        format!(
+            "primary_object_type: {}",
+            format_optional_text(decision.primary_object_type.as_deref())
+        ),
+        format!(
+            "primary_object_id: {}",
+            format_optional_text(decision.primary_object_id.as_deref())
+        ),
+        format!("reply_text: {}", decision.reply_text),
+        format!(
+            "suggested_run_type: {}",
+            format_optional_text(decision.suggested_run_type.as_deref())
+        ),
+        format!(
+            "session_summary: {}",
+            format_optional_text(decision.session_summary.as_deref())
+        ),
+    ]
+    .join("\n")
+}
 
 #[tauri::command]
 fn create_demo_run() -> Result<String, String> {
@@ -246,6 +297,24 @@ fn list_assets() -> Result<String, String> {
     Ok(summary)
 }
 
+#[tauri::command]
+async fn decide_llm_session_message_debug(form: LlmDebugForm) -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let request = LlmSessionDebugRequest {
+        provider_kind: form.provider_kind,
+        base_url: form.base_url,
+        model: form.model,
+        api_key: form.api_key,
+        user_message: form.user_message,
+    };
+
+    let decision = runtime::decide_llm_session_message_with_config(&runtime, request)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(format_session_agent_decision_text(&decision))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -273,8 +342,34 @@ pub fn run() {
             group_demo_project,
             list_projects,
             build_demo_assets,
-            list_assets
+            list_assets,
+            decide_llm_session_message_debug
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_session_agent_decision_text;
+    use agent::{SessionActionType, SessionAgentDecision};
+
+    #[test]
+    fn formats_structured_session_agent_decision_as_plain_text() {
+        let text = format_session_agent_decision_text(&SessionAgentDecision {
+            intent: "llm_direct_reply".to_string(),
+            primary_object_type: None,
+            primary_object_id: None,
+            action_type: SessionActionType::DirectReply,
+            reply_text: "Hello from debug panel".to_string(),
+            suggested_run_type: None,
+            session_summary: Some("LLM replied to the current session message".to_string()),
+        });
+
+        assert!(text.contains("intent: llm_direct_reply"));
+        assert!(text.contains("action_type: direct_reply"));
+        assert!(text.contains("reply_text: Hello from debug panel"));
+        assert!(text.contains("suggested_run_type: none"));
+        assert!(text.contains("session_summary: LLM replied to the current session message"));
+    }
 }

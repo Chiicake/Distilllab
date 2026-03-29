@@ -6,31 +6,105 @@ use agent::{
 use chrono::Utc;
 use memory::db::open_database;
 use memory::migrations::run_migrations;
-use memory::session_store::{insert_session, list_sessions as memory_list_sessions};
-use schema::{Session, SessionStatus};
+use memory::session_message_store::{
+    insert_session_message, list_session_messages_for_session,
+};
+use memory::session_store::{
+    get_session_by_id, insert_session, list_sessions as memory_list_sessions, update_session,
+};
+use schema::{Session, SessionMessage, SessionMessageRole, SessionStatus};
 use uuid::Uuid;
 
-pub async fn decide_demo_session_message(
-    _runtime: &AppRuntime,
-    user_message: &str,
-) -> Result<SessionAgentDecision, Box<dyn std::error::Error>> {
+#[derive(Debug, Clone)]
+pub struct LlmSessionDebugRequest {
+    pub provider_kind: String,
+    pub base_url: String,
+    pub model: String,
+    pub api_key: Option<String>,
+    pub user_message: String,
+}
+
+fn build_demo_agent_session(session_id: &str, title: &str, summary: &str) -> Session {
     let now = Utc::now().to_string();
 
-    let session = Session {
-        id: "session-demo".to_string(),
-        title: "Demo Session".to_string(),
+    Session {
+        id: session_id.to_string(),
+        title: title.to_string(),
         status: SessionStatus::Active,
         current_intent: "idle".to_string(),
         current_object_type: "none".to_string(),
         current_object_id: "none".to_string(),
-        summary: "Demo session for session-agent decision".to_string(),
+        summary: summary.to_string(),
         started_at: now.clone(),
         updated_at: now.clone(),
         last_user_message_at: now.clone(),
         last_run_at: now.clone(),
         last_compacted_at: now,
         metadata_json: "{}".to_string(),
+    }
+}
+
+fn normalize_optional_api_key(api_key: Option<String>) -> Option<String> {
+    api_key.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn build_session_message(
+    session_id: &str,
+    run_id: Option<String>,
+    message_type: &str,
+    role: SessionMessageRole,
+    content: String,
+) -> SessionMessage {
+    SessionMessage {
+        id: format!("message-{}", Uuid::new_v4()),
+        session_id: session_id.to_string(),
+        run_id,
+        message_type: message_type.to_string(),
+        role,
+        content,
+        data_json: "{}".to_string(),
+        created_at: Utc::now().to_string(),
+    }
+}
+
+async fn decide_llm_session_message_with_provider_config(
+    config: LlmProviderConfig,
+    user_message: &str,
+) -> Result<SessionAgentDecision, Box<dyn std::error::Error>> {
+    let session = build_demo_agent_session(
+        "session-llm-demo",
+        "LLM Demo Session",
+        "Demo session for llm-backed session-agent decision",
+    );
+
+    let input = SessionAgentInput {
+        session,
+        recent_messages: vec![],
+        user_message: user_message.to_string(),
     };
+
+    let session_agent = LlmSessionAgent::new(config);
+    let decision = session_agent.decide(input).await?;
+
+    Ok(decision)
+}
+
+pub async fn decide_demo_session_message(
+    _runtime: &AppRuntime,
+    user_message: &str,
+) -> Result<SessionAgentDecision, Box<dyn std::error::Error>> {
+    let session = build_demo_agent_session(
+        "session-demo",
+        "Demo Session",
+        "Demo session for session-agent decision",
+    );
 
     let input = SessionAgentInput {
         session,
@@ -50,7 +124,7 @@ pub async fn decide_llm_session_message(
 ) -> Result<SessionAgentDecision, Box<dyn std::error::Error>> {
     let base_url = std::env::var("DISTILLLAB_LLM_BASE_URL")?;
     let model = std::env::var("DISTILLLAB_LLM_MODEL")?;
-    let api_key = std::env::var("DISTILLLAB_LLM_API_KEY").ok();
+    let api_key = normalize_optional_api_key(std::env::var("DISTILLLAB_LLM_API_KEY").ok());
 
     let config = LlmProviderConfig {
         provider_kind: "openai_compatible".to_string(),
@@ -59,31 +133,81 @@ pub async fn decide_llm_session_message(
         api_key,
     };
 
-    let now = Utc::now().to_string();
-    let session = Session {
-        id: "session-llm-demo".to_string(),
-        title: "LLM Demo Session".to_string(),
-        status: SessionStatus::Active,
-        current_intent: "idle".to_string(),
-        current_object_type: "none".to_string(),
-        current_object_id: "none".to_string(),
-        summary: "Demo session for llm-backed session-agent decision".to_string(),
-        started_at: now.clone(),
-        updated_at: now.clone(),
-        last_user_message_at: now.clone(),
-        last_run_at: now.clone(),
-        last_compacted_at: now,
-        metadata_json: "{}".to_string(),
+    decide_llm_session_message_with_provider_config(config, user_message).await
+}
+
+pub async fn decide_llm_session_message_with_config(
+    _runtime: &AppRuntime,
+    request: LlmSessionDebugRequest,
+) -> Result<SessionAgentDecision, Box<dyn std::error::Error>> {
+    let config = LlmProviderConfig {
+        provider_kind: request.provider_kind,
+        base_url: request.base_url,
+        model: request.model,
+        api_key: normalize_optional_api_key(request.api_key),
     };
 
+    decide_llm_session_message_with_provider_config(config, &request.user_message).await
+}
+
+pub async fn send_session_message(
+    runtime: &AppRuntime,
+    session_id: &str,
+    user_message: &str,
+) -> Result<SessionAgentDecision, Box<dyn std::error::Error>> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    let mut session = get_session_by_id(&conn, session_id)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("session not found: {session_id}"),
+        )
+    })?;
+
+    let user_session_message = build_session_message(
+        &session.id,
+        None,
+        "user_message",
+        SessionMessageRole::User,
+        user_message.to_string(),
+    );
+    insert_session_message(&conn, &user_session_message)?;
+
+    let recent_messages = list_session_messages_for_session(&conn, &session.id)?;
     let input = SessionAgentInput {
-        session,
-        recent_messages: vec![],
+        session: session.clone(),
+        recent_messages,
         user_message: user_message.to_string(),
     };
 
-    let session_agent = LlmSessionAgent::new(config);
+    let session_agent = BasicSessionAgent;
     let decision = session_agent.decide(input).await?;
+
+    let assistant_message_type = match decision.action_type {
+        agent::SessionActionType::DirectReply => "assistant_message",
+        agent::SessionActionType::RequestClarification => "clarification_message",
+        agent::SessionActionType::CreateRun => "system_message",
+    };
+
+    let assistant_session_message = build_session_message(
+        &session.id,
+        None,
+        assistant_message_type,
+        SessionMessageRole::Assistant,
+        decision.reply_text.clone(),
+    );
+    insert_session_message(&conn, &assistant_session_message)?;
+
+    let now = Utc::now().to_string();
+    session.current_intent = decision.intent.clone();
+    session.summary = decision
+        .session_summary
+        .clone()
+        .unwrap_or_else(|| session.summary.clone());
+    session.updated_at = now.clone();
+    session.last_user_message_at = now;
+    update_session(&conn, &session)?;
 
     Ok(decision)
 }
@@ -123,8 +247,15 @@ pub fn list_sessions(runtime: &AppRuntime) -> Result<Vec<Session>, Box<dyn std::
 
 #[cfg(test)]
 mod tests {
-    use super::{decide_demo_session_message, decide_llm_session_message};
+    use super::{
+        LlmSessionDebugRequest, create_demo_session, decide_demo_session_message,
+        decide_llm_session_message, decide_llm_session_message_with_config,
+        send_session_message,
+    };
     use crate::app::AppRuntime;
+    use memory::db::open_database;
+    use memory::session_message_store::list_session_messages_for_session;
+    use memory::session_store::get_session_by_id;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -200,5 +331,108 @@ mod tests {
 
         assert_eq!(decision.intent, "llm_direct_reply");
         assert_eq!(decision.reply_text, "Hello from runtime llm");
+    }
+
+    #[tokio::test]
+    async fn runtime_can_get_llm_backed_decision_from_explicit_config() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("server should accept connection");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream
+                .read(&mut buffer)
+                .await
+                .expect("server should read request");
+
+            let response_body = r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Hello from explicit config"
+                        }
+                    }
+                ]
+            }"#;
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("server should write response");
+        });
+
+        let runtime = AppRuntime::new("/tmp/distilllab-runtime-test-llm-explicit.db".to_string());
+        let request = LlmSessionDebugRequest {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: format!("http://{}", address),
+            model: "gpt-test".to_string(),
+            api_key: Some(String::new()),
+            user_message: "Hello from runtime explicit config".to_string(),
+        };
+
+        let decision = decide_llm_session_message_with_config(&runtime, request)
+            .await
+            .expect("runtime should receive an llm-backed session agent decision");
+
+        assert_eq!(decision.intent, "llm_direct_reply");
+        assert_eq!(decision.reply_text, "Hello from explicit config");
+    }
+
+    #[tokio::test]
+    async fn send_session_message_persists_user_and_assistant_messages() {
+        let runtime = AppRuntime::new("/tmp/distilllab-runtime-session-flow.db".to_string());
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let reply = send_session_message(&runtime, &session.id, "Hello Distilllab")
+            .await
+            .expect("runtime should send a session message");
+
+        assert_eq!(reply.intent, "general_reply");
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let messages = list_session_messages_for_session(&conn, &session.id)
+            .expect("session messages should load");
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role.as_str(), "user");
+        assert_eq!(messages[0].content, "Hello Distilllab");
+        assert_eq!(messages[1].role.as_str(), "assistant");
+        assert_eq!(
+            messages[1].content,
+            "Hello! I am ready to help with your Distilllab session."
+        );
+    }
+
+    #[tokio::test]
+    async fn send_session_message_updates_session_intent_and_summary() {
+        let runtime = AppRuntime::new("/tmp/distilllab-runtime-session-update.db".to_string());
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let reply = send_session_message(&runtime, &session.id, "Hello again")
+            .await
+            .expect("runtime should send a session message");
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let updated_session = get_session_by_id(&conn, &session.id)
+            .expect("query should succeed")
+            .expect("session should exist");
+
+        assert_eq!(updated_session.current_intent, reply.intent);
+        assert_eq!(updated_session.summary, "General session assistance");
     }
 }

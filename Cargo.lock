@@ -743,6 +743,7 @@ dependencies = [
 name = "distilllab-desktop"
 version = "0.1.0"
 dependencies = [
+ "distilllab-agent",
  "distilllab-runtime",
  "distilllab-schema",
  "log",

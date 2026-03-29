@@ -30,20 +30,74 @@
       }
       button,
       p,
-      h1 {
+      h1,
+      label,
+      input,
+      textarea,
+      select {
         font-family: "Noto Sans", "DejaVu Sans", "Liberation Sans", Arial, sans-serif;
       }
       main {
-        max-width: 720px;
+        width: min(960px, calc(100vw - 32px));
         padding: 32px;
       }
       h1 { margin-top: 0; font-size: 2.2rem; }
       p { line-height: 1.6; color: #cbd5e1; }
+      h2 {
+        margin-top: 32px;
+        font-size: 1.2rem;
+      }
       code {
         font-family: "DejaVu Sans Mono", "Liberation Mono", monospace;
         background: #1e293b;
         padding: 2px 6px;
         border-radius: 6px;
+      }
+      .panel {
+        margin-top: 24px;
+        padding: 20px;
+        border: 1px solid #334155;
+        border-radius: 16px;
+        background: rgba(15, 23, 42, 0.75);
+      }
+      .form-grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .field-full {
+        grid-column: 1 / -1;
+      }
+      label {
+        font-size: 0.95rem;
+        color: #bfdbfe;
+      }
+      input,
+      textarea,
+      select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #475569;
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "DejaVu Sans Mono", "Liberation Mono", monospace;
+        line-height: 1.6;
       }
     </style>
   </head>
@@ -70,7 +124,37 @@
         <input id="source-id-input" type="text" placeholder="source-..." />
         <button id="list-chunks-button">List Chunks</button>
       </p>
-      <p id="result">No result yet.</p>
+      <div class="panel">
+        <h2>LLM Debug Panel</h2>
+        <p>Use this temporary panel to send one message through the Session Agent LLM path.</p>
+        <div class="form-grid">
+          <div class="field">
+            <label for="llm-provider-input">Provider</label>
+            <input id="llm-provider-input" type="text" value="openai_compatible" />
+          </div>
+          <div class="field">
+            <label for="llm-base-url-input">Base URL</label>
+            <input id="llm-base-url-input" type="text" placeholder="http://127.0.0.1:11434/v1" />
+          </div>
+          <div class="field">
+            <label for="llm-model-input">Model</label>
+            <input id="llm-model-input" type="text" placeholder="qwen2.5:latest" />
+          </div>
+          <div class="field">
+            <label for="llm-api-key-input">API Key</label>
+            <input id="llm-api-key-input" type="password" placeholder="optional" />
+          </div>
+          <div class="field field-full">
+            <label for="llm-message-input">Message</label>
+            <textarea id="llm-message-input" placeholder="Ask the Session Agent something..."></textarea>
+          </div>
+        </div>
+        <button id="llm-debug-button">Run Session Agent</button>
+      </div>
+      <div class="panel">
+        <h2>Output</h2>
+        <pre id="result">No result yet.</pre>
+      </div>
     </main>
     <script>
       const runButton = document.getElementById("create-run-button");
@@ -88,6 +172,12 @@
       const listAssetsButton = document.getElementById("list-assets-button");
       const listChunksButton = document.getElementById("list-chunks-button");
       const sourceIdInput = document.getElementById("source-id-input");
+      const llmProviderInput = document.getElementById("llm-provider-input");
+      const llmBaseUrlInput = document.getElementById("llm-base-url-input");
+      const llmModelInput = document.getElementById("llm-model-input");
+      const llmApiKeyInput = document.getElementById("llm-api-key-input");
+      const llmMessageInput = document.getElementById("llm-message-input");
+      const llmDebugButton = document.getElementById("llm-debug-button");
       const result = document.getElementById("result");
 
       async function invokeCommand(commandName, loadingMessage) {
@@ -179,6 +269,43 @@
           }
 
           const response = await invoke("list_chunks_for_source", { sourceId });
+          result.textContent = response;
+        } catch (error) {
+          result.textContent = `Error: ${error}`;
+        }
+      });
+
+      llmDebugButton.addEventListener("click", async () => {
+        const providerKind = llmProviderInput.value.trim();
+        const baseUrl = llmBaseUrlInput.value.trim();
+        const model = llmModelInput.value.trim();
+        const apiKey = llmApiKeyInput.value.trim();
+        const userMessage = llmMessageInput.value.trim();
+
+        if (!providerKind || !baseUrl || !model || !userMessage) {
+          result.textContent = "Error: provider, base URL, model, and message are required.";
+          return;
+        }
+
+        result.textContent = "Running Session Agent through the LLM debug path...";
+
+        try {
+          const invoke = window.__TAURI_INTERNALS__?.invoke;
+
+          if (!invoke) {
+            result.textContent = "Error: Tauri bridge is not available in the current page context.";
+            return;
+          }
+
+          const response = await invoke("decide_llm_session_message_debug", {
+            form: {
+              providerKind,
+              baseUrl,
+              model,
+              apiKey,
+              userMessage,
+            },
+          });
           result.textContent = response;
         } catch (error) {
           result.textContent = `Error: ${error}`;

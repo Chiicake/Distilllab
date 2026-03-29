@@ -25,3 +25,4 @@ tauri = { version = "2.10.3", features = [] }
 tauri-plugin-log = "2"
 runtime = { package = "distilllab-runtime", path = "../../../crates/runtime" }
 schema = { package = "distilllab-schema", path = "../../../crates/schema" }
+agent = { package = "distilllab-agent", path = "../../../crates/agent" }
