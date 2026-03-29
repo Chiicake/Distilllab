@@ -9,3 +9,4 @@ schema = { package = "distilllab-schema", path = "../schema" }
 memory = { package = "distilllab-memory", path = "../memory" }
 uuid = { version = "1.18.1", features = ["v4"] }
 chrono = { version = "0.4", features = ["clock"] }
+tokio = "1.50.0"

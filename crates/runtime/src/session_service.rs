@@ -7,7 +7,7 @@ use memory::session_store::{insert_session, list_sessions as memory_list_session
 use schema::{Session, SessionStatus};
 use uuid::Uuid;
 
-pub fn decide_demo_session_message(
+pub async fn decide_demo_session_message(
     _runtime: &AppRuntime,
     user_message: &str,
 ) -> Result<SessionAgentDecision, Box<dyn std::error::Error>> {
@@ -36,7 +36,7 @@ pub fn decide_demo_session_message(
     };
 
     let session_agent = BasicSessionAgent;
-    let decision = session_agent.decide(input)?;
+    let decision = session_agent.decide(input).await?;
 
     Ok(decision)
 }
@@ -79,11 +79,12 @@ mod tests {
     use super::decide_demo_session_message;
     use crate::app::AppRuntime;
 
-    #[test]
-    fn runtime_can_get_structured_decision_from_session_agent() {
+    #[tokio::test]
+    async fn runtime_can_get_structured_decision_from_session_agent() {
         let runtime = AppRuntime::new("/tmp/distilllab-runtime-test.db".to_string());
 
         let decision = decide_demo_session_message(&runtime, "Hello Distilllab")
+            .await
             .expect("runtime should receive a session agent decision");
 
         assert_eq!(decision.intent, "general_reply");

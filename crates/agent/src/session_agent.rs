@@ -1,4 +1,5 @@
-use crate::{AgentDefinition, AgentError};
+use crate::{AgentDefinition, AgentError, LlmProviderConfig};
+use async_trait::async_trait;
 use schema::{Session, SessionMessage};
 
 pub fn session_agent_definition() -> AgentDefinition {
@@ -62,14 +63,16 @@ pub struct SessionAgentDecision {
     pub session_summary: Option<String>,
 }
 
+#[async_trait]
 pub trait SessionAgent {
-    fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError>;
+    async fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError>;
 }
 
 pub struct BasicSessionAgent;
 
+#[async_trait]
 impl SessionAgent for BasicSessionAgent {
-    fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError> {
+    async fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError> {
         let normalized_message = input.user_message.to_lowercase();
 
         if normalized_message.contains("import") {
@@ -96,11 +99,15 @@ impl SessionAgent for BasicSessionAgent {
     }
 }
 
+pub struct LlmSessionAgent {
+    pub config: LlmProviderConfig,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        session_agent_definition, BasicSessionAgent, SessionActionType, SessionAgent,
-        SessionAgentDecision, SessionAgentInput,
+        BasicSessionAgent, SessionActionType, SessionAgent, SessionAgentDecision,
+        SessionAgentInput, session_agent_definition,
     };
     use schema::{Session, SessionMessage, SessionMessageRole, SessionStatus};
 
@@ -111,9 +118,11 @@ mod tests {
         assert_eq!(definition.key, "session_agent");
         assert_eq!(definition.kind, "session");
         assert_eq!(definition.default_model_profile, "reasoning_default");
-        assert!(definition
-            .can_create_run_types
-            .contains(&"import_and_distill".to_string()));
+        assert!(
+            definition
+                .can_create_run_types
+                .contains(&"import_and_distill".to_string())
+        );
     }
 
     #[test]
@@ -171,8 +180,8 @@ mod tests {
         assert_eq!(input.user_message, "Import these notes");
     }
 
-    #[test]
-    fn basic_session_agent_returns_structured_direct_reply_decision() {
+    #[tokio::test]
+    async fn basic_session_agent_returns_structured_direct_reply_decision() {
         let agent = BasicSessionAgent;
 
         let input = SessionAgentInput {
@@ -197,6 +206,7 @@ mod tests {
 
         let decision = agent
             .decide(input)
+            .await
             .expect("basic session agent should decide");
 
         assert_eq!(decision.action_type, SessionActionType::DirectReply);
@@ -207,8 +217,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn basic_session_agent_returns_create_run_for_import_requests() {
+    #[tokio::test]
+    async fn basic_session_agent_returns_create_run_for_import_requests() {
         let agent = BasicSessionAgent;
 
         let input = SessionAgentInput {
@@ -233,6 +243,7 @@ mod tests {
 
         let decision = agent
             .decide(input)
+            .await
             .expect("basic session agent should decide");
 
         assert_eq!(decision.action_type, SessionActionType::CreateRun);

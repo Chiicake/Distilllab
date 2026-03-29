@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::AgentError;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmProviderConfig {
@@ -68,12 +68,12 @@ pub async fn send_chat_completion_request(
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        LlmProviderConfig, OpenAiCompatibleChatChoice, OpenAiCompatibleChatMessage,
+        OpenAiCompatibleChatRequest, OpenAiCompatibleChatResponse, send_chat_completion_request,
+    };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
-    use super::{
-        send_chat_completion_request, LlmProviderConfig, OpenAiCompatibleChatChoice,
-        OpenAiCompatibleChatMessage, OpenAiCompatibleChatRequest, OpenAiCompatibleChatResponse,
-    };
 
     #[test]
     fn provider_config_builds_chat_completions_url_without_double_slash() {
@@ -185,13 +185,15 @@ mod tests {
             api_key: None,
         };
         let request = OpenAiCompatibleChatRequest {
-            model: "gpt-test".to_string(),
+            model: config.model.clone(),
             messages: vec![OpenAiCompatibleChatMessage {
                 role: "user".to_string(),
                 content: "Hello".to_string(),
             }],
         };
-        let response = send_chat_completion_request(&client, &config, &request).await.expect("send failed");
+        let response = send_chat_completion_request(&client, &config, &request)
+            .await
+            .expect("send failed");
         assert_eq!(
             response.first_message_content(),
             Some("Hello from fake llm")
