@@ -125,6 +125,43 @@
         <button id="list-chunks-button">List Chunks</button>
       </p>
       <div class="panel">
+        <h2>Session Timeline</h2>
+        <p>Use the formal session flow below to send messages and inspect the current timeline.</p>
+        <div class="form-grid">
+          <div class="field field-full">
+            <label for="timeline-session-id-input">Session ID</label>
+            <input id="timeline-session-id-input" type="text" placeholder="session-..." />
+          </div>
+          <div class="field">
+            <label for="timeline-provider-input">Provider</label>
+            <input id="timeline-provider-input" type="text" value="openai_compatible" />
+          </div>
+          <div class="field">
+            <label for="timeline-base-url-input">Base URL</label>
+            <input id="timeline-base-url-input" type="text" placeholder="http://127.0.0.1:11434/v1" />
+          </div>
+          <div class="field">
+            <label for="timeline-model-input">Model</label>
+            <input id="timeline-model-input" type="text" placeholder="qwen2.5:latest" />
+          </div>
+          <div class="field">
+            <label for="timeline-api-key-input">API Key</label>
+            <input id="timeline-api-key-input" type="password" placeholder="optional" />
+          </div>
+          <div class="field field-full">
+            <label for="timeline-message-input">Session Message</label>
+            <textarea id="timeline-message-input" placeholder="Send a real session message..."></textarea>
+          </div>
+        </div>
+        <button id="timeline-create-session-button">Create and Use New Session</button>
+        <button id="timeline-send-button">Send Session Message</button>
+        <button id="timeline-refresh-button">Refresh Timeline</button>
+      </div>
+      <div class="panel">
+        <h2>Timeline Output</h2>
+        <pre id="timeline-result">No timeline loaded yet.</pre>
+      </div>
+      <div class="panel">
         <h2>LLM Debug Panel</h2>
         <p>Use this temporary panel to send one message through the Session Agent LLM path.</p>
         <div class="form-grid">
@@ -172,6 +209,16 @@
       const listAssetsButton = document.getElementById("list-assets-button");
       const listChunksButton = document.getElementById("list-chunks-button");
       const sourceIdInput = document.getElementById("source-id-input");
+      const timelineSessionIdInput = document.getElementById("timeline-session-id-input");
+      const timelineProviderInput = document.getElementById("timeline-provider-input");
+      const timelineBaseUrlInput = document.getElementById("timeline-base-url-input");
+      const timelineModelInput = document.getElementById("timeline-model-input");
+      const timelineApiKeyInput = document.getElementById("timeline-api-key-input");
+      const timelineMessageInput = document.getElementById("timeline-message-input");
+      const timelineCreateSessionButton = document.getElementById("timeline-create-session-button");
+      const timelineSendButton = document.getElementById("timeline-send-button");
+      const timelineRefreshButton = document.getElementById("timeline-refresh-button");
+      const timelineResult = document.getElementById("timeline-result");
       const llmProviderInput = document.getElementById("llm-provider-input");
       const llmBaseUrlInput = document.getElementById("llm-base-url-input");
       const llmModelInput = document.getElementById("llm-model-input");
@@ -180,23 +227,103 @@
       const llmDebugButton = document.getElementById("llm-debug-button");
       const result = document.getElementById("result");
 
+      async function invokeTauri(commandName, args) {
+        const invoke = window.__TAURI_INTERNALS__?.invoke;
+
+        if (!invoke) {
+          throw new Error("Tauri bridge is not available in the current page context.");
+        }
+
+        return await invoke(commandName, args);
+      }
+
+      async function refreshTimeline() {
+        const sessionId = timelineSessionIdInput.value.trim();
+
+        if (!sessionId) {
+          timelineResult.textContent = "Error: please create or enter a session id first.";
+          return;
+        }
+
+        timelineResult.textContent = "Loading timeline...";
+
+        try {
+          const response = await invokeTauri("list_session_messages_command", { sessionId });
+          timelineResult.textContent = response;
+        } catch (error) {
+          timelineResult.textContent = `Error: ${error}`;
+        }
+      }
+
       async function invokeCommand(commandName, loadingMessage) {
         result.textContent = loadingMessage;
 
         try {
-          const invoke = window.__TAURI_INTERNALS__?.invoke;
-
-          if (!invoke) {
-            result.textContent = "Error: Tauri bridge is not available in the current page context.";
-            return;
-          }
-
-          const response = await invoke(commandName);
+          const response = await invokeTauri(commandName);
           result.textContent = response;
         } catch (error) {
           result.textContent = `Error: ${error}`;
         }
       }
+
+      timelineCreateSessionButton.addEventListener("click", async () => {
+        timelineResult.textContent = "Creating session...";
+
+        try {
+          const response = await invokeTauri("create_demo_session");
+          const match = response.match(/created session: (session-[^\s]+)/);
+
+          if (!match) {
+            timelineResult.textContent = `Created session, but could not parse id: ${response}`;
+            return;
+          }
+
+          const sessionId = match[1];
+          timelineSessionIdInput.value = sessionId;
+          timelineResult.textContent = `Using session ${sessionId}`;
+          await refreshTimeline();
+        } catch (error) {
+          timelineResult.textContent = `Error: ${error}`;
+        }
+      });
+
+      timelineSendButton.addEventListener("click", async () => {
+        const sessionId = timelineSessionIdInput.value.trim();
+        const providerKind = timelineProviderInput.value.trim();
+        const baseUrl = timelineBaseUrlInput.value.trim();
+        const model = timelineModelInput.value.trim();
+        const apiKey = timelineApiKeyInput.value.trim();
+        const userMessage = timelineMessageInput.value.trim();
+
+        if (!sessionId || !providerKind || !baseUrl || !model || !userMessage) {
+          timelineResult.textContent = "Error: session id, provider, base URL, model, and session message are required.";
+          return;
+        }
+
+        timelineResult.textContent = "Sending session message...";
+
+        try {
+          const response = await invokeTauri("send_session_message_command", {
+            form: {
+              sessionId,
+              providerKind,
+              baseUrl,
+              model,
+              apiKey,
+              userMessage,
+            },
+          });
+          result.textContent = response;
+          timelineMessageInput.value = "";
+          await refreshTimeline();
+        } catch (error) {
+          timelineResult.textContent = `Error: ${error}`;
+        }
+      });
+
+      timelineRefreshButton.addEventListener("click", async () => {
+        await refreshTimeline();
+      });
 
       runButton.addEventListener("click", async () => {
         await invokeCommand("create_demo_run", "Creating demo run...");
@@ -261,14 +388,7 @@
         result.textContent = "Loading chunks...";
 
         try {
-          const invoke = window.__TAURI_INTERNALS__?.invoke;
-
-          if (!invoke) {
-            result.textContent = "Error: Tauri bridge is not available in the current page context.";
-            return;
-          }
-
-          const response = await invoke("list_chunks_for_source", { sourceId });
+          const response = await invokeTauri("list_chunks_for_source", { sourceId });
           result.textContent = response;
         } catch (error) {
           result.textContent = `Error: ${error}`;
@@ -290,14 +410,7 @@
         result.textContent = "Running Session Agent through the LLM debug path...";
 
         try {
-          const invoke = window.__TAURI_INTERNALS__?.invoke;
-
-          if (!invoke) {
-            result.textContent = "Error: Tauri bridge is not available in the current page context.";
-            return;
-          }
-
-          const response = await invoke("decide_llm_session_message_debug", {
+          const response = await invokeTauri("decide_llm_session_message_debug", {
             form: {
               providerKind,
               baseUrl,

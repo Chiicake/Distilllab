@@ -1,5 +1,6 @@
 use agent::{SessionActionType, SessionAgentDecision};
-use runtime::{AppRuntime, LlmSessionDebugRequest};
+use runtime::{AppRuntime, LlmSessionDebugRequest, SessionMessageRequest};
+use schema::SessionMessage;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -9,6 +10,17 @@ struct LlmDebugForm {
     model: String,
     api_key: Option<String>,
     user_message: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionMessageForm {
+    session_id: String,
+    user_message: String,
+    provider_kind: String,
+    base_url: String,
+    model: String,
+    api_key: Option<String>,
 }
 
 fn format_action_type(action_type: &SessionActionType) -> &'static str {
@@ -49,6 +61,18 @@ fn format_session_agent_decision_text(decision: &SessionAgentDecision) -> String
         ),
     ]
     .join("\n")
+}
+
+fn format_session_messages_text(messages: &[SessionMessage]) -> String {
+    if messages.is_empty() {
+        return "no session messages found".to_string();
+    }
+
+    messages
+        .iter()
+        .map(|message| format!("[{}] {}", message.role.as_str(), message.content))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 #[tauri::command]
@@ -315,6 +339,34 @@ async fn decide_llm_session_message_debug(form: LlmDebugForm) -> Result<String, 
     Ok(format_session_agent_decision_text(&decision))
 }
 
+#[tauri::command]
+async fn send_session_message_command(form: SessionMessageForm) -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let decision = runtime::send_session_message_with_config(
+        &runtime,
+        SessionMessageRequest {
+            session_id: form.session_id,
+            user_message: form.user_message,
+            provider_kind: form.provider_kind,
+            base_url: form.base_url,
+            model: form.model,
+            api_key: form.api_key,
+        },
+    )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(format_session_agent_decision_text(&decision))
+}
+
+#[tauri::command]
+fn list_session_messages_command(session_id: String) -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let messages = runtime::list_session_messages(&runtime, &session_id).map_err(|e| e.to_string())?;
+
+    Ok(format_session_messages_text(&messages))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -343,7 +395,9 @@ pub fn run() {
             list_projects,
             build_demo_assets,
             list_assets,
-            decide_llm_session_message_debug
+            decide_llm_session_message_debug,
+            send_session_message_command,
+            list_session_messages_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -351,8 +405,9 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::format_session_agent_decision_text;
+    use super::{format_session_agent_decision_text, format_session_messages_text};
     use agent::{SessionActionType, SessionAgentDecision};
+    use schema::{SessionMessage, SessionMessageRole};
 
     #[test]
     fn formats_structured_session_agent_decision_as_plain_text() {
@@ -371,5 +426,34 @@ mod tests {
         assert!(text.contains("reply_text: Hello from debug panel"));
         assert!(text.contains("suggested_run_type: none"));
         assert!(text.contains("session_summary: LLM replied to the current session message"));
+    }
+
+    #[test]
+    fn formats_session_messages_as_timeline_text() {
+        let text = format_session_messages_text(&[
+            SessionMessage {
+                id: "message-1".to_string(),
+                session_id: "session-1".to_string(),
+                run_id: None,
+                message_type: "user_message".to_string(),
+                role: SessionMessageRole::User,
+                content: "Hello timeline".to_string(),
+                data_json: "{}".to_string(),
+                created_at: "2026-03-29T00:00:00Z".to_string(),
+            },
+            SessionMessage {
+                id: "message-2".to_string(),
+                session_id: "session-1".to_string(),
+                run_id: None,
+                message_type: "assistant_message".to_string(),
+                role: SessionMessageRole::Assistant,
+                content: "Hello back".to_string(),
+                data_json: "{}".to_string(),
+                created_at: "2026-03-29T00:00:01Z".to_string(),
+            },
+        ]);
+
+        assert!(text.contains("[user] Hello timeline"));
+        assert!(text.contains("[assistant] Hello back"));
     }
 }

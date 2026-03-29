@@ -3,7 +3,7 @@ use crate::{
     OpenAiCompatibleChatMessage, OpenAiCompatibleChatRequest,
 };
 use async_trait::async_trait;
-use schema::{Session, SessionMessage};
+use schema::{Session, SessionMessage, SessionMessageRole};
 
 pub fn session_agent_definition() -> AgentDefinition {
     AgentDefinition {
@@ -116,16 +116,30 @@ impl LlmSessionAgent {
     }
 
     fn build_chat_messages(&self, input: &SessionAgentInput) -> Vec<OpenAiCompatibleChatMessage> {
-        vec![
-            OpenAiCompatibleChatMessage {
-                role: "system".to_string(),
-                content: session_agent_definition().system_prompt,
-            },
-            OpenAiCompatibleChatMessage {
-                role: "user".to_string(),
-                content: input.user_message.clone(),
-            },
-        ]
+        let mut messages = vec![OpenAiCompatibleChatMessage {
+            role: "system".to_string(),
+            content: session_agent_definition().system_prompt,
+        }];
+
+        for recent_message in &input.recent_messages {
+            let role = match recent_message.role {
+                SessionMessageRole::User => "user",
+                SessionMessageRole::Assistant => "assistant",
+                SessionMessageRole::System => "system",
+            };
+
+            messages.push(OpenAiCompatibleChatMessage {
+                role: role.to_string(),
+                content: recent_message.content.clone(),
+            });
+        }
+
+        messages.push(OpenAiCompatibleChatMessage {
+            role: "user".to_string(),
+            content: input.user_message.clone(),
+        });
+
+        messages
     }
 }
 
@@ -346,6 +360,67 @@ mod tests {
         assert_eq!(messages[0].role, "system");
         assert_eq!(messages[1].role, "user");
         assert_eq!(messages[1].content, "Hello from the user");
+    }
+
+    #[test]
+    fn llm_session_agent_includes_recent_messages_before_current_user_message() {
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: "http://localhost:11434/v1".to_string(),
+            model: "qwen-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "LLM Context Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing llm session agent context assembly".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![
+                SessionMessage {
+                    id: "message-1".to_string(),
+                    session_id: "session-1".to_string(),
+                    run_id: None,
+                    message_type: "user_message".to_string(),
+                    role: SessionMessageRole::User,
+                    content: "Earlier user question".to_string(),
+                    data_json: "{}".to_string(),
+                    created_at: "2026-03-28T00:00:00Z".to_string(),
+                },
+                SessionMessage {
+                    id: "message-2".to_string(),
+                    session_id: "session-1".to_string(),
+                    run_id: None,
+                    message_type: "assistant_message".to_string(),
+                    role: SessionMessageRole::Assistant,
+                    content: "Earlier assistant reply".to_string(),
+                    data_json: "{}".to_string(),
+                    created_at: "2026-03-28T00:00:01Z".to_string(),
+                },
+            ],
+            user_message: "Current user follow-up".to_string(),
+        };
+
+        let messages = agent.build_chat_messages(&input);
+
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[1].role, "user");
+        assert_eq!(messages[1].content, "Earlier user question");
+        assert_eq!(messages[2].role, "assistant");
+        assert_eq!(messages[2].content, "Earlier assistant reply");
+        assert_eq!(messages[3].role, "user");
+        assert_eq!(messages[3].content, "Current user follow-up");
     }
 
     #[tokio::test]
