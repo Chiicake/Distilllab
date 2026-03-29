@@ -681,6 +681,25 @@ mod tests {
     }
 
     #[test]
+    fn formats_create_run_decision_with_debug_readability() {
+        let text = format_session_agent_decision_text(&SessionAgentDecision {
+            intent: "import_material".to_string(),
+            primary_object_type: Some("source".to_string()),
+            primary_object_id: Some("source-1".to_string()),
+            action_type: SessionActionType::CreateRun,
+            reply_text: "I will start an import and distill run.".to_string(),
+            suggested_run_type: Some("import_and_distill".to_string()),
+            session_summary: Some("Preparing to import material".to_string()),
+        });
+
+        assert!(text.contains("intent: import_material"));
+        assert!(text.contains("action_type: create_run"));
+        assert!(text.contains("primary_object_type: source"));
+        assert!(text.contains("primary_object_id: source-1"));
+        assert!(text.contains("suggested_run_type: import_and_distill"));
+    }
+
+    #[test]
     fn formats_session_messages_as_timeline_text() {
         let text = format_session_messages_text(&[
             SessionMessage {

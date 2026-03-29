@@ -3,6 +3,7 @@ use crate::{
     OpenAiCompatibleChatMessage, OpenAiCompatibleChatRequest,
 };
 use async_trait::async_trait;
+use serde::Deserialize;
 use schema::{Session, SessionMessage, SessionMessageRole};
 
 pub fn session_agent_definition() -> AgentDefinition {
@@ -77,12 +78,24 @@ pub struct BasicSessionAgent;
 impl SessionAgent for BasicSessionAgent {
     async fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError> {
         let normalized_message = input.user_message.to_lowercase();
+        let primary_object_type = match input.session.current_object_type.as_str() {
+            "none" => None,
+            other => Some(other.to_string()),
+        };
+        let primary_object_id = match input.session.current_object_id.as_str() {
+            "none" => None,
+            other => Some(other.to_string()),
+        };
 
-        if normalized_message.contains("import") {
+        if normalized_message.contains("import")
+            || normalized_message.contains("upload")
+            || normalized_message.contains("bring in")
+            || normalized_message.contains("load these")
+        {
             return Ok(SessionAgentDecision {
                 intent: "import_material".to_string(),
-                primary_object_type: None,
-                primary_object_id: None,
+                primary_object_type,
+                primary_object_id,
                 action_type: SessionActionType::CreateRun,
                 reply_text: "I will start an import and distill run.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
@@ -90,10 +103,43 @@ impl SessionAgent for BasicSessionAgent {
             });
         }
 
+        if normalized_message.contains("deepen")
+            || normalized_message.contains("follow-up")
+            || normalized_message.contains("clarify")
+            || normalized_message.contains("ask questions")
+        {
+            return Ok(SessionAgentDecision {
+                intent: "deepen_understanding".to_string(),
+                primary_object_type,
+                primary_object_id,
+                action_type: SessionActionType::CreateRun,
+                reply_text: "I will start a deepening run to explore this topic further.".to_string(),
+                suggested_run_type: Some("deepening".to_string()),
+                session_summary: Some("Preparing to deepen understanding".to_string()),
+            });
+        }
+
+        if normalized_message.contains("write")
+            || normalized_message.contains("summary")
+            || normalized_message.contains("article")
+            || normalized_message.contains("report")
+            || normalized_message.contains("compose")
+        {
+            return Ok(SessionAgentDecision {
+                intent: "compose_output".to_string(),
+                primary_object_type,
+                primary_object_id,
+                action_type: SessionActionType::CreateRun,
+                reply_text: "I will prepare a compose and verify run for this output request.".to_string(),
+                suggested_run_type: Some("compose_and_verify".to_string()),
+                session_summary: Some("Preparing to compose an output".to_string()),
+            });
+        }
+
         Ok(SessionAgentDecision {
             intent: "general_reply".to_string(),
-            primary_object_type: None,
-            primary_object_id: None,
+            primary_object_type,
+            primary_object_id,
             action_type: SessionActionType::DirectReply,
             reply_text: "Hello! I am ready to help with your Distilllab session.".to_string(),
             suggested_run_type: None,
@@ -105,6 +151,17 @@ impl SessionAgent for BasicSessionAgent {
 pub struct LlmSessionAgent {
     pub client: reqwest::Client,
     pub config: LlmProviderConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct StructuredSessionAgentDecision {
+    intent: String,
+    action_type: String,
+    reply_text: String,
+    primary_object_type: Option<String>,
+    primary_object_id: Option<String>,
+    suggested_run_type: Option<String>,
+    session_summary: Option<String>,
 }
 
 impl LlmSessionAgent {
@@ -141,6 +198,30 @@ impl LlmSessionAgent {
 
         messages
     }
+
+    fn parse_action_type(action_type: &str) -> Option<SessionActionType> {
+        match action_type {
+            "direct_reply" => Some(SessionActionType::DirectReply),
+            "request_clarification" => Some(SessionActionType::RequestClarification),
+            "create_run" => Some(SessionActionType::CreateRun),
+            _ => None,
+        }
+    }
+
+    fn parse_structured_decision(reply_text: &str) -> Option<SessionAgentDecision> {
+        let parsed = serde_json::from_str::<StructuredSessionAgentDecision>(reply_text).ok()?;
+        let action_type = Self::parse_action_type(parsed.action_type.as_str())?;
+
+        Some(SessionAgentDecision {
+            intent: parsed.intent,
+            primary_object_type: parsed.primary_object_type,
+            primary_object_id: parsed.primary_object_id,
+            action_type,
+            reply_text: parsed.reply_text,
+            suggested_run_type: parsed.suggested_run_type,
+            session_summary: parsed.session_summary,
+        })
+    }
 }
 
 #[async_trait]
@@ -158,6 +239,10 @@ impl SessionAgent for LlmSessionAgent {
         let reply_text = response.first_message_content().ok_or_else(|| {
             AgentError::Response("llm response did not contain assistant content".to_string())
         })?;
+
+        if let Some(structured_decision) = Self::parse_structured_decision(reply_text) {
+            return Ok(structured_decision);
+        }
 
         Ok(SessionAgentDecision {
             intent: "llm_direct_reply".to_string(),
@@ -323,6 +408,78 @@ mod tests {
             decision.suggested_run_type,
             Some("import_and_distill".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn basic_session_agent_routes_deepening_requests_to_deepening_run() {
+        let agent = BasicSessionAgent;
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Deepening Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "asset".to_string(),
+                current_object_id: "asset-1".to_string(),
+                summary: "Testing deepening routing".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            user_message: "Please deepen this topic and ask follow-up questions".to_string(),
+        };
+
+        let decision = agent
+            .decide(input)
+            .await
+            .expect("basic session agent should decide");
+
+        assert_eq!(decision.action_type, SessionActionType::CreateRun);
+        assert_eq!(decision.intent, "deepen_understanding");
+        assert_eq!(decision.primary_object_type.as_deref(), Some("asset"));
+        assert_eq!(decision.primary_object_id.as_deref(), Some("asset-1"));
+        assert_eq!(decision.suggested_run_type.as_deref(), Some("deepening"));
+    }
+
+    #[tokio::test]
+    async fn basic_session_agent_routes_composition_requests_to_compose_and_verify_run() {
+        let agent = BasicSessionAgent;
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Compose Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "project".to_string(),
+                current_object_id: "project-1".to_string(),
+                summary: "Testing composition routing".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            user_message: "Write a summary article from these materials".to_string(),
+        };
+
+        let decision = agent
+            .decide(input)
+            .await
+            .expect("basic session agent should decide");
+
+        assert_eq!(decision.action_type, SessionActionType::CreateRun);
+        assert_eq!(decision.intent, "compose_output");
+        assert_eq!(decision.primary_object_type.as_deref(), Some("project"));
+        assert_eq!(decision.primary_object_id.as_deref(), Some("project-1"));
+        assert_eq!(decision.suggested_run_type.as_deref(), Some("compose_and_verify"));
     }
 
     #[test]
@@ -498,5 +655,83 @@ mod tests {
         assert_eq!(decision.action_type, SessionActionType::DirectReply);
         assert_eq!(decision.intent, "llm_direct_reply");
         assert_eq!(decision.reply_text, "Hello from fake llm");
+    }
+
+    #[tokio::test]
+    async fn llm_session_agent_parses_structured_create_run_decision_from_json_response() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("server should accept connection");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream
+                .read(&mut buffer)
+                .await
+                .expect("server should read request");
+
+            let response_body = r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"intent\":\"import_material\",\"action_type\":\"create_run\",\"reply_text\":\"I will start an import and distill run.\",\"suggested_run_type\":\"import_and_distill\",\"session_summary\":\"Preparing to import material\"}"
+                        }
+                    }
+                ]
+            }"#;
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("server should write response");
+        });
+
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: format!("http://{}", address),
+            model: "gpt-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Structured LLM Reply Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing llm structured decision parsing".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            user_message: "Import these notes".to_string(),
+        };
+
+        let decision = agent.decide(input).await.expect("llm session agent should decide");
+
+        assert_eq!(decision.action_type, SessionActionType::CreateRun);
+        assert_eq!(decision.intent, "import_material");
+        assert_eq!(decision.suggested_run_type.as_deref(), Some("import_and_distill"));
+        assert_eq!(decision.reply_text, "I will start an import and distill run.");
     }
 }
