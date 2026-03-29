@@ -15,7 +15,7 @@ pub fn session_agent_definition() -> AgentDefinition {
         description: "Distilllab homepage entry agent that understands user intent and decides the next high-level action.".to_string(),
         responsibility_summary: "Reads the current session and recent timeline, identifies user intent and primary object, then decides whether to reply directly, ask for clarification, or create a run. It does not execute the workflow itself.".to_string(),
         status: "active".to_string(),
-        system_prompt: "You are the Session Agent for Distilllab. Understand the current session state, identify user intent, and decide the next high-level action in a structured way.".to_string(),
+        system_prompt: "You are the Session Agent for Distilllab. Understand the current session state, identify user intent, and decide the next high-level action. Respond with valid JSON only. Do not include markdown fences or extra explanation. The JSON object must contain these fields: intent, action_type, reply_text, primary_object_type, primary_object_id, suggested_run_type, session_summary. action_type must be one of: direct_reply, request_clarification, create_run. Use suggested_run_type only when action_type is create_run. Use null for optional fields when unknown.".to_string(),
         default_model_profile: "reasoning_default".to_string(),
         allowed_tool_keys: vec![
             "list_sources".to_string(),
@@ -153,6 +153,12 @@ pub struct LlmSessionAgent {
     pub config: LlmProviderConfig,
 }
 
+#[derive(Debug, Clone)]
+pub struct LlmSessionAgentDebugResult {
+    pub raw_output: String,
+    pub decision: SessionAgentDecision,
+}
+
 #[derive(Debug, Deserialize)]
 struct StructuredSessionAgentDecision {
     intent: String,
@@ -173,10 +179,23 @@ impl LlmSessionAgent {
     }
 
     fn build_chat_messages(&self, input: &SessionAgentInput) -> Vec<OpenAiCompatibleChatMessage> {
+        let system_context = format!(
+            "{}\nCurrent session context:\nsession_id: {}\nsession_title: {}\ncurrent_intent: {}\ncurrent_object_type: {}\ncurrent_object_id: {}\nsession_summary: {}",
+            session_agent_definition().system_prompt,
+            input.session.id,
+            input.session.title,
+            input.session.current_intent,
+            input.session.current_object_type,
+            input.session.current_object_id,
+            input.session.summary,
+        );
+
         let mut messages = vec![OpenAiCompatibleChatMessage {
             role: "system".to_string(),
-            content: session_agent_definition().system_prompt,
+            content: system_context,
         }];
+
+        messages.extend(self.few_shot_examples());
 
         for recent_message in &input.recent_messages {
             let role = match recent_message.role {
@@ -197,6 +216,35 @@ impl LlmSessionAgent {
         });
 
         messages
+    }
+
+    fn few_shot_examples(&self) -> Vec<OpenAiCompatibleChatMessage> {
+        vec![
+            OpenAiCompatibleChatMessage {
+                role: "user".to_string(),
+                content: "Please import these notes into Distilllab".to_string(),
+            },
+            OpenAiCompatibleChatMessage {
+                role: "assistant".to_string(),
+                content: r#"{"intent":"import_material","action_type":"create_run","reply_text":"I will start an import and distill run.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":"import_and_distill","session_summary":"Preparing to import material"}"#.to_string(),
+            },
+            OpenAiCompatibleChatMessage {
+                role: "user".to_string(),
+                content: "Write a concise article from this project".to_string(),
+            },
+            OpenAiCompatibleChatMessage {
+                role: "assistant".to_string(),
+                content: r#"{"intent":"compose_output","action_type":"create_run","reply_text":"I will prepare a compose and verify run for this output request.","primary_object_type":"project","primary_object_id":"project-current","suggested_run_type":"compose_and_verify","session_summary":"Preparing to compose an output"}"#.to_string(),
+            },
+            OpenAiCompatibleChatMessage {
+                role: "user".to_string(),
+                content: "What did we do so far?".to_string(),
+            },
+            OpenAiCompatibleChatMessage {
+                role: "assistant".to_string(),
+                content: r#"{"intent":"general_reply","action_type":"direct_reply","reply_text":"Here is a concise summary of the current session.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Providing a direct session summary"}"#.to_string(),
+            },
+        ]
     }
 
     fn parse_action_type(action_type: &str) -> Option<SessionActionType> {
@@ -222,11 +270,23 @@ impl LlmSessionAgent {
             session_summary: parsed.session_summary,
         })
     }
-}
 
-#[async_trait]
-impl SessionAgent for LlmSessionAgent {
-    async fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError> {
+    fn fallback_direct_reply_decision(reply_text: &str) -> SessionAgentDecision {
+        SessionAgentDecision {
+            intent: "llm_direct_reply".to_string(),
+            primary_object_type: None,
+            primary_object_id: None,
+            action_type: SessionActionType::DirectReply,
+            reply_text: reply_text.to_string(),
+            suggested_run_type: None,
+            session_summary: Some("LLM replied to the current session message".to_string()),
+        }
+    }
+
+    pub async fn decide_with_debug(
+        &self,
+        input: SessionAgentInput,
+    ) -> Result<LlmSessionAgentDebugResult, AgentError> {
         let messages = self.build_chat_messages(&input);
 
         let request = OpenAiCompatibleChatRequest {
@@ -236,23 +296,27 @@ impl SessionAgent for LlmSessionAgent {
 
         let response = send_chat_completion_request(&self.client, &self.config, &request).await?;
 
-        let reply_text = response.first_message_content().ok_or_else(|| {
-            AgentError::Response("llm response did not contain assistant content".to_string())
-        })?;
+        let raw_output = response
+            .first_message_content()
+            .ok_or_else(|| {
+                AgentError::Response("llm response did not contain assistant content".to_string())
+            })?
+            .to_string();
 
-        if let Some(structured_decision) = Self::parse_structured_decision(reply_text) {
-            return Ok(structured_decision);
-        }
+        let decision = Self::parse_structured_decision(&raw_output)
+            .unwrap_or_else(|| Self::fallback_direct_reply_decision(&raw_output));
 
-        Ok(SessionAgentDecision {
-            intent: "llm_direct_reply".to_string(),
-            primary_object_type: None,
-            primary_object_id: None,
-            action_type: SessionActionType::DirectReply,
-            reply_text: reply_text.to_string(),
-            suggested_run_type: None,
-            session_summary: Some("LLM replied to the current session message".to_string()),
+        Ok(LlmSessionAgentDebugResult {
+            raw_output,
+            decision,
         })
+    }
+}
+
+#[async_trait]
+impl SessionAgent for LlmSessionAgent {
+    async fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError> {
+        Ok(self.decide_with_debug(input).await?.decision)
     }
 }
 
@@ -513,10 +577,16 @@ mod tests {
 
         let messages = agent.build_chat_messages(&input);
 
-        assert_eq!(messages.len(), 2);
+        assert!(messages.len() >= 4);
         assert_eq!(messages[0].role, "system");
-        assert_eq!(messages[1].role, "user");
-        assert_eq!(messages[1].content, "Hello from the user");
+        assert!(messages[0].content.contains("Respond with valid JSON only"));
+        assert!(messages[0].content.contains("action_type"));
+        assert!(messages[0].content.contains("create_run"));
+        assert_eq!(messages.last().expect("user message should exist").role, "user");
+        assert_eq!(
+            messages.last().expect("user message should exist").content,
+            "Hello from the user"
+        );
     }
 
     #[test]
@@ -571,13 +641,99 @@ mod tests {
 
         let messages = agent.build_chat_messages(&input);
 
-        assert_eq!(messages.len(), 4);
+        assert!(messages.len() >= 6);
+        let recent_user_index = messages
+            .iter()
+            .position(|message| message.content == "Earlier user question")
+            .expect("recent user message should exist");
+        let recent_assistant_index = messages
+            .iter()
+            .position(|message| message.content == "Earlier assistant reply")
+            .expect("recent assistant message should exist");
+        let current_user_index = messages
+            .iter()
+            .position(|message| message.content == "Current user follow-up")
+            .expect("current user message should exist");
+
+        assert_eq!(messages[recent_user_index].role, "user");
+        assert_eq!(messages[recent_assistant_index].role, "assistant");
+        assert!(recent_user_index < recent_assistant_index);
+        assert!(recent_assistant_index < current_user_index);
+    }
+
+    #[test]
+    fn llm_session_agent_includes_few_shot_examples_before_live_context() {
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: "http://localhost:11434/v1".to_string(),
+            model: "qwen-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Few Shot Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing few-shot message assembly".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            user_message: "Please import these notes".to_string(),
+        };
+
+        let messages = agent.build_chat_messages(&input);
+
+        assert!(messages.len() >= 4);
         assert_eq!(messages[1].role, "user");
-        assert_eq!(messages[1].content, "Earlier user question");
+        assert!(messages[1].content.contains("import these notes"));
         assert_eq!(messages[2].role, "assistant");
-        assert_eq!(messages[2].content, "Earlier assistant reply");
-        assert_eq!(messages[3].role, "user");
-        assert_eq!(messages[3].content, "Current user follow-up");
+        assert!(messages[2].content.contains("\"action_type\":\"create_run\""));
+        assert!(messages[2].content.contains("\"suggested_run_type\":\"import_and_distill\""));
+    }
+
+    #[test]
+    fn llm_session_agent_includes_current_session_object_clues_in_system_context() {
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: "http://localhost:11434/v1".to_string(),
+            model: "qwen-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Source Review Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "review_source".to_string(),
+                current_object_type: "source".to_string(),
+                current_object_id: "source-1".to_string(),
+                summary: "The session is focused on one imported source".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            user_message: "Summarize the current source".to_string(),
+        };
+
+        let messages = agent.build_chat_messages(&input);
+
+        assert!(messages[0].content.contains("current_object_type: source"));
+        assert!(messages[0].content.contains("current_object_id: source-1"));
+        assert!(messages[0].content.contains("session_summary: The session is focused on one imported source"));
     }
 
     #[tokio::test]
@@ -733,5 +889,94 @@ mod tests {
         assert_eq!(decision.intent, "import_material");
         assert_eq!(decision.suggested_run_type.as_deref(), Some("import_and_distill"));
         assert_eq!(decision.reply_text, "I will start an import and distill run.");
+    }
+
+    #[tokio::test]
+    async fn llm_session_agent_debug_result_preserves_raw_output_and_parsed_decision() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("server should accept connection");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream
+                .read(&mut buffer)
+                .await
+                .expect("server should read request");
+
+            let raw_json = "{\"intent\":\"general_reply\",\"action_type\":\"direct_reply\",\"reply_text\":\"Here is the answer.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Providing a direct answer\"}";
+            let encoded_raw_json = serde_json::to_string(raw_json).expect("raw json should encode");
+            let response_body = format!(
+                "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":{encoded_raw_json}}}}}]}}"
+            );
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("server should write response");
+        });
+
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: format!("http://{}", address),
+            model: "gpt-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Debug Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing llm debug result".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            user_message: "Hello".to_string(),
+        };
+
+        let result = agent
+            .decide_with_debug(input)
+            .await
+            .expect("llm session agent debug should decide");
+
+        assert!(result.raw_output.contains("\"intent\":\"general_reply\""));
+        assert_eq!(result.decision.intent, "general_reply");
+        assert_eq!(result.decision.reply_text, "Here is the answer.");
+    }
+
+    #[test]
+    fn session_agent_definition_system_prompt_requires_fixed_json_contract() {
+        let definition = session_agent_definition();
+
+        assert!(definition.system_prompt.contains("Respond with valid JSON only"));
+        assert!(definition.system_prompt.contains("intent"));
+        assert!(definition.system_prompt.contains("action_type"));
+        assert!(definition.system_prompt.contains("reply_text"));
+        assert!(definition.system_prompt.contains("suggested_run_type"));
+        assert!(definition.system_prompt.contains("direct_reply"));
+        assert!(definition.system_prompt.contains("request_clarification"));
+        assert!(definition.system_prompt.contains("create_run"));
     }
 }

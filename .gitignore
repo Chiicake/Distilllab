@@ -1,4 +1,5 @@
 /local/
+/docs/
 .idea
 *.db
 # Added by cargo

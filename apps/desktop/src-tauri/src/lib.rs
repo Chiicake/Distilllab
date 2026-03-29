@@ -125,6 +125,18 @@ fn format_provider_test_text(
     .join("\n")
 }
 
+#[cfg(test)]
+fn format_llm_debug_comparison_text(raw_output: &str, decision: &SessionAgentDecision) -> String {
+    [
+        "Raw LLM Output".to_string(),
+        raw_output.to_string(),
+        String::new(),
+        "Parsed Decision".to_string(),
+        format_session_agent_decision_text(decision),
+    ]
+    .join("\n")
+}
+
 fn load_or_create_app_config() -> Result<(std::path::PathBuf, AppConfig), String> {
     let config_path = default_app_config_path().map_err(|e| e.to_string())?;
 
@@ -424,27 +436,6 @@ fn list_assets() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn decide_llm_session_message_using_current_config(user_message: String) -> Result<String, String> {
-    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
-    let (config_path, config) = load_or_create_app_config()?;
-    let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
-
-    let request = LlmSessionDebugRequest {
-        provider_kind: resolved.provider_type.replace('-', "_"),
-        base_url: resolved.base_url,
-        model: resolved.model_id,
-        api_key: resolved.api_key,
-        user_message,
-    };
-
-    let decision = runtime::decide_llm_session_message_with_config(&runtime, request)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(format_session_agent_decision_text(&decision))
-}
-
-#[tauri::command]
 async fn test_current_provider_command() -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
     let (config_path, config) = load_or_create_app_config()?;
@@ -636,7 +627,6 @@ pub fn run() {
             list_projects,
             build_demo_assets,
             list_assets,
-            decide_llm_session_message_using_current_config,
             test_current_provider_command,
             send_session_message_command,
             list_session_messages_command,
@@ -655,8 +645,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_app_config_text, format_provider_test_text, format_session_agent_decision_text,
-        format_session_messages_text,
+        format_app_config_text, format_llm_debug_comparison_text, format_provider_test_text,
+        format_session_agent_decision_text, format_session_messages_text,
     };
     use agent::{SessionActionType, SessionAgentDecision};
     use schema::{SessionMessage, SessionMessageRole};
@@ -773,5 +763,26 @@ mod tests {
         assert!(text.contains("model: gpt-5.4"));
         assert!(text.contains("status: ok"));
         assert!(text.contains("message: connected successfully"));
+    }
+
+    #[test]
+    fn formats_llm_debug_comparison_text_with_raw_and_parsed_sections() {
+        let text = format_llm_debug_comparison_text(
+            "{\"intent\":\"import_material\"}",
+            &SessionAgentDecision {
+                intent: "import_material".to_string(),
+                primary_object_type: None,
+                primary_object_id: None,
+                action_type: SessionActionType::CreateRun,
+                reply_text: "I will start an import and distill run.".to_string(),
+                suggested_run_type: Some("import_and_distill".to_string()),
+                session_summary: Some("Preparing to import material".to_string()),
+            },
+        );
+
+        assert!(text.contains("Raw LLM Output"));
+        assert!(text.contains("Parsed Decision"));
+        assert!(text.contains("import_material"));
+        assert!(text.contains("import_and_distill"));
     }
 }
