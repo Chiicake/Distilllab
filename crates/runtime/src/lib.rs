@@ -14,7 +14,9 @@ pub use config::{
 };
 pub use contracts::{
     DistillRunStepPreview, LlmSessionDebugRequest, RunHandoffPreview, SessionIntakePreview,
-    SessionMessageRequest, SourceMaterializationInput, SourceMaterializationResult,
+    SessionMessageRequest, MaterializeDedupePolicy, MaterializeFailure, MaterializeSkip,
+    MaterializeSourcesInput, MaterializeSourcesResult, MaterializedSourceRef,
+    SourceOriginKind,
 };
 pub use flows::build_import_and_distill_handoff_preview;
 pub use services::{

@@ -6,4 +6,7 @@ pub use session::{LlmSessionDebugRequest, SessionMessageRequest};
 pub use session_intake::{
     DistillRunStepPreview, RunHandoffPreview, RunInput, SessionIntakePreview,
 };
-pub use source_materialization::{SourceMaterializationInput, SourceMaterializationResult};
+pub use source_materialization::{
+    MaterializeDedupePolicy, MaterializeFailure, MaterializeSkip, MaterializeSourcesInput,
+    MaterializeSourcesResult, MaterializedSourceRef, SourceOriginKind,
+};

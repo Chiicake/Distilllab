@@ -1,6 +1,7 @@
-use schema::{AttachmentRef, SessionIntake};
+use schema::AttachmentRef;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunInput {
     pub session_id: String,
     pub trigger_message: String,
@@ -33,7 +34,8 @@ pub struct SessionIntakePreview {
 
 #[cfg(test)]
 mod tests {
-    use super::{AttachmentRef, RunInput, SessionIntake};
+    use super::{AttachmentRef, RunInput};
+    use schema::SessionIntake;
 
     #[test]
     fn session_intake_and_run_input_model_different_layers_of_input() {
