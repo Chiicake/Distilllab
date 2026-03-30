@@ -14,7 +14,7 @@ use memory::session_message_store::{
 use memory::session_store::{
     get_session_by_id, insert_session, list_sessions as memory_list_sessions, update_session,
 };
-use schema::{Session, SessionMessage, SessionMessageRole, SessionStatus};
+use schema::{Session, SessionIntake, SessionMessage, SessionMessageRole, SessionStatus};
 use uuid::Uuid;
 
 type RuntimeError = Box<dyn std::error::Error + Send + Sync>;
@@ -82,7 +82,13 @@ async fn decide_llm_session_message_with_provider_config(
     let input = SessionAgentInput {
         session,
         recent_messages: vec![],
-        user_message: user_message.to_string(),
+        intake: SessionIntake {
+            session_id: "session-llm-demo".to_string(),
+            user_message: user_message.to_string(),
+            attachments: vec![],
+            current_object_type: None,
+            current_object_id: None,
+        },
     };
 
     let session_agent = LlmSessionAgent::new(config);
@@ -120,7 +126,19 @@ async fn send_session_message_with_optional_provider_config(
     let input = SessionAgentInput {
         session: session.clone(),
         recent_messages,
-        user_message: user_message.to_string(),
+        intake: SessionIntake {
+            session_id: session.id.clone(),
+            user_message: user_message.to_string(),
+            attachments: vec![],
+            current_object_type: match session.current_object_type.as_str() {
+                "none" => None,
+                other => Some(other.to_string()),
+            },
+            current_object_id: match session.current_object_id.as_str() {
+                "none" => None,
+                other => Some(other.to_string()),
+            },
+        },
     };
 
     let decision = if let Some(config) = provider_config {
@@ -195,7 +213,13 @@ pub async fn decide_demo_session_message(
     let input = SessionAgentInput {
         session,
         recent_messages: vec![],
-        user_message: user_message.to_string(),
+        intake: SessionIntake {
+            session_id: "session-demo".to_string(),
+            user_message: user_message.to_string(),
+            attachments: vec![],
+            current_object_type: None,
+            current_object_id: None,
+        },
     };
 
     let session_agent = BasicSessionAgent;
@@ -285,7 +309,13 @@ pub async fn preview_session_intake(
     let input = SessionAgentInput {
         session,
         recent_messages,
-        user_message: user_message.to_string(),
+        intake: SessionIntake {
+            session_id: session_id.to_string(),
+            user_message: user_message.to_string(),
+            attachments: vec![],
+            current_object_type: None,
+            current_object_id: None,
+        },
     };
 
     let session_agent = BasicSessionAgent;

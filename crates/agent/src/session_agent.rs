@@ -4,7 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use serde::Deserialize;
-use schema::{Session, SessionMessage, SessionMessageRole};
+use schema::{AttachmentRef, Session, SessionIntake, SessionMessage, SessionMessageRole};
 
 pub fn session_agent_definition() -> AgentDefinition {
     AgentDefinition {
@@ -94,7 +94,7 @@ impl SessionIntent {
 pub struct SessionAgentInput {
     pub session: Session,
     pub recent_messages: Vec<SessionMessage>,
-    pub user_message: String,
+    pub intake: SessionIntake,
 }
 
 #[derive(Debug, Clone)]
@@ -119,7 +119,7 @@ pub struct BasicSessionAgent;
 #[async_trait]
 impl SessionAgent for BasicSessionAgent {
     async fn decide(&self, input: SessionAgentInput) -> Result<SessionAgentDecision, AgentError> {
-        let normalized_message = input.user_message.to_lowercase();
+        let normalized_message = input.intake.user_message.to_lowercase();
         let primary_object_type = match input.session.current_object_type.as_str() {
             "none" => None,
             other => Some(other.to_string()),
@@ -264,7 +264,7 @@ impl LlmSessionAgent {
 
         messages.push(OpenAiCompatibleChatMessage {
             role: "user".to_string(),
-            content: input.user_message.clone(),
+                content: input.intake.user_message.clone(),
         });
 
         messages
@@ -407,7 +407,10 @@ mod tests {
         SessionAgentDecision, SessionAgentInput, SessionIntent, session_agent_definition,
     };
     use crate::LlmProviderConfig;
-    use schema::{Session, SessionMessage, SessionMessageRole, SessionStatus};
+    use schema::{
+        AttachmentRef, Session, SessionIntake, SessionMessage, SessionMessageRole,
+        SessionStatus,
+    };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -473,12 +476,18 @@ mod tests {
         let input = SessionAgentInput {
             session,
             recent_messages,
-            user_message: "Import these notes".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Import these notes".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         assert_eq!(input.session.id, "session-1");
         assert_eq!(input.recent_messages.len(), 1);
-        assert_eq!(input.user_message, "Import these notes");
+        assert_eq!(input.intake.user_message, "Import these notes");
     }
 
     #[tokio::test]
@@ -502,7 +511,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Hello Distilllab".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Hello Distilllab".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         let decision = agent
@@ -540,7 +555,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Please distill these work notes into Distilllab".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Please distill these work notes into Distilllab".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         let decision = agent
@@ -578,7 +599,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Here are my notes, distill them".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Here are my notes, distill them".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         let decision = agent
@@ -613,7 +640,21 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Use these files to create a distillation run".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Use these files to create a distillation run".to_string(),
+                attachments: vec![AttachmentRef {
+                    attachment_id: "attachment-1".to_string(),
+                    kind: "file_path".to_string(),
+                    name: "requirements.md".to_string(),
+                    mime_type: "text/markdown".to_string(),
+                    path_or_locator: "/tmp/requirements.md".to_string(),
+                    size: 256,
+                    metadata_json: "{}".to_string(),
+                }],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         let decision = agent
@@ -648,7 +689,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Please deepen this topic and ask follow-up questions".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Please deepen this topic and ask follow-up questions".to_string(),
+                attachments: vec![],
+                current_object_type: Some("asset".to_string()),
+                current_object_id: Some("asset-1".to_string()),
+            },
         };
 
         let decision = agent
@@ -684,7 +731,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Write a summary article from these materials".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Write a summary article from these materials".to_string(),
+                attachments: vec![],
+                current_object_type: Some("project".to_string()),
+                current_object_id: Some("project-1".to_string()),
+            },
         };
 
         let decision = agent
@@ -725,7 +778,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Hello from the user".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Hello from the user".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         let messages = agent.build_chat_messages(&input);
@@ -789,7 +848,13 @@ mod tests {
                     created_at: "2026-03-28T00:00:01Z".to_string(),
                 },
             ],
-            user_message: "Current user follow-up".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Current user follow-up".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         let messages = agent.build_chat_messages(&input);
@@ -840,7 +905,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Please distill these work notes".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Please distill these work notes".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         let messages = agent.build_chat_messages(&input);
@@ -900,7 +971,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Summarize the current source".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Summarize the current source".to_string(),
+                attachments: vec![],
+                current_object_type: Some("source".to_string()),
+                current_object_id: Some("source-1".to_string()),
+            },
         };
 
         let messages = agent.build_chat_messages(&input);
@@ -977,7 +1054,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Say hello".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Say hello".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         let decision = agent.decide(input).await.expect("llm session agent should decide");
@@ -1054,7 +1137,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Distill these work notes".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Distill these work notes".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         let decision = agent.decide(input).await.expect("llm session agent should decide");
@@ -1127,7 +1216,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Hello".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Hello".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         let result = agent
@@ -1207,7 +1302,13 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Please distill these work items".to_string(),
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Please distill these work items".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         };
 
         let decision = agent.decide(input).await.expect("llm session agent should decide");
