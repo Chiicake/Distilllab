@@ -294,6 +294,27 @@ pub async fn preview_session_intake(
     runtime: &AppRuntime,
     intake: SessionIntake,
 ) -> Result<SessionIntakePreview, RuntimeError> {
+    preview_session_intake_with_agent(runtime, intake, PreviewAgent::Basic).await
+}
+
+pub async fn preview_session_intake_with_config(
+    runtime: &AppRuntime,
+    intake: SessionIntake,
+    config: LlmProviderConfig,
+) -> Result<SessionIntakePreview, RuntimeError> {
+    preview_session_intake_with_agent(runtime, intake, PreviewAgent::Llm(config)).await
+}
+
+enum PreviewAgent {
+    Basic,
+    Llm(LlmProviderConfig),
+}
+
+async fn preview_session_intake_with_agent(
+    runtime: &AppRuntime,
+    intake: SessionIntake,
+    preview_agent: PreviewAgent,
+) -> Result<SessionIntakePreview, RuntimeError> {
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
 
@@ -311,16 +332,37 @@ pub async fn preview_session_intake(
         intake,
     };
 
-    let session_agent = BasicSessionAgent;
-    let decision = session_agent.decide(input).await?;
+    let attachment_count = input.intake.attachments.len();
+
+    let decision = match preview_agent {
+        PreviewAgent::Basic => {
+            let session_agent = BasicSessionAgent;
+            session_agent.decide(input).await?
+        }
+        PreviewAgent::Llm(config) => {
+            let session_agent = LlmSessionAgent::new(config);
+            session_agent.decide(input).await?
+        }
+    };
 
     let run_handoff_preview = if decision.intent == SessionIntent::DistillMaterial
         && decision.suggested_run_type.as_deref() == Some("import_and_distill")
     {
-        Some(build_import_and_distill_handoff_preview(
+        let mut preview = build_import_and_distill_handoff_preview(
             decision.primary_object_type.clone().or(Some("material".to_string())),
             decision.primary_object_id.clone(),
-        ))
+        );
+
+        if attachment_count > 0 {
+            let count = attachment_count;
+            preview.summary = format!(
+                "Previewing the import-and-distill workflow for this work material with {} attachment{}.",
+                count,
+                if count == 1 { "" } else { "s" }
+            );
+        }
+
+        Some(preview)
     } else {
         None
     };
@@ -380,10 +422,11 @@ mod tests {
     use super::{
         LlmSessionDebugRequest, SessionMessageRequest, create_demo_session,
         decide_demo_session_message, decide_llm_session_message,
-        decide_llm_session_message_with_config, preview_session_intake, send_session_message,
+        decide_llm_session_message_with_config, preview_session_intake,
+        preview_session_intake_with_config, send_session_message,
     };
     use crate::app::AppRuntime;
-    use agent::SessionIntent;
+    use agent::{LlmProviderConfig, SessionIntent};
     use schema::SessionIntake;
     use memory::db::open_database;
     use memory::session_message_store::list_session_messages_for_session;
@@ -876,5 +919,120 @@ mod tests {
         assert_eq!(handoff.planned_steps[0].step_key, "materialize_sources");
         assert_eq!(handoff.planned_steps[1].step_key, "chunk_sources");
         assert_eq!(handoff.planned_steps[2].step_key, "extract_work_items");
+    }
+
+    #[tokio::test]
+    async fn preview_session_intake_mentions_attachment_count_in_handoff_summary() {
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-intake-preview-attachments-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let preview = preview_session_intake(
+            &runtime,
+            SessionIntake {
+                session_id: session.id.clone(),
+                user_message: "请帮我提炼一下".to_string(),
+                attachments: vec![schema::AttachmentRef {
+                    attachment_id: "attachment-1".to_string(),
+                    kind: "file_path".to_string(),
+                    name: "requirements.md".to_string(),
+                    mime_type: "text/markdown".to_string(),
+                    path_or_locator: "/tmp/requirements.md".to_string(),
+                    size: 256,
+                    metadata_json: "{}".to_string(),
+                }],
+                current_object_type: None,
+                current_object_id: None,
+            },
+        )
+        .await
+        .expect("runtime should preview session intake");
+
+        let handoff = preview
+            .run_handoff_preview
+            .expect("distill intake should produce a handoff preview");
+
+        assert!(handoff.summary.contains("1 attachment"));
+    }
+
+    #[tokio::test]
+    async fn preview_session_intake_with_config_uses_llm_backed_decision() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("server should accept connection");
+            let mut buffer = [0_u8; 8192];
+            let _ = stream
+                .read(&mut buffer)
+                .await
+                .expect("server should read request");
+
+            let response_body = r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"intent\":\"distill_material\",\"action_type\":\"create_run\",\"reply_text\":\"I will start a distillation workflow for this work material.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":\"import_and_distill\",\"session_summary\":\"Preparing to distill work material\",\"tool_call_key\":null}"
+                        }
+                    }
+                ]
+            }"#;
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("server should write response");
+        });
+
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-intake-preview-llm-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let preview = preview_session_intake_with_config(
+            &runtime,
+            SessionIntake {
+                session_id: session.id.clone(),
+                user_message: "Please distill these work notes into Distilllab".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
+            LlmProviderConfig {
+                provider_kind: "openai_compatible".to_string(),
+                base_url: format!("http://{}", address),
+                model: "gpt-test".to_string(),
+                api_key: None,
+            },
+        )
+        .await
+        .expect("runtime should preview intake with llm decision");
+
+        assert_eq!(preview.decision.intent, SessionIntent::DistillMaterial);
+        assert_eq!(preview.decision.action_type, agent::SessionActionType::CreateRun);
+        assert_eq!(
+            preview
+                .run_handoff_preview
+                .expect("preview should include handoff")
+                .run_type,
+            "import_and_distill"
+        );
     }
 }

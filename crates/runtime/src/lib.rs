@@ -22,5 +22,6 @@ pub use services::{
     create_demo_source, decide_llm_session_message_with_config, extract_demo_work_items,
     group_demo_project, list_assets, list_chunks_for_source, list_projects,
     list_session_messages, list_sessions, list_sources, list_work_items, list_runs,
-    preview_session_intake, send_session_message, send_session_message_with_config,
+    preview_session_intake, preview_session_intake_with_config, send_session_message,
+    send_session_message_with_config,
 };

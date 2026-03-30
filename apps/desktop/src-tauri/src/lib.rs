@@ -1,4 +1,4 @@
-use agent::{SessionActionType, SessionAgentDecision};
+use agent::{LlmProviderConfig, SessionActionType, SessionAgentDecision};
 use runtime::{
     AppConfig, AppRuntime, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
     ProviderOptions, SessionIntakePreview, SessionMessageRequest, default_app_config_path,
@@ -527,6 +527,8 @@ async fn preview_session_intake_command(form: SessionMessageForm) -> Result<Stri
     let storage_root = config_path
         .parent()
         .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?;
+    let (_, config) = load_or_create_app_config()?;
+    let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
 
     let attachments = form
         .attachment_paths
@@ -534,7 +536,7 @@ async fn preview_session_intake_command(form: SessionMessageForm) -> Result<Stri
         .map(|path| store_attachment_copy(storage_root, &form.session_id, path).map_err(|e| e.to_string()))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let preview = runtime::preview_session_intake(
+    let preview = runtime::preview_session_intake_with_config(
         &runtime,
         SessionIntake {
             session_id: form.session_id,
@@ -542,6 +544,12 @@ async fn preview_session_intake_command(form: SessionMessageForm) -> Result<Stri
             attachments,
             current_object_type: None,
             current_object_id: None,
+        },
+        LlmProviderConfig {
+            provider_kind: resolved.provider_type.replace('-', "_"),
+            base_url: resolved.base_url,
+            model: resolved.model_id,
+            api_key: resolved.api_key,
         },
     )
         .await

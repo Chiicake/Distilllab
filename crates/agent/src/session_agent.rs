@@ -138,6 +138,10 @@ impl SessionAgent for BasicSessionAgent {
             || normalized_message.contains("distill them")
             || normalized_message.contains("distillation run")
             || (normalized_message.contains("distill") && normalized_message.contains("work notes"))
+            || (!input.intake.attachments.is_empty()
+                && (normalized_message.contains("distill")
+                    || normalized_message.contains("提炼")
+                    || normalized_message.contains("提取")))
         {
             return Ok(SessionAgentDecision {
                 intent: SessionIntent::DistillMaterial,
@@ -665,6 +669,54 @@ mod tests {
         assert_eq!(decision.intent, SessionIntent::DistillMaterial);
         assert_eq!(decision.action_type, SessionActionType::CreateRun);
         assert_eq!(decision.tool_call_key, None);
+        assert_eq!(decision.suggested_run_type.as_deref(), Some("import_and_distill"));
+    }
+
+    #[tokio::test]
+    async fn basic_session_agent_treats_attachment_only_input_as_distill_material_intake() {
+        let agent = BasicSessionAgent;
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Attachment Intake Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing attachment-driven intake routing".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "请帮我提炼一下".to_string(),
+                attachments: vec![AttachmentRef {
+                    attachment_id: "attachment-1".to_string(),
+                    kind: "file_path".to_string(),
+                    name: "requirements.md".to_string(),
+                    mime_type: "text/markdown".to_string(),
+                    path_or_locator: "/tmp/requirements.md".to_string(),
+                    size: 256,
+                    metadata_json: "{}".to_string(),
+                }],
+                current_object_type: None,
+                current_object_id: None,
+            },
+        };
+
+        let decision = agent
+            .decide(input)
+            .await
+            .expect("basic session agent should decide");
+
+        assert_eq!(decision.intent, SessionIntent::DistillMaterial);
+        assert_eq!(decision.action_type, SessionActionType::CreateRun);
         assert_eq!(decision.suggested_run_type.as_deref(), Some("import_and_distill"));
     }
 
