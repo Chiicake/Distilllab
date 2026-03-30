@@ -15,7 +15,7 @@ pub fn session_agent_definition() -> AgentDefinition {
         description: "Distilllab homepage entry agent that understands user intent and decides the next high-level action.".to_string(),
         responsibility_summary: "Reads the current session and recent timeline, identifies user intent and primary object, then decides whether to reply directly, ask for clarification, or create a run. It does not execute the workflow itself.".to_string(),
         status: "active".to_string(),
-        system_prompt: "You are the Session Agent for Distilllab. Understand the current session state, identify user intent, and decide the next high-level action. Respond with valid JSON only. Do not include markdown fences or extra explanation. The JSON object must contain these fields: intent, action_type, reply_text, primary_object_type, primary_object_id, suggested_run_type, session_summary, tool_call_key. Intent must be one of: general_reply, import_material, deepen_understanding, compose_output. action_type must be one of: direct_reply, request_clarification, tool_call, create_run. Use tool_call_key only when action_type is tool_call. Use suggested_run_type only when action_type is create_run. Use null for optional fields when unknown.".to_string(),
+        system_prompt: "You are the Session Agent for Distilllab. Distilllab's primary goal is to distill work content and working process materials into reusable knowledge objects, not to act as a generic note organizer. Understand the current session state, identify user intent, and decide the next high-level action. Respond with valid JSON only. Do not include markdown fences or extra explanation. The JSON object must contain these fields: intent, action_type, reply_text, primary_object_type, primary_object_id, suggested_run_type, session_summary, tool_call_key. Intent must be one of: general_reply, distill_material, deepen_understanding, compose_output. action_type must be one of: direct_reply, request_clarification, tool_call, create_run. If intent is distill_material, action_type must be create_run or request_clarification, and create_run should normally use suggested_run_type import_and_distill. Use tool_call_key only when action_type is tool_call. Use suggested_run_type only when action_type is create_run. Use null for optional fields when unknown.".to_string(),
         default_model_profile: "reasoning_default".to_string(),
         allowed_tool_keys: vec![
             "list_sources".to_string(),
@@ -64,7 +64,7 @@ impl SessionActionType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionIntent {
     GeneralReply,
-    ImportMaterial,
+    DistillMaterial,
     DeepenUnderstanding,
     ComposeOutput,
 }
@@ -73,7 +73,7 @@ impl SessionIntent {
     pub fn as_str(&self) -> &'static str {
         match self {
             SessionIntent::GeneralReply => "general_reply",
-            SessionIntent::ImportMaterial => "import_material",
+            SessionIntent::DistillMaterial => "distill_material",
             SessionIntent::DeepenUnderstanding => "deepen_understanding",
             SessionIntent::ComposeOutput => "compose_output",
         }
@@ -82,7 +82,7 @@ impl SessionIntent {
     pub fn from_str(value: &str) -> Option<Self> {
         match value {
             "general_reply" | "llm_direct_reply" => Some(SessionIntent::GeneralReply),
-            "import_material" => Some(SessionIntent::ImportMaterial),
+            "distill_material" => Some(SessionIntent::DistillMaterial),
             "deepen_understanding" => Some(SessionIntent::DeepenUnderstanding),
             "compose_output" => Some(SessionIntent::ComposeOutput),
             _ => None,
@@ -137,16 +137,17 @@ impl SessionAgent for BasicSessionAgent {
             || normalized_message.contains("these files")
             || normalized_message.contains("distill them")
             || normalized_message.contains("distillation run")
+            || (normalized_message.contains("distill") && normalized_message.contains("work notes"))
         {
             return Ok(SessionAgentDecision {
-                intent: SessionIntent::ImportMaterial,
+                intent: SessionIntent::DistillMaterial,
                 primary_object_type,
                 primary_object_id,
                 action_type: SessionActionType::CreateRun,
                 tool_call_key: None,
-                reply_text: "I will start an import and distill run.".to_string(),
+                reply_text: "I will start a distill run for this work material.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
-                session_summary: Some("Preparing to import material".to_string()),
+                session_summary: Some("Preparing to distill work material".to_string()),
             });
         }
 
@@ -273,11 +274,11 @@ impl LlmSessionAgent {
         vec![
             OpenAiCompatibleChatMessage {
                 role: "user".to_string(),
-                content: "Please import these notes into Distilllab".to_string(),
+                content: "Please distill these work notes into Distilllab".to_string(),
             },
             OpenAiCompatibleChatMessage {
                 role: "assistant".to_string(),
-                content: r#"{"intent":"import_material","action_type":"create_run","reply_text":"I will start an import and distill run.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":"import_and_distill","session_summary":"Preparing to import material","tool_call_key":null}"#.to_string(),
+                content: r#"{"intent":"distill_material","action_type":"create_run","reply_text":"I will start a distill run for this work material.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":"import_and_distill","session_summary":"Preparing to distill work material","tool_call_key":null}"#.to_string(),
             },
             OpenAiCompatibleChatMessage {
                 role: "user".to_string(),
@@ -327,7 +328,7 @@ impl LlmSessionAgent {
         let parsed = serde_json::from_str::<StructuredSessionAgentDecision>(reply_text).ok()?;
         let action_type = Self::parse_action_type(parsed.action_type.as_str())?;
 
-        Some(SessionAgentDecision {
+        let mut decision = SessionAgentDecision {
             intent: SessionIntent::from_str(parsed.intent.as_str())?,
             primary_object_type: parsed.primary_object_type,
             primary_object_id: parsed.primary_object_id,
@@ -336,7 +337,17 @@ impl LlmSessionAgent {
             reply_text: parsed.reply_text,
             suggested_run_type: parsed.suggested_run_type,
             session_summary: parsed.session_summary,
-        })
+        };
+
+        if decision.intent == SessionIntent::DistillMaterial
+            && decision.action_type == SessionActionType::DirectReply
+        {
+            decision.action_type = SessionActionType::CreateRun;
+            decision.suggested_run_type = Some("import_and_distill".to_string());
+            decision.tool_call_key = None;
+        }
+
+        Some(decision)
     }
 
     fn fallback_direct_reply_decision(reply_text: &str) -> SessionAgentDecision {
@@ -417,14 +428,14 @@ mod tests {
     #[test]
     fn session_agent_decision_uses_structured_action_type() {
         let decision = SessionAgentDecision {
-            intent: SessionIntent::ImportMaterial,
+            intent: SessionIntent::DistillMaterial,
             primary_object_type: Some("source".to_string()),
             primary_object_id: None,
             action_type: SessionActionType::CreateRun,
             tool_call_key: None,
-            reply_text: "I will start an import and distill run.".to_string(),
+            reply_text: "I will start a distill run for this work material.".to_string(),
             suggested_run_type: Some("import_and_distill".to_string()),
-            session_summary: Some("Preparing to import material".to_string()),
+            session_summary: Some("Preparing to distill work material".to_string()),
         };
 
         assert_eq!(decision.action_type, SessionActionType::CreateRun);
@@ -529,7 +540,7 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Please import these notes into Distilllab".to_string(),
+            user_message: "Please distill these work notes into Distilllab".to_string(),
         };
 
         let decision = agent
@@ -538,7 +549,7 @@ mod tests {
             .expect("basic session agent should decide");
 
         assert_eq!(decision.action_type, SessionActionType::CreateRun);
-        assert_eq!(decision.intent, SessionIntent::ImportMaterial);
+        assert_eq!(decision.intent, SessionIntent::DistillMaterial);
         assert_eq!(decision.tool_call_key, None);
         assert_eq!(
             decision.suggested_run_type,
@@ -547,7 +558,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn basic_session_agent_treats_here_are_my_notes_as_import_material_intake() {
+    async fn basic_session_agent_treats_here_are_my_notes_as_distill_material_intake() {
         let agent = BasicSessionAgent;
 
         let input = SessionAgentInput {
@@ -575,14 +586,14 @@ mod tests {
             .await
             .expect("basic session agent should decide");
 
-        assert_eq!(decision.intent, SessionIntent::ImportMaterial);
+        assert_eq!(decision.intent, SessionIntent::DistillMaterial);
         assert_eq!(decision.action_type, SessionActionType::CreateRun);
         assert_eq!(decision.tool_call_key, None);
         assert_eq!(decision.suggested_run_type.as_deref(), Some("import_and_distill"));
     }
 
     #[tokio::test]
-    async fn basic_session_agent_treats_file_based_request_as_import_material_intake() {
+    async fn basic_session_agent_treats_file_based_request_as_distill_material_intake() {
         let agent = BasicSessionAgent;
 
         let input = SessionAgentInput {
@@ -610,7 +621,7 @@ mod tests {
             .await
             .expect("basic session agent should decide");
 
-        assert_eq!(decision.intent, SessionIntent::ImportMaterial);
+        assert_eq!(decision.intent, SessionIntent::DistillMaterial);
         assert_eq!(decision.action_type, SessionActionType::CreateRun);
         assert_eq!(decision.tool_call_key, None);
         assert_eq!(decision.suggested_run_type.as_deref(), Some("import_and_distill"));
@@ -829,14 +840,14 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Please import these notes".to_string(),
+            user_message: "Please distill these work notes".to_string(),
         };
 
         let messages = agent.build_chat_messages(&input);
 
         assert!(messages.len() >= 4);
         assert_eq!(messages[1].role, "user");
-        assert!(messages[1].content.contains("import these notes"));
+        assert!(messages[1].content.contains("distill these work notes"));
         assert_eq!(messages[2].role, "assistant");
         assert!(messages[2].content.contains("\"action_type\":\"create_run\""));
         assert!(messages[2].content.contains("\"suggested_run_type\":\"import_and_distill\""));
@@ -1001,7 +1012,7 @@ mod tests {
                     {
                         "message": {
                             "role": "assistant",
-                            "content": "{\"intent\":\"import_material\",\"action_type\":\"create_run\",\"reply_text\":\"I will start an import and distill run.\",\"suggested_run_type\":\"import_and_distill\",\"session_summary\":\"Preparing to import material\"}"
+                            "content": "{\"intent\":\"distill_material\",\"action_type\":\"create_run\",\"reply_text\":\"I will start a distill run for this work material.\",\"suggested_run_type\":\"import_and_distill\",\"session_summary\":\"Preparing to distill work material\",\"tool_call_key\":null}"
                         }
                     }
                 ]
@@ -1043,15 +1054,15 @@ mod tests {
                 metadata_json: "{}".to_string(),
             },
             recent_messages: vec![],
-            user_message: "Import these notes".to_string(),
+            user_message: "Distill these work notes".to_string(),
         };
 
         let decision = agent.decide(input).await.expect("llm session agent should decide");
 
         assert_eq!(decision.action_type, SessionActionType::CreateRun);
-        assert_eq!(decision.intent, SessionIntent::ImportMaterial);
+        assert_eq!(decision.intent, SessionIntent::DistillMaterial);
         assert_eq!(decision.suggested_run_type.as_deref(), Some("import_and_distill"));
-        assert_eq!(decision.reply_text, "I will start an import and distill run.");
+        assert_eq!(decision.reply_text, "I will start a distill run for this work material.");
     }
 
     #[tokio::test]
@@ -1129,6 +1140,83 @@ mod tests {
         assert_eq!(result.decision.reply_text, "Here is the answer.");
     }
 
+    #[tokio::test]
+    async fn llm_session_agent_normalizes_distill_material_direct_reply_into_create_run() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("server should accept connection");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream
+                .read(&mut buffer)
+                .await
+                .expect("server should read request");
+
+            let response_body = r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"intent\":\"distill_material\",\"action_type\":\"direct_reply\",\"reply_text\":\"I extracted requirement points for you.\",\"primary_object_type\":\"material\",\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"User provided work content\",\"tool_call_key\":null}"
+                        }
+                    }
+                ]
+            }"#;
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("server should write response");
+        });
+
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: format!("http://{}", address),
+            model: "gpt-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Normalization Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing distill intent normalization".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            user_message: "Please distill these work items".to_string(),
+        };
+
+        let decision = agent.decide(input).await.expect("llm session agent should decide");
+
+        assert_eq!(decision.intent, SessionIntent::DistillMaterial);
+        assert_eq!(decision.action_type, SessionActionType::CreateRun);
+        assert_eq!(decision.suggested_run_type.as_deref(), Some("import_and_distill"));
+    }
+
     #[test]
     fn session_action_type_supports_tool_call_variant() {
         assert_eq!(SessionActionType::ToolCall.as_str(), "tool_call");
@@ -1142,7 +1230,7 @@ mod tests {
         assert!(definition.system_prompt.contains("intent"));
         assert!(definition.system_prompt.contains("Intent must be one of"));
         assert!(definition.system_prompt.contains("general_reply"));
-        assert!(definition.system_prompt.contains("import_material"));
+        assert!(definition.system_prompt.contains("distill_material"));
         assert!(definition.system_prompt.contains("deepen_understanding"));
         assert!(definition.system_prompt.contains("compose_output"));
         assert!(definition.system_prompt.contains("action_type"));

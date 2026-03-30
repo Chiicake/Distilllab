@@ -13,13 +13,14 @@ pub use config::{
     set_current_provider_model, upsert_provider_entry,
 };
 pub use contracts::{
-    LlmSessionDebugRequest, SessionMessageRequest, SourceMaterializationInput,
-    SourceMaterializationResult,
+    DistillRunStepPreview, LlmSessionDebugRequest, RunHandoffPreview, SessionIntakePreview,
+    SessionMessageRequest, SourceMaterializationInput, SourceMaterializationResult,
 };
+pub use flows::build_import_and_distill_handoff_preview;
 pub use services::{
     build_demo_assets, chunk_demo_source, create_demo_run, create_demo_session,
     create_demo_source, decide_llm_session_message_with_config, extract_demo_work_items,
     group_demo_project, list_assets, list_chunks_for_source, list_projects,
     list_session_messages, list_sessions, list_sources, list_work_items, list_runs,
-    send_session_message, send_session_message_with_config,
+    preview_session_intake, send_session_message, send_session_message_with_config,
 };

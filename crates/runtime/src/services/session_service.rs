@@ -1,8 +1,9 @@
 use crate::app::AppRuntime;
-use crate::contracts::{LlmSessionDebugRequest, SessionMessageRequest};
+use crate::contracts::{LlmSessionDebugRequest, SessionIntakePreview, SessionMessageRequest};
+use crate::flows::build_import_and_distill_handoff_preview;
 use agent::{
     BasicSessionAgent, LlmProviderConfig, LlmSessionAgent, SessionAgent, SessionAgentDecision,
-    SessionAgentInput,
+    SessionAgentInput, SessionIntent,
 };
 use chrono::Utc;
 use memory::db::open_database;
@@ -265,6 +266,48 @@ pub async fn send_session_message_with_config(
     .await
 }
 
+pub async fn preview_session_intake(
+    runtime: &AppRuntime,
+    session_id: &str,
+    user_message: &str,
+) -> Result<SessionIntakePreview, RuntimeError> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    let session = get_session_by_id(&conn, session_id)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("session not found: {session_id}"),
+        )
+    })?;
+
+    let recent_messages = list_session_messages_for_session(&conn, &session.id)?;
+    let input = SessionAgentInput {
+        session,
+        recent_messages,
+        user_message: user_message.to_string(),
+    };
+
+    let session_agent = BasicSessionAgent;
+    let decision = session_agent.decide(input).await?;
+
+    let run_handoff_preview = if decision.intent == SessionIntent::DistillMaterial
+        && decision.suggested_run_type.as_deref() == Some("import_and_distill")
+    {
+        Some(build_import_and_distill_handoff_preview(
+            decision.primary_object_type.clone().or(Some("material".to_string())),
+            decision.primary_object_id.clone(),
+        ))
+    } else {
+        None
+    };
+
+    Ok(SessionIntakePreview {
+        decision,
+        run_handoff_preview,
+    })
+}
+
 pub fn create_demo_session(runtime: &AppRuntime) -> Result<Session, RuntimeError> {
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
@@ -314,7 +357,7 @@ mod tests {
     use super::{
         LlmSessionDebugRequest, SessionMessageRequest, create_demo_session,
         decide_demo_session_message, decide_llm_session_message,
-        decide_llm_session_message_with_config, send_session_message,
+        decide_llm_session_message_with_config, preview_session_intake, send_session_message,
     };
     use crate::app::AppRuntime;
     use agent::SessionIntent;
@@ -775,5 +818,34 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].content, "Timeline hello");
         assert_eq!(messages[0].role.as_str(), "user");
+    }
+
+    #[tokio::test]
+    async fn preview_session_intake_returns_distill_run_handoff_with_planned_steps() {
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-intake-preview-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let preview = preview_session_intake(
+            &runtime,
+            &session.id,
+            "Please distill these work notes into Distilllab",
+        )
+        .await
+        .expect("runtime should preview session intake");
+
+        assert_eq!(preview.decision.intent, SessionIntent::DistillMaterial);
+
+        let handoff = preview
+            .run_handoff_preview
+            .expect("distill intake should produce a handoff preview");
+
+        assert_eq!(handoff.run_type, "import_and_distill");
+        assert_eq!(handoff.planned_steps.len(), 3);
+        assert_eq!(handoff.planned_steps[0].step_key, "materialize_sources");
+        assert_eq!(handoff.planned_steps[1].step_key, "chunk_sources");
+        assert_eq!(handoff.planned_steps[2].step_key, "extract_work_items");
     }
 }

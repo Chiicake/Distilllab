@@ -675,17 +675,17 @@ mod tests {
     #[test]
     fn formats_create_run_decision_with_debug_readability() {
         let text = format_session_agent_decision_text(&SessionAgentDecision {
-            intent: SessionIntent::ImportMaterial,
+            intent: SessionIntent::DistillMaterial,
             primary_object_type: Some("source".to_string()),
             primary_object_id: Some("source-1".to_string()),
             action_type: SessionActionType::CreateRun,
             tool_call_key: None,
-            reply_text: "I will start an import and distill run.".to_string(),
+            reply_text: "I will start a distill run for this work material.".to_string(),
             suggested_run_type: Some("import_and_distill".to_string()),
             session_summary: Some("Preparing to import material".to_string()),
         });
 
-        assert!(text.contains("intent: import_material"));
+        assert!(text.contains("intent: distill_material"));
         assert!(text.contains("action_type: create_run"));
         assert!(text.contains("primary_object_type: source"));
         assert!(text.contains("primary_object_id: source-1"));
@@ -771,14 +771,14 @@ mod tests {
     #[test]
     fn formats_llm_debug_comparison_text_with_raw_and_parsed_sections() {
         let text = format_llm_debug_comparison_text(
-            "{\"intent\":\"import_material\"}",
+            "{\"intent\":\"distill_material\"}",
             &SessionAgentDecision {
-                intent: SessionIntent::ImportMaterial,
+                intent: SessionIntent::DistillMaterial,
                 primary_object_type: None,
                 primary_object_id: None,
                 action_type: SessionActionType::CreateRun,
                 tool_call_key: None,
-                reply_text: "I will start an import and distill run.".to_string(),
+                reply_text: "I will start a distill run for this work material.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
                 session_summary: Some("Preparing to import material".to_string()),
             },
@@ -786,7 +786,7 @@ mod tests {
 
         assert!(text.contains("Raw LLM Output"));
         assert!(text.contains("Parsed Decision"));
-        assert!(text.contains("import_material"));
+        assert!(text.contains("distill_material"));
         assert!(text.contains("import_and_distill"));
     }
 }
