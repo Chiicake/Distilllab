@@ -184,6 +184,10 @@
             <label for="timeline-message-input">Session Message</label>
             <textarea id="timeline-message-input" placeholder="Send a real session message..."></textarea>
           </div>
+          <div class="field field-full">
+            <label for="timeline-attachments-input">Attachment Paths</label>
+            <textarea id="timeline-attachments-input" placeholder="Optional: one file path per line"></textarea>
+          </div>
         </div>
         <button id="timeline-create-session-button">Create and Use New Session</button>
         <button id="timeline-send-button">Send Session Message</button>
@@ -231,6 +235,7 @@
       const configResult = document.getElementById("config-result");
       const timelineSessionIdInput = document.getElementById("timeline-session-id-input");
       const timelineMessageInput = document.getElementById("timeline-message-input");
+      const timelineAttachmentsInput = document.getElementById("timeline-attachments-input");
       const timelineCreateSessionButton = document.getElementById("timeline-create-session-button");
       const timelineSendButton = document.getElementById("timeline-send-button");
       const timelineRefreshButton = document.getElementById("timeline-refresh-button");
@@ -524,24 +529,28 @@
       timelineSendButton.addEventListener("click", async () => {
         const sessionId = timelineSessionIdInput.value.trim();
         const userMessage = timelineMessageInput.value.trim();
+        const attachmentPaths = timelineAttachmentsInput.value
+          .split("\n")
+          .map((value) => value.trim())
+          .filter(Boolean);
 
         if (!sessionId || !userMessage) {
           timelineResult.textContent = "Error: session id and session message are required.";
           return;
         }
 
-        timelineResult.textContent = "Sending session message...";
+        timelineResult.textContent = "Previewing session intake...";
 
         try {
-          const response = await invokeTauri("send_session_message_command", {
+          const response = await invokeTauri("preview_session_intake_command", {
             form: {
               sessionId,
               userMessage,
+              attachmentPaths,
             },
           });
           result.textContent = response;
-          timelineMessageInput.value = "";
-          await refreshTimeline();
+          timelineResult.textContent = response;
         } catch (error) {
           timelineResult.textContent = `Error: ${error}`;
         }

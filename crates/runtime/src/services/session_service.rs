@@ -292,16 +292,15 @@ pub async fn send_session_message_with_config(
 
 pub async fn preview_session_intake(
     runtime: &AppRuntime,
-    session_id: &str,
-    user_message: &str,
+    intake: SessionIntake,
 ) -> Result<SessionIntakePreview, RuntimeError> {
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
 
-    let session = get_session_by_id(&conn, session_id)?.ok_or_else(|| {
+    let session = get_session_by_id(&conn, &intake.session_id)?.ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            format!("session not found: {session_id}"),
+            format!("session not found: {}", intake.session_id),
         )
     })?;
 
@@ -309,13 +308,7 @@ pub async fn preview_session_intake(
     let input = SessionAgentInput {
         session,
         recent_messages,
-        intake: SessionIntake {
-            session_id: session_id.to_string(),
-            user_message: user_message.to_string(),
-            attachments: vec![],
-            current_object_type: None,
-            current_object_id: None,
-        },
+        intake,
     };
 
     let session_agent = BasicSessionAgent;
@@ -391,6 +384,7 @@ mod tests {
     };
     use crate::app::AppRuntime;
     use agent::SessionIntent;
+    use schema::SessionIntake;
     use memory::db::open_database;
     use memory::session_message_store::list_session_messages_for_session;
     use memory::session_store::get_session_by_id;
@@ -860,8 +854,13 @@ mod tests {
 
         let preview = preview_session_intake(
             &runtime,
-            &session.id,
-            "Please distill these work notes into Distilllab",
+            SessionIntake {
+                session_id: session.id.clone(),
+                user_message: "Please distill these work notes into Distilllab".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
         )
         .await
         .expect("runtime should preview session intake");

@@ -1,11 +1,12 @@
 use agent::{SessionActionType, SessionAgentDecision};
 use runtime::{
     AppConfig, AppRuntime, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
-    ProviderOptions, SessionMessageRequest, default_app_config_path,
+    ProviderOptions, SessionIntakePreview, SessionMessageRequest, default_app_config_path,
     delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
     resolve_current_provider_model, set_current_provider_model, upsert_provider_entry,
 };
-use schema::SessionMessage;
+use runtime::flows::attachment_storage::store_attachment_copy;
+use schema::{SessionIntake, SessionMessage};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +31,7 @@ struct ImportProvidersForm {
 struct SessionMessageForm {
     session_id: String,
     user_message: String,
+    attachment_paths: Vec<String>,
 }
 
 fn format_action_type(action_type: &SessionActionType) -> &'static str {
@@ -71,6 +73,35 @@ fn format_session_agent_decision_text(decision: &SessionAgentDecision) -> String
         ),
     ]
     .join("\n")
+}
+
+fn format_intake_preview_text(preview: &SessionIntakePreview) -> String {
+    let mut sections = vec![
+        "SessionAgent Decision".to_string(),
+        format_session_agent_decision_text(&preview.decision),
+    ];
+
+    if let Some(handoff) = &preview.run_handoff_preview {
+        sections.push(String::new());
+        sections.push("Run Handoff Preview".to_string());
+        sections.push(format!("run_type: {}", handoff.run_type));
+        sections.push(format!(
+            "primary_object_type: {}",
+            handoff.primary_object_type.as_deref().unwrap_or("none")
+        ));
+        sections.push(format!(
+            "primary_object_id: {}",
+            handoff.primary_object_id.as_deref().unwrap_or("none")
+        ));
+        sections.push(format!("summary: {}", handoff.summary));
+        sections.push("planned_steps:".to_string());
+        for step in &handoff.planned_steps {
+            sections.push(format!("- {}", step.step_key));
+            sections.push(format!("  {}", step.summary));
+        }
+    }
+
+    sections.join("\n")
 }
 
 fn format_session_messages_text(messages: &[SessionMessage]) -> String {
@@ -490,6 +521,36 @@ async fn send_session_message_command(form: SessionMessageForm) -> Result<String
 }
 
 #[tauri::command]
+async fn preview_session_intake_command(form: SessionMessageForm) -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let config_path = default_app_config_path().map_err(|e| e.to_string())?;
+    let storage_root = config_path
+        .parent()
+        .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?;
+
+    let attachments = form
+        .attachment_paths
+        .iter()
+        .map(|path| store_attachment_copy(storage_root, &form.session_id, path).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let preview = runtime::preview_session_intake(
+        &runtime,
+        SessionIntake {
+            session_id: form.session_id,
+            user_message: form.user_message,
+            attachments,
+            current_object_type: None,
+            current_object_id: None,
+        },
+    )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(format_intake_preview_text(&preview))
+}
+
+#[tauri::command]
 fn load_llm_config_command() -> Result<String, String> {
     let (_, config) = load_or_create_app_config()?;
     let config_json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
@@ -637,7 +698,8 @@ pub fn run() {
             import_opencode_providers_command,
             create_provider_command,
             delete_provider_command,
-            set_current_provider_model_command
+            set_current_provider_model_command,
+            preview_session_intake_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -646,10 +708,11 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_app_config_text, format_llm_debug_comparison_text, format_provider_test_text,
-        format_session_agent_decision_text, format_session_messages_text,
+        format_app_config_text, format_intake_preview_text, format_llm_debug_comparison_text,
+        format_provider_test_text, format_session_agent_decision_text, format_session_messages_text,
     };
     use agent::{SessionActionType, SessionAgentDecision, SessionIntent};
+    use runtime::{DistillRunStepPreview, RunHandoffPreview, SessionIntakePreview};
     use schema::{SessionMessage, SessionMessageRole};
 
     #[test]
@@ -788,5 +851,72 @@ mod tests {
         assert!(text.contains("Parsed Decision"));
         assert!(text.contains("distill_material"));
         assert!(text.contains("import_and_distill"));
+    }
+
+    #[test]
+    fn formats_session_intake_preview_with_decision_and_handoff_sections() {
+        let text = format_intake_preview_text(&SessionIntakePreview {
+            decision: SessionAgentDecision {
+                intent: SessionIntent::DistillMaterial,
+                primary_object_type: None,
+                primary_object_id: None,
+                action_type: SessionActionType::CreateRun,
+                tool_call_key: None,
+                reply_text: "I will start a distillation workflow for this work material.".to_string(),
+                suggested_run_type: Some("import_and_distill".to_string()),
+                session_summary: Some("Preparing to distill work material".to_string()),
+            },
+            run_handoff_preview: Some(RunHandoffPreview {
+                run_type: "import_and_distill".to_string(),
+                primary_object_type: Some("material".to_string()),
+                primary_object_id: None,
+                summary: "Previewing the import-and-distill workflow for this work material.".to_string(),
+                planned_steps: vec![
+                    DistillRunStepPreview {
+                        step_key: "materialize_sources".to_string(),
+                        summary: "Materialize the current work material into one or more sources.".to_string(),
+                    },
+                    DistillRunStepPreview {
+                        step_key: "chunk_sources".to_string(),
+                        summary: "Chunk the source material into retrieval and extraction units.".to_string(),
+                    },
+                ],
+            }),
+        });
+
+        assert!(text.contains("SessionAgent Decision"));
+        assert!(text.contains("Run Handoff Preview"));
+        assert!(text.contains("run_type: import_and_distill"));
+        assert!(text.contains("- materialize_sources"));
+        assert!(text.contains("- chunk_sources"));
+    }
+
+    #[test]
+    fn formats_session_intake_preview_with_attachment_hint() {
+        let text = format_intake_preview_text(&SessionIntakePreview {
+            decision: SessionAgentDecision {
+                intent: SessionIntent::DistillMaterial,
+                primary_object_type: Some("material".to_string()),
+                primary_object_id: None,
+                action_type: SessionActionType::CreateRun,
+                tool_call_key: None,
+                reply_text: "I will start a distillation workflow for this work material.".to_string(),
+                suggested_run_type: Some("import_and_distill".to_string()),
+                session_summary: Some("Preparing to distill work material".to_string()),
+            },
+            run_handoff_preview: Some(RunHandoffPreview {
+                run_type: "import_and_distill".to_string(),
+                primary_object_type: Some("material".to_string()),
+                primary_object_id: None,
+                summary: "Previewing the import-and-distill workflow for this work material.".to_string(),
+                planned_steps: vec![DistillRunStepPreview {
+                    step_key: "materialize_sources".to_string(),
+                    summary: "Materialize the current work material into one or more sources.".to_string(),
+                }],
+            }),
+        });
+
+        assert!(text.contains("primary_object_type: material"));
+        assert!(text.contains("materialize_sources"));
     }
 }
