@@ -11,5 +11,5 @@ pub use llm::{
 };
 pub use session_agent::{
     BasicSessionAgent, LlmSessionAgent, SessionActionType, SessionAgent, SessionAgentDecision,
-    SessionAgentInput,
+    SessionAgentInput, SessionIntent,
 };

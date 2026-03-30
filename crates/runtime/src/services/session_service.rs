@@ -133,6 +133,7 @@ async fn send_session_message_with_optional_provider_config(
     let assistant_message_type = match decision.action_type {
         agent::SessionActionType::DirectReply => "assistant_message",
         agent::SessionActionType::RequestClarification => "clarification_message",
+        agent::SessionActionType::ToolCall => "system_message",
         agent::SessionActionType::CreateRun => "system_message",
     };
 
@@ -146,7 +147,7 @@ async fn send_session_message_with_optional_provider_config(
     insert_session_message(&conn, &assistant_session_message)?;
 
     let now = Utc::now().to_string();
-    session.current_intent = decision.intent.clone();
+    session.current_intent = decision.intent.as_str().to_string();
     session.summary = decision
         .session_summary
         .clone()
@@ -316,6 +317,7 @@ mod tests {
         decide_llm_session_message_with_config, send_session_message,
     };
     use crate::app::AppRuntime;
+    use agent::SessionIntent;
     use memory::db::open_database;
     use memory::session_message_store::list_session_messages_for_session;
     use memory::session_store::get_session_by_id;
@@ -403,7 +405,7 @@ mod tests {
             .await
             .expect("runtime should receive a session agent decision");
 
-        assert_eq!(decision.intent, "general_reply");
+        assert_eq!(decision.intent, SessionIntent::GeneralReply);
         assert_eq!(
             decision.reply_text,
             "Hello! I am ready to help with your Distilllab session."
@@ -462,7 +464,7 @@ mod tests {
             .await
             .expect("runtime should receive an llm-backed session agent decision");
 
-        assert_eq!(decision.intent, "llm_direct_reply");
+        assert_eq!(decision.intent, SessionIntent::GeneralReply);
         assert_eq!(decision.reply_text, "Hello from runtime llm");
     }
 
@@ -522,7 +524,7 @@ mod tests {
             .await
             .expect("runtime should receive an llm-backed session agent decision");
 
-        assert_eq!(decision.intent, "llm_direct_reply");
+        assert_eq!(decision.intent, SessionIntent::GeneralReply);
         assert_eq!(decision.reply_text, "Hello from explicit config");
     }
 
@@ -537,7 +539,7 @@ mod tests {
             .await
             .expect("runtime should send a session message");
 
-        assert_eq!(reply.intent, "general_reply");
+        assert_eq!(reply.intent, SessionIntent::GeneralReply);
 
         let conn = open_database(&runtime.database_path).expect("database should open");
         let messages = list_session_messages_for_session(&conn, &session.id)
@@ -569,7 +571,7 @@ mod tests {
             .expect("query should succeed")
             .expect("session should exist");
 
-        assert_eq!(updated_session.current_intent, reply.intent);
+        assert_eq!(updated_session.current_intent, reply.intent.as_str());
         assert_eq!(updated_session.summary, "General session assistance");
     }
 
@@ -650,7 +652,7 @@ mod tests {
             .await
             .expect("runtime should send llm-backed session message");
 
-        assert_eq!(reply.intent, "llm_direct_reply");
+        assert_eq!(reply.intent, SessionIntent::GeneralReply);
         assert_eq!(reply.reply_text, "LLM reply with history");
     }
 
@@ -741,7 +743,7 @@ mod tests {
         .await
         .expect("runtime should send llm-backed session message with explicit config");
 
-        assert_eq!(reply.intent, "llm_direct_reply");
+        assert_eq!(reply.intent, SessionIntent::GeneralReply);
         assert_eq!(reply.reply_text, "LLM reply from explicit session config");
     }
 

@@ -36,6 +36,7 @@ fn format_action_type(action_type: &SessionActionType) -> &'static str {
     match action_type {
         SessionActionType::DirectReply => "direct_reply",
         SessionActionType::RequestClarification => "request_clarification",
+        SessionActionType::ToolCall => "tool_call",
         SessionActionType::CreateRun => "create_run",
     }
 }
@@ -46,7 +47,7 @@ fn format_optional_text(value: Option<&str>) -> &str {
 
 fn format_session_agent_decision_text(decision: &SessionAgentDecision) -> String {
     [
-        format!("intent: {}", decision.intent),
+        format!("intent: {}", decision.intent.as_str()),
         format!(
             "action_type: {}",
             format_action_type(&decision.action_type)
@@ -648,22 +649,23 @@ mod tests {
         format_app_config_text, format_llm_debug_comparison_text, format_provider_test_text,
         format_session_agent_decision_text, format_session_messages_text,
     };
-    use agent::{SessionActionType, SessionAgentDecision};
+    use agent::{SessionActionType, SessionAgentDecision, SessionIntent};
     use schema::{SessionMessage, SessionMessageRole};
 
     #[test]
     fn formats_structured_session_agent_decision_as_plain_text() {
         let text = format_session_agent_decision_text(&SessionAgentDecision {
-            intent: "llm_direct_reply".to_string(),
+            intent: SessionIntent::GeneralReply,
             primary_object_type: None,
             primary_object_id: None,
             action_type: SessionActionType::DirectReply,
+            tool_call_key: None,
             reply_text: "Hello from debug panel".to_string(),
             suggested_run_type: None,
             session_summary: Some("LLM replied to the current session message".to_string()),
         });
 
-        assert!(text.contains("intent: llm_direct_reply"));
+        assert!(text.contains("intent: general_reply"));
         assert!(text.contains("action_type: direct_reply"));
         assert!(text.contains("reply_text: Hello from debug panel"));
         assert!(text.contains("suggested_run_type: none"));
@@ -673,10 +675,11 @@ mod tests {
     #[test]
     fn formats_create_run_decision_with_debug_readability() {
         let text = format_session_agent_decision_text(&SessionAgentDecision {
-            intent: "import_material".to_string(),
+            intent: SessionIntent::ImportMaterial,
             primary_object_type: Some("source".to_string()),
             primary_object_id: Some("source-1".to_string()),
             action_type: SessionActionType::CreateRun,
+            tool_call_key: None,
             reply_text: "I will start an import and distill run.".to_string(),
             suggested_run_type: Some("import_and_distill".to_string()),
             session_summary: Some("Preparing to import material".to_string()),
@@ -770,10 +773,11 @@ mod tests {
         let text = format_llm_debug_comparison_text(
             "{\"intent\":\"import_material\"}",
             &SessionAgentDecision {
-                intent: "import_material".to_string(),
+                intent: SessionIntent::ImportMaterial,
                 primary_object_type: None,
                 primary_object_id: None,
                 action_type: SessionActionType::CreateRun,
+                tool_call_key: None,
                 reply_text: "I will start an import and distill run.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
                 session_summary: Some("Preparing to import material".to_string()),
