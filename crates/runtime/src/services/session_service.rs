@@ -477,7 +477,10 @@ mod tests {
     use memory::session_message_store::list_session_messages_for_session;
     use memory::session_store::get_session_by_id;
     use schema::SessionIntake;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use uuid::Uuid;
@@ -1675,6 +1678,253 @@ mod tests {
 
         let _ = std::fs::remove_file(&attachment_path);
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn send_session_message_with_config_stops_repeated_identical_tool_call_without_progress() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener.local_addr().expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.expect("server should accept");
+                let mut buffer = [0_u8; 8192];
+                let _ = stream.read(&mut buffer).await.expect("server should read request");
+
+                let response_body = r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"intent\":\"general_reply\",\"action_type\":\"tool_call\",\"reply_text\":\"I will fetch the webpage first.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Preparing web fetch\",\"tool_invocation\":{\"tool_name\":\"web_fetch\",\"arguments\":{\"url\":\"https://platform.claude.com/docs/en/build-with-claude/overview\"},\"reasoning_summary\":null,\"expected_follow_up\":null},\"skill_selection\":null,\"should_continue_planning\":true,\"failure_hint\":\"reply_or_clarify\"}"
+                            }
+                        }
+                    ]
+                }"#;
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                stream.write_all(response.as_bytes()).await.expect("server should write");
+            }
+        });
+
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-repeat-tool-loop-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let reply = super::send_session_message_with_config(
+            &runtime,
+            SessionMessageRequest {
+                session_id: session.id.clone(),
+                user_message: "帮我看这个网址：https://platform.claude.com/docs/en/build-with-claude/overview"
+                    .to_string(),
+                attachments: vec![],
+                provider_kind: "openai_compatible".to_string(),
+                base_url: format!("http://{}", address),
+                model: "gpt-test".to_string(),
+                api_key: Some(String::new()),
+            },
+        )
+        .await
+        .expect("runtime should terminate repeated identical tool loop safely");
+
+        assert_eq!(reply.action_type, agent::SessionActionType::RequestClarification);
+    }
+
+    #[tokio::test]
+    async fn send_session_message_with_config_stops_repeated_failing_tool_call() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener.local_addr().expect("listener should have local addr");
+
+        let request_counter = Arc::new(AtomicUsize::new(0));
+        let request_counter_for_server = request_counter.clone();
+        tokio::spawn(async move {
+            for _ in 0..3 {
+                let (mut stream, _) = listener.accept().await.expect("server should accept");
+                request_counter_for_server.fetch_add(1, Ordering::SeqCst);
+                let mut buffer = [0_u8; 8192];
+                let _ = stream.read(&mut buffer).await.expect("server should read request");
+
+                let response_body = r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"intent\":\"general_reply\",\"action_type\":\"tool_call\",\"reply_text\":\"I will read the current attachment.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Preparing attachment read\",\"tool_invocation\":{\"tool_name\":\"read_text\",\"arguments\":{\"attachment_index\":0},\"reasoning_summary\":null,\"expected_follow_up\":null},\"skill_selection\":null,\"should_continue_planning\":true,\"failure_hint\":\"reply_or_clarify\"}"
+                            }
+                        }
+                    ]
+                }"#;
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                stream.write_all(response.as_bytes()).await.expect("server should write");
+            }
+        });
+
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-repeat-failing-tool-loop-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let reply = super::send_session_message_with_config(
+            &runtime,
+            SessionMessageRequest {
+                session_id: session.id.clone(),
+                user_message: "读取附件".to_string(),
+                attachments: vec![],
+                provider_kind: "openai_compatible".to_string(),
+                base_url: format!("http://{}", address),
+                model: "gpt-test".to_string(),
+                api_key: Some(String::new()),
+            },
+        )
+        .await
+        .expect("runtime should terminate repeated failing tool loop safely");
+
+        assert_eq!(reply.action_type, agent::SessionActionType::RequestClarification);
+        assert_eq!(request_counter.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn send_session_message_with_config_does_not_finish_on_tool_call_when_tool_result_disables_planning() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener.local_addr().expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("server should accept");
+            let mut buffer = [0_u8; 8192];
+            let _ = stream.read(&mut buffer).await.expect("server should read request");
+
+            let response_body = r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"intent\":\"general_reply\",\"action_type\":\"tool_call\",\"reply_text\":\"I will fetch the webpage first.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Preparing web fetch\",\"tool_invocation\":{\"tool_name\":\"web_fetch\",\"arguments\":{\"url\":\"https://platform.claude.com/docs/en/build-with-claude/overview\"},\"reasoning_summary\":null,\"expected_follow_up\":null},\"skill_selection\":null,\"should_continue_planning\":true,\"failure_hint\":\"reply_or_clarify\"}"
+                        }
+                    }
+                ]
+            }"#;
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream.write_all(response.as_bytes()).await.expect("server should write");
+        });
+
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-nonterminal-stop-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let reply = super::send_session_message_with_config(
+            &runtime,
+            SessionMessageRequest {
+                session_id: session.id.clone(),
+                user_message: "帮我看这个网址：https://platform.claude.com/docs/en/build-with-claude/overview"
+                    .to_string(),
+                attachments: vec![],
+                provider_kind: "openai_compatible".to_string(),
+                base_url: format!("http://{}", address),
+                model: "gpt-test".to_string(),
+                api_key: Some(String::new()),
+            },
+        )
+        .await;
+
+        assert!(reply.is_err() || reply.as_ref().is_ok_and(|value| value.action_type != agent::SessionActionType::ToolCall));
+    }
+
+    #[tokio::test]
+    async fn send_session_message_with_config_allows_one_retry_before_repeated_failure_clarification() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener.local_addr().expect("listener should have local addr");
+
+        let request_counter = Arc::new(AtomicUsize::new(0));
+        let request_counter_for_server = request_counter.clone();
+        tokio::spawn(async move {
+            for _ in 0..3 {
+                let (mut stream, _) = listener.accept().await.expect("server should accept");
+                request_counter_for_server.fetch_add(1, Ordering::SeqCst);
+                let mut buffer = [0_u8; 8192];
+                let _ = stream.read(&mut buffer).await.expect("server should read request");
+
+                let response_body = r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"intent\":\"general_reply\",\"action_type\":\"tool_call\",\"reply_text\":\"I will read the current attachment.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Preparing attachment read\",\"tool_invocation\":{\"tool_name\":\"read_text\",\"arguments\":{\"attachment_index\":0},\"reasoning_summary\":null,\"expected_follow_up\":null},\"skill_selection\":null,\"should_continue_planning\":true,\"failure_hint\":\"reply_or_clarify\"}"
+                            }
+                        }
+                    ]
+                }"#;
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                stream.write_all(response.as_bytes()).await.expect("server should write");
+            }
+        });
+
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-failure-retry-loop-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let reply = super::send_session_message_with_config(
+            &runtime,
+            SessionMessageRequest {
+                session_id: session.id.clone(),
+                user_message: "读取附件".to_string(),
+                attachments: vec![],
+                provider_kind: "openai_compatible".to_string(),
+                base_url: format!("http://{}", address),
+                model: "gpt-test".to_string(),
+                api_key: Some(String::new()),
+            },
+        )
+        .await
+        .expect("runtime should stop repeated failing loop safely");
+
+        assert_eq!(reply.action_type, agent::SessionActionType::RequestClarification);
+        assert_eq!(request_counter.load(Ordering::SeqCst), 3);
     }
 
     #[test]

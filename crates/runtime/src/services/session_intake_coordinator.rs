@@ -42,6 +42,24 @@ async fn decide_with_provider(
     }
 }
 
+fn tool_loop_guard_decision(message: &str) -> SessionAgentDecision {
+    SessionAgentDecision {
+        intent: agent::SessionIntent::GeneralReply,
+        primary_object_type: None,
+        primary_object_id: None,
+        action_type: SessionActionType::RequestClarification,
+        next_action: agent::SessionNextAction::RequestClarification,
+        tool_invocation: None,
+        skill_selection: None,
+        run_creation: None,
+        reply_text: message.to_string(),
+        suggested_run_type: None,
+        session_summary: Some("Requesting clarification after repeated tool loop without progress".to_string()),
+        should_continue_planning: false,
+        failure_hint: Some("clarify_or_stop".to_string()),
+    }
+}
+
 fn build_session_message(
     session_id: &str,
     run_id: Option<String>,
@@ -109,6 +127,9 @@ pub async fn decide_and_record_intake(
 
     let mut decision = decide_with_provider(provider_config.clone(), input).await?;
     let mut tool_result = None;
+    let mut last_tool_signature: Option<String> = None;
+    let mut last_tool_result: Option<ToolExecutionResult> = None;
+    let mut consecutive_same_failure_retries = 0usize;
 
     while decision.action_type == SessionActionType::ToolCall {
         let invocation = decision.tool_invocation.clone().ok_or_else(|| {
@@ -117,12 +138,39 @@ pub async fn decide_and_record_intake(
                 "tool_call decision missing tool_invocation",
             )
         })?;
+        let tool_signature = serde_json::json!({
+            "tool_name": invocation.tool_name,
+            "arguments": invocation.arguments,
+        })
+        .to_string();
+
+        if last_tool_signature.as_deref() == Some(tool_signature.as_str()) {
+            if last_tool_result.as_ref().is_some_and(|result| result.ok) {
+                decision = tool_loop_guard_decision(
+                    "I already called the same tool with the same arguments and did not make progress. Please clarify what to inspect next.",
+                );
+                break;
+            }
+
+            if consecutive_same_failure_retries >= 1 {
+                decision = tool_loop_guard_decision(
+                    "The same tool call is failing repeatedly. Please clarify or change the requested input.",
+                );
+                break;
+            }
+
+            consecutive_same_failure_retries += 1;
+        } else {
+            consecutive_same_failure_retries = 0;
+        }
 
         let executor = ToolExecutor::new();
         let executed_tool_result = executor
             .execute_with_attachments(runtime, &invocation, &intake.attachments)
             .await;
         tool_result = Some(executed_tool_result.clone());
+        last_tool_signature = Some(tool_signature);
+        last_tool_result = Some(executed_tool_result.clone());
 
         let tool_result_message = build_session_message_with_data(
             &session.id,
@@ -142,7 +190,10 @@ pub async fn decide_and_record_intake(
         );
         insert_session_message(&conn, &tool_result_message)?;
 
-        if !(decision.should_continue_planning && executed_tool_result.should_continue_planning) {
+        if !decision.should_continue_planning || !executed_tool_result.should_continue_planning {
+            decision = tool_loop_guard_decision(
+                "Tool execution ended without a terminal planner action. Please clarify the next step.",
+            );
             break;
         }
 
