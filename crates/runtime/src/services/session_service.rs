@@ -1,6 +1,7 @@
 use crate::app::AppRuntime;
 use crate::contracts::{LlmSessionDebugRequest, SessionIntakePreview, SessionMessageRequest};
-use crate::flows::{build_import_and_distill_handoff_preview, execute_materialize_sources};
+use crate::flows::build_import_and_distill_handoff_preview;
+use crate::services::distill_run_executor::create_and_execute_from_decision;
 use crate::services::session_intake_coordinator::decide_and_record_intake;
 use agent::{
     BasicSessionAgent, LlmProviderConfig, LlmSessionAgent, SessionAgent, SessionAgentDecision,
@@ -9,7 +10,6 @@ use agent::{
 use chrono::Utc;
 use memory::db::open_database;
 use memory::migrations::run_migrations;
-use memory::run_store::{insert_run, update_run_status};
 use memory::session_message_store::{
     list_session_messages_for_session, update_session_message_run_and_content,
 };
@@ -17,8 +17,6 @@ use memory::session_store::{
     get_session_by_id, insert_session, list_sessions as memory_list_sessions,
 };
 use schema::{Session, SessionIntake, SessionMessage, SessionStatus};
-use schema::{Run, RunState};
-use schema::run::RunType;
 use uuid::Uuid;
 
 type RuntimeError = Box<dyn std::error::Error + Send + Sync>;
@@ -121,63 +119,22 @@ async fn send_session_message_with_optional_provider_config(
     let assistant_message_id = outcome.assistant_message_id;
     let coordinator_run_input = outcome.run_input;
 
-    let created_run = if decision.action_type == agent::SessionActionType::CreateRun {
-        let run_type = match decision.suggested_run_type.as_deref() {
-            Some("import_and_distill") => Some(RunType::ImportAndDistill),
-            Some("deepening") => Some(RunType::Deepening),
-            Some("compose_and_verify") => Some(RunType::ComposeAndVerify),
-            _ => None,
-        };
+    let execution_outcome = if decision.action_type == agent::SessionActionType::CreateRun {
+        let run_input = coordinator_run_input.clone().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "missing run_input for create_run decision",
+            )
+        })?;
 
-        if let Some(run_type) = run_type {
-            let run = Run {
-                id: format!("run-{}", Uuid::new_v4()),
-                run_type,
-                status: RunState::Pending,
-                primary_object_type: decision
-                    .primary_object_type
-                    .clone()
-                    .unwrap_or_else(|| "material".to_string()),
-                primary_object_id: decision
-                    .primary_object_id
-                    .clone()
-                    .unwrap_or_else(|| "pending".to_string()),
-                created_at: Utc::now().to_string(),
-            };
-
-            insert_run(&conn, &run)?;
-            Some(run)
-        } else {
-            None
-        }
+        Some(create_and_execute_from_decision(runtime, &decision, run_input)?)
     } else {
         None
     };
-    let created_run_id = created_run.as_ref().map(|run| run.id.clone());
-
-    let materialize_result = if let Some(run) = &created_run {
-        if run.run_type.as_str() == "import_and_distill" {
-            let run_input = coordinator_run_input.clone().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "missing run_input for create_run decision",
-                )
-            })?;
-
-            let result = execute_materialize_sources(runtime, &run.id, run_input)?;
-            let next_status = if result.can_continue {
-                RunState::Completed
-            } else {
-                RunState::Failed
-            };
-            update_run_status(&conn, &run.id, &next_status)?;
-            Some(result)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let created_run_id = execution_outcome.as_ref().map(|outcome| outcome.run.id.clone());
+    let materialize_result = execution_outcome
+        .as_ref()
+        .and_then(|outcome| outcome.materialize_result.clone());
 
     let final_assistant_content = match &materialize_result {
         Some(result) => format!("{}\n\n{}", decision.reply_text, result.summary),
@@ -924,6 +881,82 @@ mod tests {
 
         assert_eq!(messages.len(), 2);
         assert!(runs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn distill_run_executor_creates_and_executes_import_and_distill_run() {
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-distill-executor-{}.db",
+            Uuid::new_v4()
+        ));
+
+        let decision = agent::SessionAgentDecision {
+            intent: SessionIntent::DistillMaterial,
+            primary_object_type: Some("material".to_string()),
+            primary_object_id: None,
+            action_type: agent::SessionActionType::CreateRun,
+            tool_call_key: None,
+            reply_text: "I will start a distill run for this work material.".to_string(),
+            suggested_run_type: Some("import_and_distill".to_string()),
+            session_summary: Some("Preparing to distill work material".to_string()),
+            should_continue_planning: true,
+            failure_hint: Some("clarify_or_stop".to_string()),
+        };
+
+        let run_input = crate::contracts::RunInput {
+            session_id: "session-1".to_string(),
+            trigger_message: "Please distill these work notes into Distilllab".to_string(),
+            attachment_refs: vec![],
+            current_object_type: Some("material".to_string()),
+            current_object_id: None,
+            decision_summary: decision.reply_text.clone(),
+        };
+
+        let outcome = crate::services::distill_run_executor::create_and_execute_from_decision(
+            &runtime,
+            &decision,
+            run_input,
+        )
+        .expect("executor should create and execute run");
+
+        assert_eq!(outcome.run.run_type.as_str(), "import_and_distill");
+        assert_eq!(outcome.run.status.as_str(), "completed");
+        assert!(outcome.materialize_result.is_some());
+    }
+
+    #[tokio::test]
+    async fn send_session_message_does_not_leave_misleading_handoff_message_when_execution_fails() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-send-failure-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let error = super::send_session_message_with_optional_provider_config(
+            &runtime,
+            &session.id,
+            "Please distill these work notes into Distilllab",
+            vec![],
+            Some(LlmProviderConfig {
+                provider_kind: "openai_compatible".to_string(),
+                base_url: "http://127.0.0.1:1".to_string(),
+                model: "gpt-test".to_string(),
+                api_key: Some(String::new()),
+            }),
+        )
+        .await
+        .expect_err("send_session_message should fail");
+
+        assert!(error.to_string().contains("error sending request"));
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let messages = list_session_messages_for_session(&conn, &session.id)
+            .expect("session messages should load");
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].message_type, "user_message");
     }
 
     #[tokio::test]

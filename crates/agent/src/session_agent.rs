@@ -403,6 +403,21 @@ impl LlmSessionAgent {
         }
     }
 
+    fn fallback_clarification_decision() -> SessionAgentDecision {
+        SessionAgentDecision {
+            intent: SessionIntent::GeneralReply,
+            primary_object_type: None,
+            primary_object_id: None,
+            action_type: SessionActionType::RequestClarification,
+            tool_call_key: None,
+            reply_text: "I need a bit more context before I can decide the next step for this session.".to_string(),
+            suggested_run_type: None,
+            session_summary: Some("Requesting clarification for the current session turn".to_string()),
+            should_continue_planning: true,
+            failure_hint: Some("clarify_or_stop".to_string()),
+        }
+    }
+
     pub async fn decide_with_debug(
         &self,
         input: SessionAgentInput,
@@ -423,8 +438,12 @@ impl LlmSessionAgent {
             })?
             .to_string();
 
-        let decision = Self::parse_structured_decision(&raw_output)
-            .unwrap_or_else(|| Self::fallback_direct_reply_decision(&raw_output));
+        let decision = if raw_output.trim_start().starts_with('{') {
+            Self::parse_structured_decision(&raw_output)
+                .unwrap_or_else(Self::fallback_clarification_decision)
+        } else {
+            Self::fallback_direct_reply_decision(&raw_output)
+        };
 
         Ok(LlmSessionAgentDebugResult {
             raw_output,
@@ -1229,6 +1248,91 @@ mod tests {
         assert_eq!(decision.action_type, SessionActionType::DirectReply);
         assert_eq!(decision.intent, SessionIntent::GeneralReply);
         assert_eq!(decision.reply_text, "Hello from fake llm");
+    }
+
+    #[tokio::test]
+    async fn llm_session_agent_returns_safe_clarification_when_create_run_json_is_invalid() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("server should accept connection");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream
+                .read(&mut buffer)
+                .await
+                .expect("server should read request");
+
+            let response_body = r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"intent\":\"compose_output\",\"action_type\":\"create_run\",\"reply_text\":\"I will start a run.\",\"suggested_run_type\":null,\"session_summary\":\"Preparing to compose output\",\"tool_call_key\":null,\"should_continue_planning\":true,\"failure_hint\":\"clarify_or_stop\"}"
+                        }
+                    }
+                ]
+            }"#;
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("server should write response");
+        });
+
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: format!("http://{}", address),
+            model: "qwen-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Safe fallback session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing invalid create_run fallback".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Write an output for this project".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
+        };
+
+        let result = agent
+            .decide_with_debug(input)
+            .await
+            .expect("llm planner should return a safe fallback decision");
+
+        assert_eq!(result.decision.action_type, SessionActionType::RequestClarification);
+        assert!(!result.decision.reply_text.contains("\"intent\""));
     }
 
     #[test]
