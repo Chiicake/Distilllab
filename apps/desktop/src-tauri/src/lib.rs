@@ -518,6 +518,7 @@ async fn send_session_message_command(form: SessionMessageForm) -> Result<String
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
     let (config_path, config) = load_or_create_app_config()?;
     let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
+    let session_id = form.session_id.clone();
     let storage_root = config_path
         .parent()
         .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?;
@@ -527,10 +528,10 @@ async fn send_session_message_command(form: SessionMessageForm) -> Result<String
         .map(|path| store_attachment_copy(storage_root, &form.session_id, path).map_err(|e| e.to_string()))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let decision = runtime::send_session_message_with_config(
+    runtime::send_session_message_with_config(
         &runtime,
         SessionMessageRequest {
-            session_id: form.session_id,
+            session_id: session_id.clone(),
             user_message: form.user_message,
             attachments,
             provider_kind: resolved.provider_type.replace('-', "_"),
@@ -539,10 +540,12 @@ async fn send_session_message_command(form: SessionMessageForm) -> Result<String
             api_key: resolved.api_key,
         },
     )
-        .await
-        .map_err(|e| e.to_string())?;
+    .await
+    .map_err(|e| e.to_string())?;
 
-    Ok(format_session_agent_decision_text(&decision))
+    let messages = runtime::list_session_messages(&runtime, &session_id).map_err(|e| e.to_string())?;
+
+    Ok(format_session_messages_text(&messages))
 }
 
 #[tauri::command]

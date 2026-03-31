@@ -539,20 +539,31 @@
           return;
         }
 
-        timelineResult.textContent = "Previewing session intake...";
+        timelineResult.textContent = "Sending session message...";
+        result.textContent = "Previewing session intake...";
 
         try {
-          const response = await invokeTauri("preview_session_intake_command", {
+          const preview = await invokeTauri("preview_session_intake_command", {
             form: {
               sessionId,
               userMessage,
               attachmentPaths,
             },
           });
-          result.textContent = response;
+          result.textContent = preview;
+
+          const response = await invokeTauri("send_session_message_command", {
+            form: {
+              sessionId,
+              userMessage,
+              attachmentPaths,
+            },
+          });
           timelineResult.textContent = response;
+          timelineMessageInput.value = "";
         } catch (error) {
           timelineResult.textContent = `Error: ${error}`;
+          result.textContent = `Error: ${error}`;
         }
       });
 
