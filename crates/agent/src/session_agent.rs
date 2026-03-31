@@ -361,14 +361,30 @@ impl LlmSessionAgent {
             intent: SessionIntent::from_str(parsed.intent.as_str())?,
             primary_object_type: parsed.primary_object_type,
             primary_object_id: parsed.primary_object_id,
-            action_type,
+            action_type: action_type.clone(),
             tool_invocation,
             reply_text: parsed.reply_text,
             suggested_run_type: parsed.suggested_run_type,
             session_summary: parsed.session_summary,
-            should_continue_planning: parsed.should_continue_planning.unwrap_or(false),
+            should_continue_planning: parsed.should_continue_planning.unwrap_or(matches!(
+                action_type,
+                SessionActionType::ToolCall | SessionActionType::CreateRun | SessionActionType::RequestClarification
+            )),
             failure_hint: parsed.failure_hint,
         };
+
+        match decision.action_type {
+            SessionActionType::ToolCall => {
+                if decision.tool_invocation.is_none() {
+                    return None;
+                }
+            }
+            _ => {
+                if decision.tool_invocation.is_some() {
+                    return None;
+                }
+            }
+        }
 
         if decision.intent == SessionIntent::DistillMaterial
             && decision.action_type == SessionActionType::DirectReply
@@ -1348,6 +1364,39 @@ mod tests {
         let decision = LlmSessionAgent::parse_structured_decision(raw_json);
 
         assert!(decision.is_none());
+    }
+
+    #[test]
+    fn llm_session_agent_rejects_tool_call_without_tool_invocation() {
+        let raw_json = r#"{"intent":"general_reply","action_type":"tool_call","reply_text":"I will use a tool.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Preparing tool use","tool_invocation":null,"should_continue_planning":true,"failure_hint":"reply_or_clarify"}"#;
+
+        let decision = LlmSessionAgent::parse_structured_decision(raw_json);
+
+        assert!(decision.is_none());
+    }
+
+    #[test]
+    fn llm_session_agent_rejects_non_tool_action_with_tool_invocation() {
+        let raw_json = r#"{"intent":"general_reply","action_type":"direct_reply","reply_text":"Here is the answer.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Providing answer","tool_invocation":{"tool_name":"search_memory","arguments_json":"{}","reasoning_summary":null,"expected_follow_up":null},"should_continue_planning":false,"failure_hint":null}"#;
+
+        let decision = LlmSessionAgent::parse_structured_decision(raw_json);
+
+        assert!(decision.is_none());
+    }
+
+    #[test]
+    fn llm_session_agent_defaults_follow_up_planning_for_legacy_tool_call_json() {
+        let raw_json = r#"{"intent":"general_reply","action_type":"tool_call","reply_text":"I will look up related notes before replying.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Preparing a memory lookup before answering","tool_call_key":"search_memory"}"#;
+
+        let decision = LlmSessionAgent::parse_structured_decision(raw_json)
+            .expect("legacy tool_call json should still parse");
+
+        assert_eq!(decision.action_type, SessionActionType::ToolCall);
+        assert!(decision.should_continue_planning);
+        assert_eq!(
+            decision.tool_invocation.as_ref().map(|value| value.tool_name.as_str()),
+            Some("search_memory")
+        );
     }
 
     #[tokio::test]

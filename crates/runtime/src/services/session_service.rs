@@ -1132,6 +1132,105 @@ mod tests {
         assert_eq!(reply.reply_text, "LLM reply from explicit session config");
     }
 
+    #[tokio::test]
+    async fn send_session_message_with_config_executes_tool_call_before_follow_up_reply() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            for request_index in 0..2 {
+                let (mut stream, _) = listener
+                    .accept()
+                    .await
+                    .expect("server should accept connection");
+                let mut buffer = [0_u8; 8192];
+                let bytes_read = stream
+                    .read(&mut buffer)
+                    .await
+                    .expect("server should read request");
+                let request_text = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+                let response_body = if request_index == 0 {
+                    assert!(request_text.contains("Search memory for related notes before answering"));
+                    r#"{
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "{\"intent\":\"general_reply\",\"action_type\":\"tool_call\",\"reply_text\":\"I will look up related notes before replying.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Preparing a memory lookup before answering\",\"tool_invocation\":{\"tool_name\":\"search_memory\",\"arguments_json\":\"{\\\"query\\\":\\\"related notes\\\"}\",\"reasoning_summary\":null,\"expected_follow_up\":null},\"should_continue_planning\":true,\"failure_hint\":\"reply_or_clarify\"}"
+                                }
+                            }
+                        ]
+                    }"#
+                } else {
+                    assert!(request_text.contains("Memory search is not yet implemented"));
+                    r#"{
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "{\"intent\":\"general_reply\",\"action_type\":\"direct_reply\",\"reply_text\":\"I checked memory and there are no matching notes yet.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Reported memory lookup result\",\"tool_invocation\":null,\"should_continue_planning\":false,\"failure_hint\":null}"
+                                }
+                            }
+                        ]
+                    }"#
+                };
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+
+                stream
+                    .write_all(response.as_bytes())
+                    .await
+                    .expect("server should write response");
+            }
+        });
+
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-tool-call-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let reply = super::send_session_message_with_config(
+            &runtime,
+            SessionMessageRequest {
+                session_id: session.id.clone(),
+                user_message: "Search memory for related notes before answering".to_string(),
+                attachments: vec![],
+                provider_kind: "openai_compatible".to_string(),
+                base_url: format!("http://{}", address),
+                model: "gpt-test".to_string(),
+                api_key: Some(String::new()),
+            },
+        )
+        .await
+        .expect("runtime should execute tool call and follow up");
+
+        assert_eq!(reply.intent, SessionIntent::GeneralReply);
+        assert_eq!(reply.action_type, agent::SessionActionType::DirectReply);
+        assert_eq!(reply.reply_text, "I checked memory and there are no matching notes yet.");
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let messages = list_session_messages_for_session(&conn, &session.id)
+            .expect("session messages should load");
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1].message_type, "tool_result_message");
+        assert!(messages[1].content.contains("Memory search is not yet implemented"));
+        assert_eq!(messages[2].message_type, "assistant_message");
+        assert_eq!(messages[2].content, "I checked memory and there are no matching notes yet.");
+    }
+
     #[test]
     fn list_session_messages_returns_timeline_messages_for_session() {
         let runtime = AppRuntime::new(format!("/tmp/distilllab-runtime-list-messages-{}.db", Uuid::new_v4()));
