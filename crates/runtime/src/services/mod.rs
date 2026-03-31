@@ -6,6 +6,7 @@ pub mod run_service;
 pub mod session_intake_coordinator;
 pub mod session_service;
 pub mod source_service;
+pub mod tool_executor;
 pub mod work_item_service;
 
 pub use asset_service::{build_demo_assets, list_assets};
@@ -23,4 +24,5 @@ pub use source_service::{
     create_attachment_source, create_demo_source, create_message_source,
     find_source_for_run_origin, list_sources, list_sources_for_run,
 };
+pub use tool_executor::{ToolExecutionError, ToolExecutor};
 pub use work_item_service::{extract_demo_work_items, list_work_items};

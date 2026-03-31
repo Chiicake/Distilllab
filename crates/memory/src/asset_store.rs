@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Error, Result, params, types::Type};
+use rusqlite::{params, types::Type, Connection, Error, Result};
 use schema::{Asset, AssetType};
 
 pub fn insert_asset(conn: &Connection, asset: &Asset) -> Result<()> {
@@ -49,6 +49,37 @@ pub fn list_assets(conn: &Connection) -> Result<Vec<Asset>> {
     }
 
     Ok(assets)
+}
+
+pub fn get_asset_by_id(conn: &Connection, asset_id: &str) -> Result<Option<Asset>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, asset_type, title, summary FROM assets WHERE id = ?1 LIMIT 1",
+    )?;
+
+    let mut rows = stmt.query([asset_id])?;
+    if let Some(row) = rows.next()? {
+        let asset_type_str: String = row.get(2)?;
+        let asset_type = AssetType::from_str(&asset_type_str).ok_or_else(|| {
+            Error::FromSqlConversionFailure(
+                2,
+                Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("invalid asset type: {asset_type_str}"),
+                )),
+            )
+        })?;
+
+        return Ok(Some(Asset {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            asset_type,
+            title: row.get(3)?,
+            summary: row.get(4)?,
+        }));
+    }
+
+    Ok(None)
 }
 
 #[cfg(test)]

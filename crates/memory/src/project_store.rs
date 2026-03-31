@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result, params};
+use rusqlite::{params, Connection, Result};
 use schema::Project;
 
 pub fn insert_project(conn: &Connection, project: &Project) -> Result<()> {
@@ -27,6 +27,21 @@ pub fn list_projects(conn: &Connection) -> Result<Vec<Project>> {
     }
 
     Ok(projects)
+}
+
+pub fn get_project_by_id(conn: &Connection, project_id: &str) -> Result<Option<Project>> {
+    let mut stmt = conn.prepare("SELECT id, name, summary FROM projects WHERE id = ?1 LIMIT 1")?;
+
+    let mut rows = stmt.query([project_id])?;
+    if let Some(row) = rows.next()? {
+        return Ok(Some(Project {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            summary: row.get(2)?,
+        }));
+    }
+
+    Ok(None)
 }
 
 #[cfg(test)]

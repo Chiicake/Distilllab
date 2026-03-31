@@ -895,7 +895,7 @@ mod tests {
             primary_object_type: Some("material".to_string()),
             primary_object_id: None,
             action_type: agent::SessionActionType::CreateRun,
-            tool_call_key: None,
+            tool_invocation: None,
             reply_text: "I will start a distill run for this work material.".to_string(),
             suggested_run_type: Some("import_and_distill".to_string()),
             session_summary: Some("Preparing to distill work material".to_string()),

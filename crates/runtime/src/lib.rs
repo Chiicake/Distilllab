@@ -25,5 +25,5 @@ pub use services::{
     group_demo_project, list_assets, list_chunks_for_source, list_projects,
     list_session_messages, list_sessions, list_sources, list_work_items, list_runs,
     preview_session_intake, preview_session_intake_with_config, send_session_message,
-    send_session_message_with_config,
+    send_session_message_with_config, ToolExecutionError, ToolExecutor,
 };

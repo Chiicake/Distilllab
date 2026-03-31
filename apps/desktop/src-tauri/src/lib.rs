@@ -48,6 +48,11 @@ fn format_optional_text(value: Option<&str>) -> &str {
 }
 
 fn format_session_agent_decision_text(decision: &SessionAgentDecision) -> String {
+    let tool_name = decision
+        .tool_invocation
+        .as_ref()
+        .map(|invocation| invocation.tool_name.as_str());
+
     [
         format!("intent: {}", decision.intent.as_str()),
         format!(
@@ -70,6 +75,15 @@ fn format_session_agent_decision_text(decision: &SessionAgentDecision) -> String
         format!(
             "session_summary: {}",
             format_optional_text(decision.session_summary.as_deref())
+        ),
+        format!("tool_name: {}", format_optional_text(tool_name)),
+        format!(
+            "should_continue_planning: {}",
+            decision.should_continue_planning
+        ),
+        format!(
+            "failure_hint: {}",
+            format_optional_text(decision.failure_hint.as_deref())
         ),
     ]
     .join("\n")
@@ -739,10 +753,12 @@ mod tests {
             primary_object_type: None,
             primary_object_id: None,
             action_type: SessionActionType::DirectReply,
-            tool_call_key: None,
+            tool_invocation: None,
             reply_text: "Hello from debug panel".to_string(),
             suggested_run_type: None,
             session_summary: Some("LLM replied to the current session message".to_string()),
+            should_continue_planning: false,
+            failure_hint: None,
         });
 
         assert!(text.contains("intent: general_reply"));
@@ -759,10 +775,12 @@ mod tests {
             primary_object_type: Some("source".to_string()),
             primary_object_id: Some("source-1".to_string()),
             action_type: SessionActionType::CreateRun,
-            tool_call_key: None,
+            tool_invocation: None,
             reply_text: "I will start a distill run for this work material.".to_string(),
             suggested_run_type: Some("import_and_distill".to_string()),
             session_summary: Some("Preparing to import material".to_string()),
+            should_continue_planning: true,
+            failure_hint: Some("clarify_or_stop".to_string()),
         });
 
         assert!(text.contains("intent: distill_material"));
@@ -857,10 +875,12 @@ mod tests {
                 primary_object_type: None,
                 primary_object_id: None,
                 action_type: SessionActionType::CreateRun,
-                tool_call_key: None,
+                tool_invocation: None,
                 reply_text: "I will start a distill run for this work material.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
                 session_summary: Some("Preparing to import material".to_string()),
+                should_continue_planning: true,
+                failure_hint: Some("clarify_or_stop".to_string()),
             },
         );
 
@@ -878,10 +898,12 @@ mod tests {
                 primary_object_type: None,
                 primary_object_id: None,
                 action_type: SessionActionType::CreateRun,
-                tool_call_key: None,
+                tool_invocation: None,
                 reply_text: "I will start a distillation workflow for this work material.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
                 session_summary: Some("Preparing to distill work material".to_string()),
+                should_continue_planning: true,
+                failure_hint: Some("clarify_or_stop".to_string()),
             },
             run_handoff_preview: Some(RunHandoffPreview {
                 run_type: "import_and_distill".to_string(),
@@ -916,10 +938,12 @@ mod tests {
                 primary_object_type: Some("material".to_string()),
                 primary_object_id: None,
                 action_type: SessionActionType::CreateRun,
-                tool_call_key: None,
+                tool_invocation: None,
                 reply_text: "I will start a distillation workflow for this work material.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
                 session_summary: Some("Preparing to distill work material".to_string()),
+                should_continue_planning: true,
+                failure_hint: Some("clarify_or_stop".to_string()),
             },
             run_handoff_preview: Some(RunHandoffPreview {
                 run_type: "import_and_distill".to_string(),
