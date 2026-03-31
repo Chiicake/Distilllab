@@ -103,10 +103,27 @@ where
 {
     let value = serde_json::Value::deserialize(deserializer)?;
     match value {
+        serde_json::Value::Object(_) => Ok(value),
         serde_json::Value::String(text) => {
-            Ok(serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "raw": text })))
+            let trimmed = text.trim_start();
+            if trimmed.starts_with('{') {
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&text).map_err(serde::de::Error::custom)?;
+                match parsed {
+                    serde_json::Value::Object(_) => Ok(parsed),
+                    _ => Err(serde::de::Error::custom(
+                        "tool arguments must deserialize to a JSON object",
+                    )),
+                }
+            } else {
+                Err(serde::de::Error::custom(
+                    "canonical arguments must be a JSON object; legacy string payloads belong in arguments_json",
+                ))
+            }
         }
-        other => Ok(other),
+        _ => Err(serde::de::Error::custom(
+            "tool arguments must be a JSON object",
+        )),
     }
 }
 
@@ -378,7 +395,9 @@ pub fn builtin_tool_registry() -> ToolRegistry {
                 "read_attachment_excerpt",
                 "Read a short excerpt from the current attachment for planning or reply grounding",
             )
-            .with_input_schema(r#"{"locator": "string", "max_chars": "number?"}"#),
+            .with_input_schema(
+                r#"{"attachment_id": "string?", "attachment_index": "number?", "max_chars": "number?"}"#,
+            ),
         )
         .expect("builtin tool registration should not fail");
 
@@ -386,10 +405,10 @@ pub fn builtin_tool_registry() -> ToolRegistry {
         .register(
             ToolDefinition::read_only(
                 "read_text",
-                "Read text content from a file or current attachment using locator, attachment_id, or attachment_index",
+                "Read text content from the current attachment using attachment_id or attachment_index",
             )
             .with_input_schema(
-                r#"{"locator": "string?", "attachment_id": "string?", "attachment_index": "number?", "max_chars": "number?"}"#,
+                r#"{"attachment_id": "string?", "attachment_index": "number?", "max_chars": "number?"}"#,
             ),
         )
         .expect("builtin tool registration should not fail");
@@ -493,6 +512,15 @@ mod tests {
             arguments.get("max_chars").and_then(|v| v.as_u64()),
             Some(400)
         );
+    }
+
+    #[test]
+    fn canonical_arguments_field_rejects_non_json_object_shape() {
+        let result = serde_json::from_str::<ToolInvocation>(
+            r#"{"tool_name":"search_memory","arguments":"not-an-object","reasoning_summary":null,"expected_follow_up":null}"#,
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]

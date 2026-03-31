@@ -1278,7 +1278,7 @@ mod tests {
 
                 let response_body = if request_index == 0 {
                     assert!(request_text.contains("current_intake_attachments:"));
-                    assert!(request_text.contains("Attachment heading"));
+                    assert!(request_text.contains("notes.md"));
                     r#"{
                         "choices": [
                             {

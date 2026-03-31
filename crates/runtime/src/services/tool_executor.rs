@@ -324,13 +324,36 @@ impl ToolExecutor {
             Ok(value) => value,
             Err(error) => return ToolExecutionResult::failure(&invocation.tool_name, &error.to_string()),
         };
+        if is_blocked_url(&url) {
+            return ToolExecutionResult::failure(
+                &invocation.tool_name,
+                &ToolExecutionError::InvalidArguments(format!("blocked url: {url}")).to_string(),
+            );
+        }
         let max_chars = invocation
             .arguments
             .get("max_chars")
             .and_then(|value| value.as_u64())
             .unwrap_or(4000) as usize;
 
-        let response = match reqwest::get(&url).await {
+        let client = match reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+        {
+            Ok(client) => client,
+            Err(error) => {
+                return ToolExecutionResult::failure(
+                    &invocation.tool_name,
+                    &ToolExecutionError::ExecutionFailed(format!(
+                        "failed to build web client: {error}"
+                    ))
+                    .to_string(),
+                )
+            }
+        };
+
+        let response = match client.get(&url).send().await {
             Ok(response) => response,
             Err(error) => {
                 return ToolExecutionResult::failure(
@@ -339,6 +362,17 @@ impl ToolExecutor {
                 )
             }
         };
+
+        if !response.status().is_success() {
+            return ToolExecutionResult::failure(
+                &invocation.tool_name,
+                &ToolExecutionError::ExecutionFailed(format!(
+                    "web fetch returned status {}",
+                    response.status()
+                ))
+                .to_string(),
+            );
+        }
 
         let body = match response.text().await {
             Ok(body) => body,
@@ -403,10 +437,6 @@ fn resolve_attachment_locator(
     arguments: &serde_json::Value,
     attachments: &[schema::AttachmentRef],
 ) -> Result<String, ToolExecutionError> {
-    if let Some(locator) = arguments.get("locator").and_then(|value| value.as_str()) {
-        return Ok(locator.to_string());
-    }
-
     if let Some(attachment_id) = arguments.get("attachment_id").and_then(|value| value.as_str()) {
         return attachments
             .iter()
@@ -428,9 +458,59 @@ fn resolve_attachment_locator(
             });
     }
 
+    if arguments.get("locator").and_then(|value| value.as_str()).is_some() {
+        return Err(ToolExecutionError::InvalidArguments(
+            "raw locator is not allowed for attachment-scoped tools; use attachment_id or attachment_index"
+                .to_string(),
+        ));
+    }
+
     Err(ToolExecutionError::InvalidArguments(
         "missing required argument: locator, attachment_id, or attachment_index".to_string(),
     ))
+}
+
+fn is_blocked_url(url: &str) -> bool {
+    let parsed = match url::Url::parse(url) {
+        Ok(parsed) => parsed,
+        Err(_) => return true,
+    };
+
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return true,
+    }
+
+    let host = match parsed.host() {
+        Some(host) => host,
+        None => return true,
+    };
+
+    match host {
+        url::Host::Domain(domain) => {
+            let lower = domain.to_ascii_lowercase();
+            lower == "localhost"
+                || lower.ends_with(".localhost")
+                || lower == "metadata.google.internal"
+        }
+        url::Host::Ipv4(ip) => {
+            if cfg!(test) && ip == std::net::Ipv4Addr::new(0, 0, 0, 0) {
+                return false;
+            }
+            ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                || ip.is_broadcast()
+                || ip.is_documentation()
+                || ip.is_unspecified()
+        }
+        url::Host::Ipv6(ip) => {
+            ip.is_loopback()
+                || ip.is_unique_local()
+                || ip.is_unspecified()
+                || ip.is_multicast()
+        }
+    }
 }
 
 fn strip_html_like_tags(body: &str) -> String {
@@ -651,15 +731,25 @@ mod tests {
         )
         .expect("attachment should be written");
 
-        let invocation = ToolInvocation::with_args(
+        let invocation = ToolInvocation::with_value_args(
             "read_attachment_excerpt",
-            &serde_json::json!({
-                "locator": attachment_path.to_string_lossy(),
+            serde_json::json!({
+                "attachment_index": 0,
                 "max_chars": 40,
-            })
-            .to_string(),
+            }),
         );
-        let result = executor.execute(&runtime, &invocation).await;
+        let attachments = vec![schema::AttachmentRef {
+            attachment_id: "attachment-1".to_string(),
+            kind: "file_copy".to_string(),
+            name: "notes.md".to_string(),
+            mime_type: "text/markdown".to_string(),
+            path_or_locator: attachment_path.to_string_lossy().to_string(),
+            size: 128,
+            metadata_json: "{}".to_string(),
+        }];
+        let result = executor
+            .execute_with_attachments(&runtime, &invocation, &attachments)
+            .await;
 
         assert!(result.ok);
         assert_eq!(result.tool_name, "read_attachment_excerpt");
@@ -810,7 +900,7 @@ mod tests {
     async fn tool_executor_can_web_fetch_text_from_url() {
         let runtime = create_test_runtime();
         let executor = ToolExecutor::new();
-        let listener = TcpListener::bind("127.0.0.1:0")
+        let listener = TcpListener::bind("0.0.0.0:0")
             .await
             .expect("listener should bind");
         let address = listener.local_addr().expect("listener should have local addr");
@@ -841,6 +931,48 @@ mod tests {
         assert!(result.ok);
         assert!(result.output_json.as_deref().unwrap_or_default().contains("Web fetch content"));
         assert!(result.rendered_summary.as_deref().unwrap_or_default().contains("Hello"));
+
+        let _ = std::fs::remove_file(&runtime.database_path);
+    }
+
+    #[tokio::test]
+    async fn tool_executor_rejects_raw_locator_for_attachment_scoped_tools() {
+        let runtime = create_test_runtime();
+        let executor = ToolExecutor::new();
+        let invocation = ToolInvocation::with_value_args(
+            "read_text",
+            serde_json::json!({ "locator": "/etc/passwd" }),
+        );
+
+        let result = executor.execute(&runtime, &invocation).await;
+
+        assert!(!result.ok);
+        assert!(result
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("attachment"));
+
+        let _ = std::fs::remove_file(&runtime.database_path);
+    }
+
+    #[tokio::test]
+    async fn tool_executor_rejects_web_fetch_to_localhost() {
+        let runtime = create_test_runtime();
+        let executor = ToolExecutor::new();
+        let invocation = ToolInvocation::with_value_args(
+            "web_fetch",
+            serde_json::json!({ "url": "http://127.0.0.1:3000" }),
+        );
+
+        let result = executor.execute(&runtime, &invocation).await;
+
+        assert!(!result.ok);
+        assert!(result
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("blocked"));
 
         let _ = std::fs::remove_file(&runtime.database_path);
     }

@@ -15,7 +15,7 @@ pub fn session_agent_definition() -> AgentDefinition {
         description: "Distilllab session-level planning agent that understands user intent and decides the next action for the current session.".to_string(),
         responsibility_summary: "Reads the current session and recent timeline, identifies user intent and primary object, decides the next action, and can choose what to do after actions succeed or fail. It does not execute the workflow itself.".to_string(),
         status: "active".to_string(),
-        system_prompt: "You are the Session Agent for Distilllab. Distilllab's primary goal is to distill work content and working process materials into reusable knowledge objects, not to act as a generic note organizer. You are the session-level planner for the current session: understand the current session state, identify user intent, decide the next high-level action, and consider post-action follow-up and failure handling at the session level. Respond with valid JSON only. Do not include markdown fences or extra explanation. The JSON object must contain these fields: intent, action_type, reply_text, primary_object_type, primary_object_id, suggested_run_type, session_summary, tool_invocation, skill_selection, should_continue_planning, failure_hint. Intent must be one of: general_reply, distill_material, deepen_understanding, compose_output. action_type must be one of: direct_reply, request_clarification, tool_call, skill_call, create_run, stop. If intent is distill_material, action_type must be create_run or request_clarification, and create_run should normally use suggested_run_type import_and_distill. Use tool_invocation only when action_type is tool_call. tool_invocation must contain tool_name, arguments, reasoning_summary, and expected_follow_up, where arguments is a JSON object. For read_attachment_excerpt, prefer arguments using attachment_index when current_intake_attachments are present; locator is optional when attachment_index is available. Use skill_selection only when action_type is skill_call. skill_selection must contain skill_key, reasoning_summary, and expected_outcome. Use suggested_run_type only when action_type is create_run. Set should_continue_planning to true when the session should expect a follow-up planning turn after the chosen action finishes, otherwise false. Use failure_hint to summarize what the planner should consider if the chosen action fails. Use null for optional fields when unknown.".to_string(),
+        system_prompt: "You are the Session Agent for Distilllab. Distilllab's primary goal is to distill work content and working process materials into reusable knowledge objects, not to act as a generic note organizer. You are the session-level planner for the current session: understand the current session state, identify user intent, decide the next high-level action, and consider post-action follow-up and failure handling at the session level. Respond with valid JSON only. Do not include markdown fences or extra explanation. The JSON object must contain these fields: intent, action_type, reply_text, primary_object_type, primary_object_id, suggested_run_type, session_summary, tool_invocation, skill_selection, should_continue_planning, failure_hint. Intent must be one of: general_reply, distill_material, deepen_understanding, compose_output. action_type must be one of: direct_reply, request_clarification, tool_call, skill_call, create_run, stop. If intent is distill_material, action_type must be create_run or request_clarification, and create_run should normally use suggested_run_type import_and_distill. Use tool_invocation only when action_type is tool_call. tool_invocation must contain tool_name, arguments, reasoning_summary, and expected_follow_up, where arguments is a JSON object. Prefer list_attachments when you need to discover which attachments are available. Prefer read_attachment_excerpt or read_text when the user asks what a current attachment contains. For read_attachment_excerpt and read_text, prefer arguments using attachment_index when current_intake_attachments are present; use attachment_id only when needed. Prefer web_fetch when the user asks about a URL or webpage and the answer requires reading remote content. Use skill_selection only when action_type is skill_call. skill_selection must contain skill_key, reasoning_summary, and expected_outcome. Use suggested_run_type only when action_type is create_run. Set should_continue_planning to true when the session should expect a follow-up planning turn after the chosen action finishes, otherwise false. Use failure_hint to summarize what the planner should consider if the chosen action fails. Use null for optional fields when unknown.".to_string(),
         default_model_profile: "reasoning_default".to_string(),
         allowed_tool_keys: vec![
             "list_sources".to_string(),
@@ -164,6 +164,112 @@ impl SessionAgent for BasicSessionAgent {
             other => Some(other.to_string()),
         };
 
+        if normalized_message.contains("import")
+            || normalized_message.contains("upload")
+            || normalized_message.contains("bring in")
+            || normalized_message.contains("load these")
+            || normalized_message.contains("here are my notes")
+            || normalized_message.contains("these files")
+            || normalized_message.contains("distill them")
+            || normalized_message.contains("distillation run")
+            || (normalized_message.contains("distill") && normalized_message.contains("work notes"))
+            || (normalized_message.contains("distill") && extract_first_url(&input.intake.user_message).is_some())
+            || (!input.intake.attachments.is_empty()
+                && (normalized_message.contains("distill")
+                    || normalized_message.contains("提炼")
+                    || normalized_message.contains("提取")))
+        {
+            return Ok(SessionAgentDecision {
+                intent: SessionIntent::DistillMaterial,
+                primary_object_type: primary_object_type.or(Some("material".to_string())),
+                primary_object_id,
+                action_type: SessionActionType::CreateRun,
+                next_action: SessionNextAction::CreateRun(RunCreationRequest {
+                    run_type: "import_and_distill".to_string(),
+                    reasoning_summary: Some("Distill material should enter the import_and_distill workflow.".to_string()),
+                }),
+                tool_invocation: None,
+                skill_selection: None,
+                run_creation: Some(RunCreationRequest {
+                    run_type: "import_and_distill".to_string(),
+                    reasoning_summary: Some("Distill material should enter the import_and_distill workflow.".to_string()),
+                }),
+                reply_text: "I will start a distill run for this work material.".to_string(),
+                suggested_run_type: Some("import_and_distill".to_string()),
+                session_summary: Some("Preparing to distill work material".to_string()),
+                should_continue_planning: true,
+                failure_hint: Some("clarify_or_stop".to_string()),
+            });
+        }
+
+        if !input.intake.attachments.is_empty()
+            && (normalized_message.contains("attachment")
+                || normalized_message.contains("attachments")
+                || normalized_message.contains("附件"))
+            && (normalized_message.contains("available")
+                || normalized_message.contains("which")
+                || normalized_message.contains("list")
+                || normalized_message.contains("有哪些")
+                || normalized_message.contains("哪些"))
+        {
+            let tool_invocation = ToolInvocation::new("list_attachments")
+                .with_reasoning("Need to inspect the current attachment list before answering.")
+                .with_expected_follow_up("Summarize which attachments are available.");
+
+            return Ok(SessionAgentDecision {
+                intent: SessionIntent::GeneralReply,
+                primary_object_type,
+                primary_object_id,
+                action_type: SessionActionType::ToolCall,
+                next_action: SessionNextAction::ToolCall(tool_invocation.clone()),
+                tool_invocation: Some(tool_invocation),
+                skill_selection: None,
+                run_creation: None,
+                reply_text: "I will inspect the current attachments before answering.".to_string(),
+                suggested_run_type: None,
+                session_summary: Some("Preparing an attachment lookup before answering".to_string()),
+                should_continue_planning: true,
+                failure_hint: Some("reply_or_clarify".to_string()),
+            });
+        }
+
+        if !input.intake.attachments.is_empty()
+            && (normalized_message.contains("read")
+                || normalized_message.contains("open")
+                || normalized_message.contains("text")
+                || normalized_message.contains("内容")
+                || normalized_message.contains("读取"))
+            && (normalized_message.contains("attachment")
+                || normalized_message.contains("file")
+                || normalized_message.contains("附件"))
+        {
+            let tool_invocation = ToolInvocation::with_value_args(
+                "read_text",
+                serde_json::json!({
+                    "attachment_index": 0,
+                    "max_chars": 1200,
+                }),
+            )
+            .with_reasoning("Need to read the current attachment text before answering.")
+            .with_expected_follow_up("Use the text content to answer directly.");
+
+            return Ok(SessionAgentDecision {
+                intent: SessionIntent::GeneralReply,
+                primary_object_type,
+                primary_object_id,
+                action_type: SessionActionType::ToolCall,
+                next_action: SessionNextAction::ToolCall(tool_invocation.clone()),
+                tool_invocation: Some(tool_invocation),
+                skill_selection: None,
+                run_creation: None,
+                reply_text: "I will read the current attachment before answering.".to_string(),
+                suggested_run_type: None,
+                session_summary: Some("Preparing to read the current attachment before answering".to_string()),
+                should_continue_planning: true,
+                failure_hint: Some("reply_or_clarify".to_string()),
+            });
+        }
+
         if !input.intake.attachments.is_empty()
             && (normalized_message.contains("attachment")
                 || normalized_message.contains("file")
@@ -210,40 +316,31 @@ impl SessionAgent for BasicSessionAgent {
             });
         }
 
-        if normalized_message.contains("import")
-            || normalized_message.contains("upload")
-            || normalized_message.contains("bring in")
-            || normalized_message.contains("load these")
-            || normalized_message.contains("here are my notes")
-            || normalized_message.contains("these files")
-            || normalized_message.contains("distill them")
-            || normalized_message.contains("distillation run")
-            || (normalized_message.contains("distill") && normalized_message.contains("work notes"))
-            || (!input.intake.attachments.is_empty()
-                && (normalized_message.contains("distill")
-                    || normalized_message.contains("提炼")
-                    || normalized_message.contains("提取")))
-        {
+        if let Some(url) = extract_first_url(&input.intake.user_message) {
+            let tool_invocation = ToolInvocation::with_value_args(
+                "web_fetch",
+                serde_json::json!({
+                    "url": url,
+                    "max_chars": 4000,
+                }),
+            )
+            .with_reasoning("Need to inspect the referenced webpage before answering.")
+            .with_expected_follow_up("Use the fetched page content to answer the user's question.");
+
             return Ok(SessionAgentDecision {
-                intent: SessionIntent::DistillMaterial,
-                primary_object_type: primary_object_type.or(Some("material".to_string())),
+                intent: SessionIntent::GeneralReply,
+                primary_object_type,
                 primary_object_id,
-                action_type: SessionActionType::CreateRun,
-                next_action: SessionNextAction::CreateRun(RunCreationRequest {
-                    run_type: "import_and_distill".to_string(),
-                    reasoning_summary: Some("Distill material should enter the import_and_distill workflow.".to_string()),
-                }),
-                tool_invocation: None,
+                action_type: SessionActionType::ToolCall,
+                next_action: SessionNextAction::ToolCall(tool_invocation.clone()),
+                tool_invocation: Some(tool_invocation),
                 skill_selection: None,
-                run_creation: Some(RunCreationRequest {
-                    run_type: "import_and_distill".to_string(),
-                    reasoning_summary: Some("Distill material should enter the import_and_distill workflow.".to_string()),
-                }),
-                reply_text: "I will start a distill run for this work material.".to_string(),
-                suggested_run_type: Some("import_and_distill".to_string()),
-                session_summary: Some("Preparing to distill work material".to_string()),
+                run_creation: None,
+                reply_text: "I will fetch the webpage before answering.".to_string(),
+                suggested_run_type: None,
+                session_summary: Some("Preparing a web fetch before answering".to_string()),
                 should_continue_planning: true,
-                failure_hint: Some("clarify_or_stop".to_string()),
+                failure_hint: Some("reply_or_clarify".to_string()),
             });
         }
 
@@ -372,18 +469,13 @@ impl LlmSessionAgent {
                 .attachments
                 .iter()
                 .map(|attachment| {
-                    let excerpt = read_attachment_excerpt_for_prompt(&attachment.path_or_locator, 240)
-                        .map(|value| format!(" | excerpt: {}", value.replace('\n', " ")))
-                        .unwrap_or_default();
                     format!(
-                        "- attachment_id: {} | name: {} | kind: {} | mime_type: {} | locator: {} | size: {}{}",
+                        "- attachment_id: {} | name: {} | kind: {} | mime_type: {} | size: {}",
                         attachment.attachment_id,
                         attachment.name,
                         attachment.kind,
                         attachment.mime_type,
-                        attachment.path_or_locator,
                         attachment.size,
-                        excerpt,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -472,6 +564,30 @@ impl LlmSessionAgent {
             OpenAiCompatibleChatMessage {
                 role: "assistant".to_string(),
                 content: r#"{"intent":"general_reply","action_type":"tool_call","reply_text":"I will look up related notes before replying.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Preparing a memory lookup before answering","tool_invocation":{"tool_name":"search_memory","arguments":{},"reasoning_summary":null,"expected_follow_up":null},"should_continue_planning":true,"failure_hint":"reply_or_clarify"}"#.to_string(),
+            },
+            OpenAiCompatibleChatMessage {
+                role: "user".to_string(),
+                content: "Show me which attachments are available in this turn".to_string(),
+            },
+            OpenAiCompatibleChatMessage {
+                role: "assistant".to_string(),
+                content: r#"{"intent":"general_reply","action_type":"tool_call","reply_text":"I will inspect the current attachments before replying.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Preparing an attachment lookup before answering","tool_invocation":{"tool_name":"list_attachments","arguments":{},"reasoning_summary":null,"expected_follow_up":null},"should_continue_planning":true,"failure_hint":"reply_or_clarify"}"#.to_string(),
+            },
+            OpenAiCompatibleChatMessage {
+                role: "user".to_string(),
+                content: "Read the current attachment before answering".to_string(),
+            },
+            OpenAiCompatibleChatMessage {
+                role: "assistant".to_string(),
+                content: r#"{"intent":"general_reply","action_type":"tool_call","reply_text":"I will read the current attachment before replying.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Preparing to read the current attachment before answering","tool_invocation":{"tool_name":"read_text","arguments":{"attachment_index":0,"max_chars":400},"reasoning_summary":null,"expected_follow_up":null},"should_continue_planning":true,"failure_hint":"reply_or_clarify"}"#.to_string(),
+            },
+            OpenAiCompatibleChatMessage {
+                role: "user".to_string(),
+                content: "Please check what this URL says before answering".to_string(),
+            },
+            OpenAiCompatibleChatMessage {
+                role: "assistant".to_string(),
+                content: r#"{"intent":"general_reply","action_type":"tool_call","reply_text":"I will fetch the webpage before replying.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Preparing a web fetch before answering","tool_invocation":{"tool_name":"web_fetch","arguments":{"url":"https://example.com"},"reasoning_summary":null,"expected_follow_up":null},"should_continue_planning":true,"failure_hint":"reply_or_clarify"}"#.to_string(),
             },
             OpenAiCompatibleChatMessage {
                 role: "user".to_string(),
@@ -685,14 +801,14 @@ impl SessionAgent for LlmSessionAgent {
     }
 }
 
-fn read_attachment_excerpt_for_prompt(locator: &str, max_chars: usize) -> Option<String> {
-    let content = std::fs::read_to_string(locator).ok()?;
-    let normalized = content.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.is_empty() {
-        return None;
-    }
-
-    Some(normalized.chars().take(max_chars).collect())
+fn extract_first_url(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .find(|token| token.starts_with("http://") || token.starts_with("https://"))
+        .map(|token| {
+            token
+                .trim_end_matches(|ch: char| matches!(ch, '.' | ',' | ')' | ']' | '}' | '"' | '\''))
+                .to_string()
+        })
 }
 
 #[cfg(test)]
@@ -891,6 +1007,180 @@ mod tests {
             Some("read_attachment_excerpt")
         );
         assert!(decision.should_continue_planning);
+    }
+
+    #[tokio::test]
+    async fn basic_session_agent_can_list_attachments_when_user_asks_what_is_available() {
+        let decision = BasicSessionAgent
+            .decide(SessionAgentInput {
+                session: Session {
+                    id: "session-1".to_string(),
+                    title: "Attachment Session".to_string(),
+                    status: SessionStatus::Active,
+                    current_intent: "idle".to_string(),
+                    current_object_type: "none".to_string(),
+                    current_object_id: "none".to_string(),
+                    summary: "Attachment inspection session".to_string(),
+                    started_at: "2026-03-28T00:00:00Z".to_string(),
+                    updated_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                    metadata_json: "{}".to_string(),
+                },
+                recent_messages: vec![],
+                intake: SessionIntake {
+                    session_id: "session-1".to_string(),
+                    user_message: "What attachments are available right now?".to_string(),
+                    attachments: vec![AttachmentRef {
+                        attachment_id: "attachment-1".to_string(),
+                        kind: "file_copy".to_string(),
+                        name: "notes.md".to_string(),
+                        mime_type: "text/markdown".to_string(),
+                        path_or_locator: "/tmp/distilllab/attachments/session-1/notes.md".to_string(),
+                        size: 128,
+                        metadata_json: "{}".to_string(),
+                    }],
+                    current_object_type: None,
+                    current_object_id: None,
+                },
+            })
+            .await
+            .expect("basic session agent should decide");
+
+        assert_eq!(decision.action_type, SessionActionType::ToolCall);
+        assert_eq!(
+            decision.tool_invocation.as_ref().map(|value| value.tool_name.as_str()),
+            Some("list_attachments")
+        );
+    }
+
+    #[tokio::test]
+    async fn basic_session_agent_can_use_read_text_for_local_file_questions() {
+        let decision = BasicSessionAgent
+            .decide(SessionAgentInput {
+                session: Session {
+                    id: "session-1".to_string(),
+                    title: "Local File Session".to_string(),
+                    status: SessionStatus::Active,
+                    current_intent: "idle".to_string(),
+                    current_object_type: "none".to_string(),
+                    current_object_id: "none".to_string(),
+                    summary: "Local file inspection".to_string(),
+                    started_at: "2026-03-28T00:00:00Z".to_string(),
+                    updated_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                    metadata_json: "{}".to_string(),
+                },
+                recent_messages: vec![],
+                intake: SessionIntake {
+                    session_id: "session-1".to_string(),
+                    user_message: "Please read the current attachment text before answering.".to_string(),
+                    attachments: vec![AttachmentRef {
+                        attachment_id: "attachment-1".to_string(),
+                        kind: "file_copy".to_string(),
+                        name: "notes.md".to_string(),
+                        mime_type: "text/markdown".to_string(),
+                        path_or_locator: "/tmp/distilllab/attachments/session-1/notes.md".to_string(),
+                        size: 128,
+                        metadata_json: "{}".to_string(),
+                    }],
+                    current_object_type: None,
+                    current_object_id: None,
+                },
+            })
+            .await
+            .expect("basic session agent should decide");
+
+        assert_eq!(decision.action_type, SessionActionType::ToolCall);
+        assert_eq!(
+            decision.tool_invocation.as_ref().map(|value| value.tool_name.as_str()),
+            Some("read_text")
+        );
+    }
+
+    #[tokio::test]
+    async fn basic_session_agent_can_use_web_fetch_for_url_questions() {
+        let decision = BasicSessionAgent
+            .decide(SessionAgentInput {
+                session: Session {
+                    id: "session-1".to_string(),
+                    title: "Web Session".to_string(),
+                    status: SessionStatus::Active,
+                    current_intent: "idle".to_string(),
+                    current_object_type: "none".to_string(),
+                    current_object_id: "none".to_string(),
+                    summary: "Web inspection".to_string(),
+                    started_at: "2026-03-28T00:00:00Z".to_string(),
+                    updated_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                    metadata_json: "{}".to_string(),
+                },
+                recent_messages: vec![],
+                intake: SessionIntake {
+                    session_id: "session-1".to_string(),
+                    user_message: "Please check what https://example.com says before answering.".to_string(),
+                    attachments: vec![],
+                    current_object_type: None,
+                    current_object_id: None,
+                },
+            })
+            .await
+            .expect("basic session agent should decide");
+
+        assert_eq!(decision.action_type, SessionActionType::ToolCall);
+        assert_eq!(
+            decision.tool_invocation.as_ref().map(|value| value.tool_name.as_str()),
+            Some("web_fetch")
+        );
+        assert_eq!(
+            decision
+                .tool_invocation
+                .as_ref()
+                .and_then(|value| value.arguments.get("url"))
+                .and_then(|value| value.as_str()),
+            Some("https://example.com")
+        );
+    }
+
+    #[tokio::test]
+    async fn basic_session_agent_keeps_distill_requests_ahead_of_web_fetch_heuristics() {
+        let decision = BasicSessionAgent
+            .decide(SessionAgentInput {
+                session: Session {
+                    id: "session-1".to_string(),
+                    title: "Distill URL Session".to_string(),
+                    status: SessionStatus::Active,
+                    current_intent: "idle".to_string(),
+                    current_object_type: "none".to_string(),
+                    current_object_id: "none".to_string(),
+                    summary: "Distill URL request".to_string(),
+                    started_at: "2026-03-28T00:00:00Z".to_string(),
+                    updated_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                    metadata_json: "{}".to_string(),
+                },
+                recent_messages: vec![],
+                intake: SessionIntake {
+                    session_id: "session-1".to_string(),
+                    user_message: "Please distill this URL https://example.com into Distilllab"
+                        .to_string(),
+                    attachments: vec![],
+                    current_object_type: None,
+                    current_object_id: None,
+                },
+            })
+            .await
+            .expect("basic session agent should decide");
+
+        assert_eq!(decision.action_type, SessionActionType::CreateRun);
+        assert_eq!(decision.suggested_run_type.as_deref(), Some("import_and_distill"));
     }
 
     #[test]
@@ -1447,6 +1737,9 @@ mod tests {
         assert!(joined.contains("\"intent\":\"deepen_understanding\""));
         assert!(joined.contains("\"action_type\":\"tool_call\""));
         assert!(joined.contains("\"tool_invocation\":"));
+        assert!(joined.contains("list_attachments"));
+        assert!(joined.contains("read_text"));
+        assert!(joined.contains("web_fetch"));
     }
 
     #[test]
@@ -1539,7 +1832,8 @@ mod tests {
         assert!(messages[0].content.contains("current_intake_attachments:"));
         assert!(messages[0].content.contains("attachment_id: attachment-1"));
         assert!(messages[0].content.contains("name: notes.md"));
-        assert!(messages[0].content.contains("locator: /tmp/distilllab/attachments/session-1/notes.md"));
+        assert!(messages[0].content.contains("mime_type: text/markdown"));
+        assert!(!messages[0].content.contains("locator:"));
     }
 
     #[test]
@@ -1595,8 +1889,8 @@ mod tests {
 
         let messages = agent.build_chat_messages(&input);
 
-        assert!(messages[0].content.contains("excerpt:"));
-        assert!(messages[0].content.contains("Attachment heading"));
+        assert!(!messages[0].content.contains("excerpt:"));
+        assert!(!messages[0].content.contains("Attachment heading"));
 
         let _ = std::fs::remove_file(&attachment_path);
         let _ = std::fs::remove_dir_all(&temp_dir);
