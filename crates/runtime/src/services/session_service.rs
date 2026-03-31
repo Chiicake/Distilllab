@@ -1,6 +1,7 @@
 use crate::app::AppRuntime;
 use crate::contracts::{LlmSessionDebugRequest, SessionIntakePreview, SessionMessageRequest};
 use crate::flows::{build_import_and_distill_handoff_preview, execute_materialize_sources};
+use crate::services::session_intake_coordinator::decide_and_record_intake;
 use agent::{
     BasicSessionAgent, LlmProviderConfig, LlmSessionAgent, SessionAgent, SessionAgentDecision,
     SessionAgentInput, SessionIntent,
@@ -10,12 +11,12 @@ use memory::db::open_database;
 use memory::migrations::run_migrations;
 use memory::run_store::{insert_run, update_run_status};
 use memory::session_message_store::{
-    insert_session_message, list_session_messages_for_session,
+    list_session_messages_for_session, update_session_message_run_and_content,
 };
 use memory::session_store::{
-    get_session_by_id, insert_session, list_sessions as memory_list_sessions, update_session,
+    get_session_by_id, insert_session, list_sessions as memory_list_sessions,
 };
-use schema::{Session, SessionIntake, SessionMessage, SessionMessageRole, SessionStatus};
+use schema::{Session, SessionIntake, SessionMessage, SessionStatus};
 use schema::{Run, RunState};
 use schema::run::RunType;
 use uuid::Uuid;
@@ -51,25 +52,6 @@ fn normalize_optional_api_key(api_key: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
-}
-
-fn build_session_message(
-    session_id: &str,
-    run_id: Option<String>,
-    message_type: &str,
-    role: SessionMessageRole,
-    content: String,
-) -> SessionMessage {
-    SessionMessage {
-        id: format!("message-{}", Uuid::new_v4()),
-        session_id: session_id.to_string(),
-        run_id,
-        message_type: message_type.to_string(),
-        role,
-        content,
-        data_json: "{}".to_string(),
-        created_at: Utc::now().to_string(),
-    }
 }
 
 async fn decide_llm_session_message_with_provider_config(
@@ -110,27 +92,15 @@ async fn send_session_message_with_optional_provider_config(
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
 
-    let mut session = get_session_by_id(&conn, session_id)?.ok_or_else(|| {
+    let session = get_session_by_id(&conn, session_id)?.ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!("session not found: {session_id}"),
         )
     })?;
-
-    let user_session_message = build_session_message(
-        &session.id,
-        None,
-        "user_message",
-        SessionMessageRole::User,
-        user_message.to_string(),
-    );
-    insert_session_message(&conn, &user_session_message)?;
-
-    let recent_messages = list_session_messages_for_session(&conn, &session.id)?;
-    let input = SessionAgentInput {
-        session: session.clone(),
-        recent_messages,
-        intake: SessionIntake {
+    let outcome = decide_and_record_intake(
+        runtime,
+        SessionIntake {
             session_id: session.id.clone(),
             user_message: user_message.to_string(),
             attachments: attachments.clone(),
@@ -143,15 +113,12 @@ async fn send_session_message_with_optional_provider_config(
                 other => Some(other.to_string()),
             },
         },
-    };
+        provider_config,
+    )
+    .await?;
 
-    let decision = if let Some(config) = provider_config {
-        let session_agent = LlmSessionAgent::new(config);
-        session_agent.decide(input).await?
-    } else {
-        let session_agent = BasicSessionAgent;
-        session_agent.decide(input).await?
-    };
+    let decision = outcome.decision;
+    let assistant_message_id = outcome.assistant_message_id;
 
     let created_run = if decision.action_type == agent::SessionActionType::CreateRun {
         let run_type = match decision.suggested_run_type.as_deref() {
@@ -219,34 +186,16 @@ async fn send_session_message_with_optional_provider_config(
         None
     };
 
-    let assistant_message_type = match decision.action_type {
-        agent::SessionActionType::DirectReply => "assistant_message",
-        agent::SessionActionType::RequestClarification => "clarification_message",
-        agent::SessionActionType::ToolCall => "system_message",
-        agent::SessionActionType::CreateRun => "system_message",
+    let final_assistant_content = match &materialize_result {
+        Some(result) => format!("{}\n\n{}", decision.reply_text, result.summary),
+        None => decision.reply_text.clone(),
     };
-
-    let assistant_session_message = build_session_message(
-        &session.id,
-        created_run_id.clone(),
-        assistant_message_type,
-        SessionMessageRole::Assistant,
-        match &materialize_result {
-            Some(result) => format!("{}\n\n{}", decision.reply_text, result.summary),
-            None => decision.reply_text.clone(),
-        },
-    );
-    insert_session_message(&conn, &assistant_session_message)?;
-
-    let now = Utc::now().to_string();
-    session.current_intent = decision.intent.as_str().to_string();
-    session.summary = decision
-        .session_summary
-        .clone()
-        .unwrap_or_else(|| session.summary.clone());
-    session.updated_at = now.clone();
-    session.last_user_message_at = now;
-    update_session(&conn, &session)?;
+    update_session_message_run_and_content(
+        &conn,
+        &assistant_message_id,
+        created_run_id.as_deref(),
+        &final_assistant_content,
+    )?;
 
     Ok(decision)
 }
@@ -919,6 +868,43 @@ mod tests {
         assert!(sources.iter().any(|source| source.source_type.as_str() == "session"));
 
         let _ = std::fs::remove_file(attachment_path);
+    }
+
+    #[tokio::test]
+    async fn session_intake_coordinator_decides_and_records_messages_without_executing_run() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-intake-coordinator-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let outcome = crate::services::session_intake_coordinator::decide_and_record_intake(
+            &runtime,
+            SessionIntake {
+                session_id: session.id.clone(),
+                user_message: "Please distill these work notes into Distilllab".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
+            None,
+        )
+        .await
+        .expect("intake coordinator should decide and record intake");
+
+        assert_eq!(outcome.decision.intent, SessionIntent::DistillMaterial);
+        assert!(outcome.run_input.is_some());
+        assert!(outcome.created_run.is_none());
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let messages = list_session_messages_for_session(&conn, &session.id)
+            .expect("session messages should load");
+        let runs = list_persisted_runs(&conn).expect("runs should load");
+
+        assert_eq!(messages.len(), 2);
+        assert!(runs.is_empty());
     }
 
     #[tokio::test]

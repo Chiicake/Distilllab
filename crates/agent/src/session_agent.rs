@@ -4,7 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use serde::Deserialize;
-use schema::{AttachmentRef, Session, SessionIntake, SessionMessage, SessionMessageRole};
+use schema::{Session, SessionIntake, SessionMessage, SessionMessageRole};
 
 pub fn session_agent_definition() -> AgentDefinition {
     AgentDefinition {
@@ -12,10 +12,10 @@ pub fn session_agent_definition() -> AgentDefinition {
         key: "session_agent".to_string(),
         name: "Session Agent".to_string(),
         kind: "session".to_string(),
-        description: "Distilllab homepage entry agent that understands user intent and decides the next high-level action.".to_string(),
-        responsibility_summary: "Reads the current session and recent timeline, identifies user intent and primary object, then decides whether to reply directly, ask for clarification, or create a run. It does not execute the workflow itself.".to_string(),
+        description: "Distilllab session-level planning agent that understands user intent and decides the next action for the current session.".to_string(),
+        responsibility_summary: "Reads the current session and recent timeline, identifies user intent and primary object, decides the next action, and can choose what to do after actions succeed or fail. It does not execute the workflow itself.".to_string(),
         status: "active".to_string(),
-        system_prompt: "You are the Session Agent for Distilllab. Distilllab's primary goal is to distill work content and working process materials into reusable knowledge objects, not to act as a generic note organizer. Understand the current session state, identify user intent, and decide the next high-level action. Respond with valid JSON only. Do not include markdown fences or extra explanation. The JSON object must contain these fields: intent, action_type, reply_text, primary_object_type, primary_object_id, suggested_run_type, session_summary, tool_call_key. Intent must be one of: general_reply, distill_material, deepen_understanding, compose_output. action_type must be one of: direct_reply, request_clarification, tool_call, create_run. If intent is distill_material, action_type must be create_run or request_clarification, and create_run should normally use suggested_run_type import_and_distill. Use tool_call_key only when action_type is tool_call. Use suggested_run_type only when action_type is create_run. Use null for optional fields when unknown.".to_string(),
+        system_prompt: "You are the Session Agent for Distilllab. Distilllab's primary goal is to distill work content and working process materials into reusable knowledge objects, not to act as a generic note organizer. You are the session-level planner for the current session: understand the current session state, identify user intent, decide the next high-level action, and consider post-action follow-up and failure handling at the session level. Respond with valid JSON only. Do not include markdown fences or extra explanation. The JSON object must contain these fields: intent, action_type, reply_text, primary_object_type, primary_object_id, suggested_run_type, session_summary, tool_call_key, should_continue_planning, failure_hint. Intent must be one of: general_reply, distill_material, deepen_understanding, compose_output. action_type must be one of: direct_reply, request_clarification, tool_call, create_run. If intent is distill_material, action_type must be create_run or request_clarification, and create_run should normally use suggested_run_type import_and_distill. Use tool_call_key only when action_type is tool_call. Use suggested_run_type only when action_type is create_run. Set should_continue_planning to true when the session should expect a follow-up planning turn after the chosen action finishes, otherwise false. Use failure_hint to summarize what the planner should consider if the chosen action fails. Use null for optional fields when unknown.".to_string(),
         default_model_profile: "reasoning_default".to_string(),
         allowed_tool_keys: vec![
             "list_sources".to_string(),
@@ -107,6 +107,8 @@ pub struct SessionAgentDecision {
     pub reply_text: String,
     pub suggested_run_type: Option<String>,
     pub session_summary: Option<String>,
+    pub should_continue_planning: bool,
+    pub failure_hint: Option<String>,
 }
 
 #[async_trait]
@@ -152,6 +154,8 @@ impl SessionAgent for BasicSessionAgent {
                 reply_text: "I will start a distill run for this work material.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
                 session_summary: Some("Preparing to distill work material".to_string()),
+                should_continue_planning: true,
+                failure_hint: Some("clarify_or_stop".to_string()),
             });
         }
 
@@ -169,6 +173,8 @@ impl SessionAgent for BasicSessionAgent {
                 reply_text: "I will start a deepening run to explore this topic further.".to_string(),
                 suggested_run_type: Some("deepening".to_string()),
                 session_summary: Some("Preparing to deepen understanding".to_string()),
+                should_continue_planning: true,
+                failure_hint: Some("clarify_or_stop".to_string()),
             });
         }
 
@@ -187,6 +193,8 @@ impl SessionAgent for BasicSessionAgent {
                 reply_text: "I will prepare a compose and verify run for this output request.".to_string(),
                 suggested_run_type: Some("compose_and_verify".to_string()),
                 session_summary: Some("Preparing to compose an output".to_string()),
+                should_continue_planning: true,
+                failure_hint: Some("clarify_or_stop".to_string()),
             });
         }
 
@@ -199,6 +207,8 @@ impl SessionAgent for BasicSessionAgent {
             reply_text: "Hello! I am ready to help with your Distilllab session.".to_string(),
             suggested_run_type: None,
             session_summary: Some("General session assistance".to_string()),
+            should_continue_planning: false,
+            failure_hint: None,
         })
     }
 }
@@ -224,6 +234,8 @@ struct StructuredSessionAgentDecision {
     primary_object_id: Option<String>,
     suggested_run_type: Option<String>,
     session_summary: Option<String>,
+    should_continue_planning: Option<bool>,
+    failure_hint: Option<String>,
 }
 
 impl LlmSessionAgent {
@@ -282,7 +294,7 @@ impl LlmSessionAgent {
             },
             OpenAiCompatibleChatMessage {
                 role: "assistant".to_string(),
-                content: r#"{"intent":"distill_material","action_type":"create_run","reply_text":"I will start a distill run for this work material.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":"import_and_distill","session_summary":"Preparing to distill work material","tool_call_key":null}"#.to_string(),
+                content: r#"{"intent":"distill_material","action_type":"create_run","reply_text":"I will start a distill run for this work material.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":"import_and_distill","session_summary":"Preparing to distill work material","tool_call_key":null,"should_continue_planning":true,"failure_hint":"clarify_or_stop"}"#.to_string(),
             },
             OpenAiCompatibleChatMessage {
                 role: "user".to_string(),
@@ -290,7 +302,7 @@ impl LlmSessionAgent {
             },
             OpenAiCompatibleChatMessage {
                 role: "assistant".to_string(),
-                content: r#"{"intent":"compose_output","action_type":"create_run","reply_text":"I will prepare a compose and verify run for this output request.","primary_object_type":"project","primary_object_id":"project-current","suggested_run_type":"compose_and_verify","session_summary":"Preparing to compose an output","tool_call_key":null}"#.to_string(),
+                content: r#"{"intent":"compose_output","action_type":"create_run","reply_text":"I will prepare a compose and verify run for this output request.","primary_object_type":"project","primary_object_id":"project-current","suggested_run_type":"compose_and_verify","session_summary":"Preparing to compose an output","tool_call_key":null,"should_continue_planning":true,"failure_hint":"clarify_or_stop"}"#.to_string(),
             },
             OpenAiCompatibleChatMessage {
                 role: "user".to_string(),
@@ -298,7 +310,7 @@ impl LlmSessionAgent {
             },
             OpenAiCompatibleChatMessage {
                 role: "assistant".to_string(),
-                content: r#"{"intent":"deepen_understanding","action_type":"create_run","reply_text":"I will start a deepening run to explore this topic further.","primary_object_type":"asset","primary_object_id":"asset-current","suggested_run_type":"deepening","session_summary":"Preparing to deepen understanding","tool_call_key":null}"#.to_string(),
+                content: r#"{"intent":"deepen_understanding","action_type":"create_run","reply_text":"I will start a deepening run to explore this topic further.","primary_object_type":"asset","primary_object_id":"asset-current","suggested_run_type":"deepening","session_summary":"Preparing to deepen understanding","tool_call_key":null,"should_continue_planning":true,"failure_hint":"clarify_or_stop"}"#.to_string(),
             },
             OpenAiCompatibleChatMessage {
                 role: "user".to_string(),
@@ -306,7 +318,7 @@ impl LlmSessionAgent {
             },
             OpenAiCompatibleChatMessage {
                 role: "assistant".to_string(),
-                content: r#"{"intent":"general_reply","action_type":"tool_call","reply_text":"I will look up related notes before replying.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Preparing a memory lookup before answering","tool_call_key":"search_memory"}"#.to_string(),
+                content: r#"{"intent":"general_reply","action_type":"tool_call","reply_text":"I will look up related notes before replying.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Preparing a memory lookup before answering","tool_call_key":"search_memory","should_continue_planning":true,"failure_hint":"reply_or_clarify"}"#.to_string(),
             },
             OpenAiCompatibleChatMessage {
                 role: "user".to_string(),
@@ -314,7 +326,7 @@ impl LlmSessionAgent {
             },
             OpenAiCompatibleChatMessage {
                 role: "assistant".to_string(),
-                content: r#"{"intent":"general_reply","action_type":"direct_reply","reply_text":"Here is a concise summary of the current session.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Providing a direct session summary","tool_call_key":null}"#.to_string(),
+                content: r#"{"intent":"general_reply","action_type":"direct_reply","reply_text":"Here is a concise summary of the current session.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Providing a direct session summary","tool_call_key":null,"should_continue_planning":false,"failure_hint":null}"#.to_string(),
             },
         ]
     }
@@ -323,6 +335,7 @@ impl LlmSessionAgent {
         match action_type {
             "direct_reply" => Some(SessionActionType::DirectReply),
             "request_clarification" => Some(SessionActionType::RequestClarification),
+            "tool_call" => Some(SessionActionType::ToolCall),
             "create_run" => Some(SessionActionType::CreateRun),
             _ => None,
         }
@@ -341,6 +354,8 @@ impl LlmSessionAgent {
             reply_text: parsed.reply_text,
             suggested_run_type: parsed.suggested_run_type,
             session_summary: parsed.session_summary,
+            should_continue_planning: parsed.should_continue_planning.unwrap_or(false),
+            failure_hint: parsed.failure_hint,
         };
 
         if decision.intent == SessionIntent::DistillMaterial
@@ -349,6 +364,8 @@ impl LlmSessionAgent {
             decision.action_type = SessionActionType::CreateRun;
             decision.suggested_run_type = Some("import_and_distill".to_string());
             decision.tool_call_key = None;
+            decision.should_continue_planning = true;
+            decision.failure_hint = Some("clarify_or_stop".to_string());
         }
 
         Some(decision)
@@ -364,6 +381,8 @@ impl LlmSessionAgent {
             reply_text: reply_text.to_string(),
             suggested_run_type: None,
             session_summary: Some("LLM replied to the current session message".to_string()),
+            should_continue_planning: false,
+            failure_hint: None,
         }
     }
 
@@ -433,6 +452,20 @@ mod tests {
     }
 
     #[test]
+    fn session_agent_definition_describes_session_level_planning_role() {
+        let definition = session_agent_definition();
+
+        assert!(definition.responsibility_summary.contains("next action"));
+        assert!(
+            definition
+                .responsibility_summary
+                .contains("after actions succeed or fail")
+        );
+        assert!(definition.system_prompt.contains("post-action follow-up"));
+        assert!(definition.system_prompt.contains("failure handling"));
+    }
+
+    #[test]
     fn session_agent_decision_uses_structured_action_type() {
         let decision = SessionAgentDecision {
             intent: SessionIntent::DistillMaterial,
@@ -443,9 +476,13 @@ mod tests {
             reply_text: "I will start a distill run for this work material.".to_string(),
             suggested_run_type: Some("import_and_distill".to_string()),
             session_summary: Some("Preparing to distill work material".to_string()),
+            should_continue_planning: true,
+            failure_hint: Some("clarify_or_stop".to_string()),
         };
 
         assert_eq!(decision.action_type, SessionActionType::CreateRun);
+        assert!(decision.should_continue_planning);
+        assert_eq!(decision.failure_hint.as_deref(), Some("clarify_or_stop"));
     }
 
     #[test]
@@ -532,6 +569,8 @@ mod tests {
         assert_eq!(decision.action_type, SessionActionType::DirectReply);
         assert_eq!(decision.intent, SessionIntent::GeneralReply);
         assert_eq!(decision.tool_call_key, None);
+        assert!(!decision.should_continue_planning);
+        assert_eq!(decision.failure_hint, None);
         assert_eq!(
             decision.reply_text,
             "Hello! I am ready to help with your Distilllab session."

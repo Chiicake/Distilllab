@@ -60,6 +60,20 @@ pub fn list_session_messages_for_session(
     Ok(messages)
 }
 
+pub fn update_session_message_run_and_content(
+    conn: &Connection,
+    message_id: &str,
+    run_id: Option<&str>,
+    content: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE session_messages SET run_id = ?1, content = ?2 WHERE id = ?3",
+        params![run_id, content, message_id],
+    )?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,5 +105,38 @@ mod tests {
         assert_eq!(messages[0].id, "message-1");
         assert_eq!(messages[0].role.as_str(), "user");
         assert_eq!(messages[0].content, "Hello Distilllab");
+    }
+
+    #[test]
+    fn updates_session_message_run_and_content() {
+        let conn = Connection::open_in_memory().expect("failed to open in-memory database");
+        run_migrations(&conn).expect("failed to run migrations");
+
+        let message = SessionMessage {
+            id: "message-1".to_string(),
+            session_id: "session-1".to_string(),
+            run_id: None,
+            message_type: "system_message".to_string(),
+            role: SessionMessageRole::Assistant,
+            content: "Initial reply".to_string(),
+            data_json: "{}".to_string(),
+            created_at: "2026-03-29T00:00:00Z".to_string(),
+        };
+
+        insert_session_message(&conn, &message).expect("failed to insert session message");
+        update_session_message_run_and_content(
+            &conn,
+            "message-1",
+            Some("run-1"),
+            "Updated reply with run summary",
+        )
+        .expect("failed to update session message");
+
+        let messages = list_session_messages_for_session(&conn, "session-1")
+            .expect("failed to list session messages");
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].run_id.as_deref(), Some("run-1"));
+        assert_eq!(messages[0].content, "Updated reply with run summary");
     }
 }
