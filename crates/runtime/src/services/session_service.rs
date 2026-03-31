@@ -895,7 +895,16 @@ mod tests {
             primary_object_type: Some("material".to_string()),
             primary_object_id: None,
             action_type: agent::SessionActionType::CreateRun,
+            next_action: agent::SessionNextAction::CreateRun(agent::RunCreationRequest {
+                run_type: "import_and_distill".to_string(),
+                reasoning_summary: None,
+            }),
             tool_invocation: None,
+            skill_selection: None,
+            run_creation: Some(agent::RunCreationRequest {
+                run_type: "import_and_distill".to_string(),
+                reasoning_summary: None,
+            }),
             reply_text: "I will start a distill run for this work material.".to_string(),
             suggested_run_type: Some("import_and_distill".to_string()),
             session_summary: Some("Preparing to distill work material".to_string()),

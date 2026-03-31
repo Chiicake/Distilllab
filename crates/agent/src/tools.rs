@@ -77,7 +77,7 @@ impl ToolDefinition {
 ///
 /// This is what the planner emits when it decides to call a tool.
 /// In the A-now model, only a single ToolInvocation is attached to an action decision.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolInvocation {
     /// The name of the tool to invoke.
     pub tool_name: String,

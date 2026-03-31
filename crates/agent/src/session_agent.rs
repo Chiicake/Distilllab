@@ -1,6 +1,6 @@
 use crate::{
     send_chat_completion_request, AgentDefinition, AgentError, LlmProviderConfig,
-    OpenAiCompatibleChatMessage, OpenAiCompatibleChatRequest, ToolInvocation,
+    OpenAiCompatibleChatMessage, OpenAiCompatibleChatRequest, SkillSelection, ToolInvocation,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -15,7 +15,7 @@ pub fn session_agent_definition() -> AgentDefinition {
         description: "Distilllab session-level planning agent that understands user intent and decides the next action for the current session.".to_string(),
         responsibility_summary: "Reads the current session and recent timeline, identifies user intent and primary object, decides the next action, and can choose what to do after actions succeed or fail. It does not execute the workflow itself.".to_string(),
         status: "active".to_string(),
-        system_prompt: "You are the Session Agent for Distilllab. Distilllab's primary goal is to distill work content and working process materials into reusable knowledge objects, not to act as a generic note organizer. You are the session-level planner for the current session: understand the current session state, identify user intent, decide the next high-level action, and consider post-action follow-up and failure handling at the session level. Respond with valid JSON only. Do not include markdown fences or extra explanation. The JSON object must contain these fields: intent, action_type, reply_text, primary_object_type, primary_object_id, suggested_run_type, session_summary, tool_invocation, should_continue_planning, failure_hint. Intent must be one of: general_reply, distill_material, deepen_understanding, compose_output. action_type must be one of: direct_reply, request_clarification, tool_call, create_run. If intent is distill_material, action_type must be create_run or request_clarification, and create_run should normally use suggested_run_type import_and_distill. Use tool_invocation only when action_type is tool_call. tool_invocation must contain tool_name, arguments_json, reasoning_summary, and expected_follow_up. Use suggested_run_type only when action_type is create_run. Set should_continue_planning to true when the session should expect a follow-up planning turn after the chosen action finishes, otherwise false. Use failure_hint to summarize what the planner should consider if the chosen action fails. Use null for optional fields when unknown.".to_string(),
+        system_prompt: "You are the Session Agent for Distilllab. Distilllab's primary goal is to distill work content and working process materials into reusable knowledge objects, not to act as a generic note organizer. You are the session-level planner for the current session: understand the current session state, identify user intent, decide the next high-level action, and consider post-action follow-up and failure handling at the session level. Respond with valid JSON only. Do not include markdown fences or extra explanation. The JSON object must contain these fields: intent, action_type, reply_text, primary_object_type, primary_object_id, suggested_run_type, session_summary, tool_invocation, skill_selection, should_continue_planning, failure_hint. Intent must be one of: general_reply, distill_material, deepen_understanding, compose_output. action_type must be one of: direct_reply, request_clarification, tool_call, skill_call, create_run, stop. If intent is distill_material, action_type must be create_run or request_clarification, and create_run should normally use suggested_run_type import_and_distill. Use tool_invocation only when action_type is tool_call. tool_invocation must contain tool_name, arguments_json, reasoning_summary, and expected_follow_up. Use skill_selection only when action_type is skill_call. skill_selection must contain skill_key, reasoning_summary, and expected_outcome. Use suggested_run_type only when action_type is create_run. Set should_continue_planning to true when the session should expect a follow-up planning turn after the chosen action finishes, otherwise false. Use failure_hint to summarize what the planner should consider if the chosen action fails. Use null for optional fields when unknown.".to_string(),
         default_model_profile: "reasoning_default".to_string(),
         allowed_tool_keys: vec![
             "list_sources".to_string(),
@@ -24,6 +24,12 @@ pub fn session_agent_definition() -> AgentDefinition {
             "get_session".to_string(),
             "get_project".to_string(),
             "get_asset".to_string(),
+            "search_memory".to_string(),
+        ],
+        allowed_skill_keys: vec![
+            "import_and_distill_skill".to_string(),
+            "deepen_asset_skill".to_string(),
+            "compose_and_verify_skill".to_string(),
         ],
         input_object_types: vec![
             "session".to_string(),
@@ -47,7 +53,9 @@ pub enum SessionActionType {
     DirectReply,
     RequestClarification,
     ToolCall,
+    SkillCall,
     CreateRun,
+    Stop,
 }
 
 impl SessionActionType {
@@ -56,9 +64,27 @@ impl SessionActionType {
             SessionActionType::DirectReply => "direct_reply",
             SessionActionType::RequestClarification => "request_clarification",
             SessionActionType::ToolCall => "tool_call",
+            SessionActionType::SkillCall => "skill_call",
             SessionActionType::CreateRun => "create_run",
+            SessionActionType::Stop => "stop",
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunCreationRequest {
+    pub run_type: String,
+    pub reasoning_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionNextAction {
+    DirectReply,
+    RequestClarification,
+    ToolCall(ToolInvocation),
+    SkillCall(SkillSelection),
+    CreateRun(RunCreationRequest),
+    Stop,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,7 +129,10 @@ pub struct SessionAgentDecision {
     pub primary_object_type: Option<String>,
     pub primary_object_id: Option<String>,
     pub action_type: SessionActionType,
+    pub next_action: SessionNextAction,
     pub tool_invocation: Option<ToolInvocation>,
+    pub skill_selection: Option<SkillSelection>,
+    pub run_creation: Option<RunCreationRequest>,
     pub reply_text: String,
     pub suggested_run_type: Option<String>,
     pub session_summary: Option<String>,
@@ -150,7 +179,16 @@ impl SessionAgent for BasicSessionAgent {
                 primary_object_type: primary_object_type.or(Some("material".to_string())),
                 primary_object_id,
                 action_type: SessionActionType::CreateRun,
+                next_action: SessionNextAction::CreateRun(RunCreationRequest {
+                    run_type: "import_and_distill".to_string(),
+                    reasoning_summary: Some("Distill material should enter the import_and_distill workflow.".to_string()),
+                }),
                 tool_invocation: None,
+                skill_selection: None,
+                run_creation: Some(RunCreationRequest {
+                    run_type: "import_and_distill".to_string(),
+                    reasoning_summary: Some("Distill material should enter the import_and_distill workflow.".to_string()),
+                }),
                 reply_text: "I will start a distill run for this work material.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
                 session_summary: Some("Preparing to distill work material".to_string()),
@@ -169,7 +207,16 @@ impl SessionAgent for BasicSessionAgent {
                 primary_object_type,
                 primary_object_id,
                 action_type: SessionActionType::CreateRun,
+                next_action: SessionNextAction::CreateRun(RunCreationRequest {
+                    run_type: "deepening".to_string(),
+                    reasoning_summary: Some("This request needs a deepening workflow.".to_string()),
+                }),
                 tool_invocation: None,
+                skill_selection: None,
+                run_creation: Some(RunCreationRequest {
+                    run_type: "deepening".to_string(),
+                    reasoning_summary: Some("This request needs a deepening workflow.".to_string()),
+                }),
                 reply_text: "I will start a deepening run to explore this topic further.".to_string(),
                 suggested_run_type: Some("deepening".to_string()),
                 session_summary: Some("Preparing to deepen understanding".to_string()),
@@ -189,7 +236,22 @@ impl SessionAgent for BasicSessionAgent {
                 primary_object_type,
                 primary_object_id,
                 action_type: SessionActionType::CreateRun,
+                next_action: SessionNextAction::CreateRun(RunCreationRequest {
+                    run_type: "compose_and_verify".to_string(),
+                    reasoning_summary: Some(
+                        "This output request should enter the compose_and_verify workflow."
+                            .to_string(),
+                    ),
+                }),
                 tool_invocation: None,
+                skill_selection: None,
+                run_creation: Some(RunCreationRequest {
+                    run_type: "compose_and_verify".to_string(),
+                    reasoning_summary: Some(
+                        "This output request should enter the compose_and_verify workflow."
+                            .to_string(),
+                    ),
+                }),
                 reply_text: "I will prepare a compose and verify run for this output request.".to_string(),
                 suggested_run_type: Some("compose_and_verify".to_string()),
                 session_summary: Some("Preparing to compose an output".to_string()),
@@ -203,7 +265,10 @@ impl SessionAgent for BasicSessionAgent {
             primary_object_type,
             primary_object_id,
             action_type: SessionActionType::DirectReply,
+            next_action: SessionNextAction::DirectReply,
             tool_invocation: None,
+            skill_selection: None,
+            run_creation: None,
             reply_text: "Hello! I am ready to help with your Distilllab session.".to_string(),
             suggested_run_type: None,
             session_summary: Some("General session assistance".to_string()),
@@ -230,6 +295,7 @@ struct StructuredSessionAgentDecision {
     action_type: String,
     tool_call_key: Option<String>,
     tool_invocation: Option<ToolInvocation>,
+    skill_selection: Option<SkillSelection>,
     reply_text: String,
     primary_object_type: Option<String>,
     primary_object_id: Option<String>,
@@ -309,7 +375,7 @@ impl LlmSessionAgent {
             },
             OpenAiCompatibleChatMessage {
                 role: "assistant".to_string(),
-                content: r#"{"intent":"compose_output","action_type":"create_run","reply_text":"I will prepare a compose and verify run for this output request.","primary_object_type":"project","primary_object_id":"project-current","suggested_run_type":"compose_and_verify","session_summary":"Preparing to compose an output","tool_invocation":null,"should_continue_planning":true,"failure_hint":"clarify_or_stop"}"#.to_string(),
+                content: r#"{"intent":"compose_output","action_type":"create_run","reply_text":"I will prepare a compose and verify run for this output request.","primary_object_type":"project","primary_object_id":"project-current","suggested_run_type":"compose_and_verify","session_summary":"Preparing to compose an output","tool_invocation":null,"skill_selection":null,"should_continue_planning":true,"failure_hint":"clarify_or_stop"}"#.to_string(),
             },
             OpenAiCompatibleChatMessage {
                 role: "user".to_string(),
@@ -343,7 +409,9 @@ impl LlmSessionAgent {
             "direct_reply" => Some(SessionActionType::DirectReply),
             "request_clarification" => Some(SessionActionType::RequestClarification),
             "tool_call" => Some(SessionActionType::ToolCall),
+            "skill_call" => Some(SessionActionType::SkillCall),
             "create_run" => Some(SessionActionType::CreateRun),
+            "stop" => Some(SessionActionType::Stop),
             _ => None,
         }
     }
@@ -356,13 +424,35 @@ impl LlmSessionAgent {
                 .tool_call_key
                 .map(|tool_name| ToolInvocation::new(&tool_name))
         });
+        let skill_selection = parsed.skill_selection;
+        let run_creation = parsed.suggested_run_type.as_ref().map(|run_type| RunCreationRequest {
+            run_type: run_type.clone(),
+            reasoning_summary: None,
+        });
+        let next_action = match action_type {
+            SessionActionType::DirectReply => SessionNextAction::DirectReply,
+            SessionActionType::RequestClarification => SessionNextAction::RequestClarification,
+            SessionActionType::ToolCall => {
+                SessionNextAction::ToolCall(tool_invocation.clone()?)
+            }
+            SessionActionType::SkillCall => {
+                SessionNextAction::SkillCall(skill_selection.clone()?)
+            }
+            SessionActionType::CreateRun => {
+                SessionNextAction::CreateRun(run_creation.clone()?)
+            }
+            SessionActionType::Stop => SessionNextAction::Stop,
+        };
 
         let mut decision = SessionAgentDecision {
             intent: SessionIntent::from_str(parsed.intent.as_str())?,
             primary_object_type: parsed.primary_object_type,
             primary_object_id: parsed.primary_object_id,
             action_type: action_type.clone(),
+            next_action,
             tool_invocation,
+            skill_selection,
+            run_creation,
             reply_text: parsed.reply_text,
             suggested_run_type: parsed.suggested_run_type,
             session_summary: parsed.session_summary,
@@ -379,8 +469,27 @@ impl LlmSessionAgent {
                     return None;
                 }
             }
+            SessionActionType::SkillCall => {
+                if decision.skill_selection.is_none() {
+                    return None;
+                }
+                if decision.tool_invocation.is_some() || decision.run_creation.is_some() {
+                    return None;
+                }
+            }
+            SessionActionType::CreateRun => {
+                if decision.run_creation.is_none() {
+                    return None;
+                }
+                if decision.tool_invocation.is_some() || decision.skill_selection.is_some() {
+                    return None;
+                }
+            }
             _ => {
                 if decision.tool_invocation.is_some() {
+                    return None;
+                }
+                if decision.skill_selection.is_some() || decision.run_creation.is_some() {
                     return None;
                 }
             }
@@ -390,8 +499,17 @@ impl LlmSessionAgent {
             && decision.action_type == SessionActionType::DirectReply
         {
             decision.action_type = SessionActionType::CreateRun;
+            decision.next_action = SessionNextAction::CreateRun(RunCreationRequest {
+                run_type: "import_and_distill".to_string(),
+                reasoning_summary: Some("Distill material should enter the import_and_distill workflow.".to_string()),
+            });
             decision.suggested_run_type = Some("import_and_distill".to_string());
             decision.tool_invocation = None;
+            decision.skill_selection = None;
+            decision.run_creation = Some(RunCreationRequest {
+                run_type: "import_and_distill".to_string(),
+                reasoning_summary: Some("Distill material should enter the import_and_distill workflow.".to_string()),
+            });
             decision.should_continue_planning = true;
             decision.failure_hint = Some("clarify_or_stop".to_string());
         }
@@ -416,7 +534,10 @@ impl LlmSessionAgent {
             primary_object_type: None,
             primary_object_id: None,
             action_type: SessionActionType::DirectReply,
+            next_action: SessionNextAction::DirectReply,
             tool_invocation: None,
+            skill_selection: None,
+            run_creation: None,
             reply_text: reply_text.to_string(),
             suggested_run_type: None,
             session_summary: Some("LLM replied to the current session message".to_string()),
@@ -431,7 +552,10 @@ impl LlmSessionAgent {
             primary_object_type: None,
             primary_object_id: None,
             action_type: SessionActionType::RequestClarification,
+            next_action: SessionNextAction::RequestClarification,
             tool_invocation: None,
+            skill_selection: None,
+            run_creation: None,
             reply_text: "I need a bit more context before I can decide the next step for this session.".to_string(),
             suggested_run_type: None,
             session_summary: Some("Requesting clarification for the current session turn".to_string()),
@@ -484,8 +608,10 @@ impl SessionAgent for LlmSessionAgent {
 #[cfg(test)]
 mod tests {
     use super::{
-        BasicSessionAgent, LlmSessionAgent, SessionActionType, SessionAgent,
-        SessionAgentDecision, SessionAgentInput, SessionIntent, session_agent_definition,
+        BasicSessionAgent, LlmSessionAgent, RunCreationRequest, SessionActionType, SessionAgent,
+        SessionAgentDecision, SessionAgentInput, SessionIntent, SessionNextAction,
+        SkillSelection,
+        session_agent_definition,
     };
     use crate::LlmProviderConfig;
     use schema::{
@@ -524,13 +650,40 @@ mod tests {
     }
 
     #[test]
+    fn session_agent_definition_exposes_allowed_skill_keys() {
+        let definition = session_agent_definition();
+
+        assert!(definition.allowed_skill_keys.contains(&"import_and_distill_skill".to_string()));
+        assert!(definition.allowed_skill_keys.contains(&"deepen_asset_skill".to_string()));
+        assert!(definition.allowed_skill_keys.contains(&"compose_and_verify_skill".to_string()));
+    }
+
+    #[test]
+    fn session_agent_definition_declares_tools_used_by_examples_and_skills() {
+        let definition = session_agent_definition();
+
+        assert!(definition.allowed_tool_keys.contains(&"search_memory".to_string()));
+        assert!(definition.allowed_tool_keys.contains(&"get_project".to_string()));
+        assert!(definition.allowed_tool_keys.contains(&"get_asset".to_string()));
+    }
+
+    #[test]
     fn session_agent_decision_uses_structured_action_type() {
         let decision = SessionAgentDecision {
             intent: SessionIntent::DistillMaterial,
             primary_object_type: Some("source".to_string()),
             primary_object_id: None,
             action_type: SessionActionType::CreateRun,
+            next_action: SessionNextAction::CreateRun(RunCreationRequest {
+                run_type: "import_and_distill".to_string(),
+                reasoning_summary: None,
+            }),
             tool_invocation: None,
+            skill_selection: None,
+            run_creation: Some(RunCreationRequest {
+                run_type: "import_and_distill".to_string(),
+                reasoning_summary: None,
+            }),
             reply_text: "I will start a distill run for this work material.".to_string(),
             suggested_run_type: Some("import_and_distill".to_string()),
             session_summary: Some("Preparing to distill work material".to_string()),
@@ -539,8 +692,67 @@ mod tests {
         };
 
         assert_eq!(decision.action_type, SessionActionType::CreateRun);
+        assert!(matches!(decision.next_action, SessionNextAction::CreateRun(_)));
         assert!(decision.should_continue_planning);
         assert_eq!(decision.failure_hint.as_deref(), Some("clarify_or_stop"));
+    }
+
+    #[tokio::test]
+    async fn skill_selection_contract_stays_distinct_from_run_and_tool_contracts() {
+        let selection = SkillSelection::new("compose_and_verify_skill")
+            .with_reasoning("Need a reusable output strategy")
+            .with_expected_outcome("Produce a checked draft");
+
+        assert_eq!(selection.skill_key, "compose_and_verify_skill");
+        assert_eq!(
+            selection.reasoning_summary.as_deref(),
+            Some("Need a reusable output strategy")
+        );
+        assert_eq!(
+            selection.expected_outcome.as_deref(),
+            Some("Produce a checked draft")
+        );
+    }
+
+    #[tokio::test]
+    async fn basic_session_agent_keeps_distill_material_on_create_run() {
+        let decision = BasicSessionAgent
+            .decide(SessionAgentInput {
+                session: Session {
+                    id: "session-1".to_string(),
+                    title: "Distill Session".to_string(),
+                    status: SessionStatus::Active,
+                    current_intent: "idle".to_string(),
+                    current_object_type: "none".to_string(),
+                    current_object_id: "none".to_string(),
+                    summary: "Distill something".to_string(),
+                    started_at: "2026-03-28T00:00:00Z".to_string(),
+                    updated_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                    metadata_json: "{}".to_string(),
+                },
+                recent_messages: vec![],
+                intake: SessionIntake {
+                    session_id: "session-1".to_string(),
+                    user_message: "Please distill these work notes into Distilllab".to_string(),
+                    attachments: vec![],
+                    current_object_type: None,
+                    current_object_id: None,
+                },
+            })
+            .await
+            .expect("basic session agent should decide");
+
+        assert_eq!(decision.intent, SessionIntent::DistillMaterial);
+        assert_eq!(decision.action_type, SessionActionType::CreateRun);
+        assert!(matches!(decision.next_action, SessionNextAction::CreateRun(_)));
+        assert_eq!(
+            decision.run_creation.as_ref().map(|value| value.run_type.as_str()),
+            Some("import_and_distill")
+        );
+        assert!(decision.skill_selection.is_none());
     }
 
     #[test]
@@ -898,6 +1110,11 @@ mod tests {
         assert_eq!(decision.intent, SessionIntent::ComposeOutput);
         assert_eq!(decision.primary_object_type.as_deref(), Some("project"));
         assert_eq!(decision.primary_object_id.as_deref(), Some("project-1"));
+        assert_eq!(
+            decision.run_creation.as_ref().map(|value| value.run_type.as_str()),
+            Some("compose_and_verify")
+        );
+        assert!(decision.skill_selection.is_none());
         assert_eq!(decision.suggested_run_type.as_deref(), Some("compose_and_verify"));
     }
 

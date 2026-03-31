@@ -39,7 +39,9 @@ fn format_action_type(action_type: &SessionActionType) -> &'static str {
         SessionActionType::DirectReply => "direct_reply",
         SessionActionType::RequestClarification => "request_clarification",
         SessionActionType::ToolCall => "tool_call",
+        SessionActionType::SkillCall => "skill_call",
         SessionActionType::CreateRun => "create_run",
+        SessionActionType::Stop => "stop",
     }
 }
 
@@ -742,7 +744,10 @@ mod tests {
         format_app_config_text, format_intake_preview_text, format_llm_debug_comparison_text,
         format_provider_test_text, format_session_agent_decision_text, format_session_messages_text,
     };
-    use agent::{SessionActionType, SessionAgentDecision, SessionIntent};
+    use agent::{
+        RunCreationRequest, SessionActionType, SessionAgentDecision, SessionIntent,
+        SessionNextAction,
+    };
     use runtime::{DistillRunStepPreview, RunHandoffPreview, SessionIntakePreview};
     use schema::{SessionMessage, SessionMessageRole};
 
@@ -753,7 +758,10 @@ mod tests {
             primary_object_type: None,
             primary_object_id: None,
             action_type: SessionActionType::DirectReply,
+            next_action: SessionNextAction::DirectReply,
             tool_invocation: None,
+            skill_selection: None,
+            run_creation: None,
             reply_text: "Hello from debug panel".to_string(),
             suggested_run_type: None,
             session_summary: Some("LLM replied to the current session message".to_string()),
@@ -775,7 +783,16 @@ mod tests {
             primary_object_type: Some("source".to_string()),
             primary_object_id: Some("source-1".to_string()),
             action_type: SessionActionType::CreateRun,
+            next_action: SessionNextAction::CreateRun(RunCreationRequest {
+                run_type: "import_and_distill".to_string(),
+                reasoning_summary: None,
+            }),
             tool_invocation: None,
+            skill_selection: None,
+            run_creation: Some(RunCreationRequest {
+                run_type: "import_and_distill".to_string(),
+                reasoning_summary: None,
+            }),
             reply_text: "I will start a distill run for this work material.".to_string(),
             suggested_run_type: Some("import_and_distill".to_string()),
             session_summary: Some("Preparing to import material".to_string()),
@@ -875,7 +892,16 @@ mod tests {
                 primary_object_type: None,
                 primary_object_id: None,
                 action_type: SessionActionType::CreateRun,
+                next_action: SessionNextAction::CreateRun(RunCreationRequest {
+                    run_type: "import_and_distill".to_string(),
+                    reasoning_summary: None,
+                }),
                 tool_invocation: None,
+                skill_selection: None,
+                run_creation: Some(RunCreationRequest {
+                    run_type: "import_and_distill".to_string(),
+                    reasoning_summary: None,
+                }),
                 reply_text: "I will start a distill run for this work material.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
                 session_summary: Some("Preparing to import material".to_string()),
@@ -898,7 +924,16 @@ mod tests {
                 primary_object_type: None,
                 primary_object_id: None,
                 action_type: SessionActionType::CreateRun,
+                next_action: SessionNextAction::CreateRun(RunCreationRequest {
+                    run_type: "import_and_distill".to_string(),
+                    reasoning_summary: None,
+                }),
                 tool_invocation: None,
+                skill_selection: None,
+                run_creation: Some(RunCreationRequest {
+                    run_type: "import_and_distill".to_string(),
+                    reasoning_summary: None,
+                }),
                 reply_text: "I will start a distillation workflow for this work material.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
                 session_summary: Some("Preparing to distill work material".to_string()),
@@ -938,7 +973,16 @@ mod tests {
                 primary_object_type: Some("material".to_string()),
                 primary_object_id: None,
                 action_type: SessionActionType::CreateRun,
+                next_action: SessionNextAction::CreateRun(RunCreationRequest {
+                    run_type: "import_and_distill".to_string(),
+                    reasoning_summary: None,
+                }),
                 tool_invocation: None,
+                skill_selection: None,
+                run_creation: Some(RunCreationRequest {
+                    run_type: "import_and_distill".to_string(),
+                    reasoning_summary: None,
+                }),
                 reply_text: "I will start a distillation workflow for this work material.".to_string(),
                 suggested_run_type: Some("import_and_distill".to_string()),
                 session_summary: Some("Preparing to distill work material".to_string()),

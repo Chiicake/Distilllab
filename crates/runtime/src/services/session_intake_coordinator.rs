@@ -115,19 +115,23 @@ pub async fn decide_and_record_intake(
         );
         insert_session_message(&conn, &tool_result_message)?;
 
-        let follow_up_input = SessionAgentInput {
-            session: session.clone(),
-            recent_messages: list_session_messages_for_session(&conn, &session.id)?,
-            intake: intake.clone(),
-        };
-        decision = decide_with_provider(provider_config.clone(), follow_up_input).await?;
+        if decision.should_continue_planning && executed_tool_result.should_continue_planning {
+            let follow_up_input = SessionAgentInput {
+                session: session.clone(),
+                recent_messages: list_session_messages_for_session(&conn, &session.id)?,
+                intake: intake.clone(),
+            };
+            decision = decide_with_provider(provider_config.clone(), follow_up_input).await?;
+        }
     }
 
     let assistant_message_type = match decision.action_type {
         SessionActionType::DirectReply => "assistant_message",
         SessionActionType::RequestClarification => "clarification_message",
         SessionActionType::ToolCall => "system_message",
+        SessionActionType::SkillCall => "system_message",
         SessionActionType::CreateRun => "system_message",
+        SessionActionType::Stop => "assistant_message",
     };
 
     let assistant_session_message = build_session_message(
