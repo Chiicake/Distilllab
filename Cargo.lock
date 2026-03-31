@@ -800,6 +800,7 @@ dependencies = [
  "distilllab-agent",
  "distilllab-memory",
  "distilllab-schema",
+ "reqwest 0.12.28",
  "rusqlite",
  "serde",
  "serde_json",

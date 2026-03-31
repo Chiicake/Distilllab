@@ -506,7 +506,6 @@ mod tests {
         let address = listener
             .local_addr()
             .expect("listener should have local addr");
-
         tokio::spawn(async move {
             let (mut stream, _) = listener
                 .accept()
@@ -561,7 +560,6 @@ mod tests {
         let address = listener
             .local_addr()
             .expect("listener should have local addr");
-
         tokio::spawn(async move {
             let (mut stream, _) = listener
                 .accept()
@@ -1173,11 +1171,12 @@ mod tests {
                             {
                                 "message": {
                                     "role": "assistant",
-                                    "content": "{\"intent\":\"general_reply\",\"action_type\":\"tool_call\",\"reply_text\":\"I will look up related notes before replying.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Preparing a memory lookup before answering\",\"tool_invocation\":{\"tool_name\":\"search_memory\",\"arguments_json\":\"{\\\"query\\\":\\\"related notes\\\"}\",\"reasoning_summary\":null,\"expected_follow_up\":null},\"should_continue_planning\":true,\"failure_hint\":\"reply_or_clarify\"}"
+                                    "content": "{\"intent\":\"general_reply\",\"action_type\":\"tool_call\",\"reply_text\":\"I will look up related notes before replying.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Preparing a memory lookup before answering\",\"tool_invocation\":{\"tool_name\":\"search_memory\",\"arguments\":{\"query\":\"related notes\"},\"reasoning_summary\":null,\"expected_follow_up\":null},\"should_continue_planning\":true,\"failure_hint\":\"reply_or_clarify\"}"
                                 }
                             }
                         ]
                     }"#
+                    .to_string()
                 } else {
                     assert!(request_text.contains("Memory search is not yet implemented"));
                     r#"{
@@ -1190,6 +1189,7 @@ mod tests {
                             }
                         ]
                     }"#
+                    .to_string()
                 };
 
                 let response = format!(
@@ -1238,6 +1238,128 @@ mod tests {
         assert!(messages[1].content.contains("Memory search is not yet implemented"));
         assert_eq!(messages[2].message_type, "assistant_message");
         assert_eq!(messages[2].content, "I checked memory and there are no matching notes yet.");
+    }
+
+    #[tokio::test]
+    async fn send_session_message_with_config_can_answer_attachment_content_questions_via_tool_call() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "distilllab-runtime-attachment-question-{}",
+            Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let attachment_path = temp_dir.join("notes.md");
+        std::fs::write(
+            &attachment_path,
+            "Attachment heading\nThis attachment contains project notes about tool execution.",
+        )
+        .expect("attachment should be written");
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+        tokio::spawn(async move {
+            for request_index in 0..2 {
+                let (mut stream, _) = listener
+                    .accept()
+                    .await
+                    .expect("server should accept connection");
+                let mut buffer = [0_u8; 8192];
+                let bytes_read = stream
+                    .read(&mut buffer)
+                    .await
+                    .expect("server should read request");
+                let request_text = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+                let response_body = if request_index == 0 {
+                    assert!(request_text.contains("current_intake_attachments:"));
+                    assert!(request_text.contains("Attachment heading"));
+                    r#"{
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "{\"intent\":\"general_reply\",\"action_type\":\"tool_call\",\"reply_text\":\"I will inspect the current attachment before answering.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Preparing to inspect the current attachment before answering\",\"tool_invocation\":{\"tool_name\":\"read_attachment_excerpt\",\"arguments\":{\"attachment_index\":0,\"max_chars\":400},\"reasoning_summary\":null,\"expected_follow_up\":null},\"skill_selection\":null,\"should_continue_planning\":true,\"failure_hint\":\"reply_or_clarify\"}"
+                                }
+                            }
+                        ]
+                    }"#
+                    .to_string()
+                } else {
+                    assert!(request_text.contains("Attachment excerpt:"));
+                    assert!(request_text.contains("project notes about tool execution"));
+                    r#"{
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "{\"intent\":\"general_reply\",\"action_type\":\"direct_reply\",\"reply_text\":\"The attachment contains project notes about tool execution.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Answered using the attachment excerpt\",\"tool_invocation\":null,\"skill_selection\":null,\"should_continue_planning\":false,\"failure_hint\":null}"
+                                }
+                            }
+                        ]
+                    }"#
+                    .to_string()
+                };
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+
+                stream
+                    .write_all(response.as_bytes())
+                    .await
+                    .expect("server should write response");
+            }
+        });
+
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-attachment-send-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let attachment = schema::AttachmentRef {
+            attachment_id: "attachment-1".to_string(),
+            kind: "file_copy".to_string(),
+            name: "notes.md".to_string(),
+            mime_type: "text/markdown".to_string(),
+            path_or_locator: attachment_path.to_string_lossy().to_string(),
+            size: 128,
+            metadata_json: "{}".to_string(),
+        };
+
+        let reply = super::send_session_message_with_config(
+            &runtime,
+            SessionMessageRequest {
+                session_id: session.id.clone(),
+                user_message: "What is inside attachment paths?".to_string(),
+                attachments: vec![attachment],
+                provider_kind: "openai_compatible".to_string(),
+                base_url: format!("http://{}", address),
+                model: "gpt-test".to_string(),
+                api_key: Some(String::new()),
+            },
+        )
+        .await
+        .expect("runtime should answer attachment content question");
+
+        assert_eq!(reply.reply_text, "The attachment contains project notes about tool execution.");
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let messages = list_session_messages_for_session(&conn, &session.id)
+            .expect("session messages should load");
+        assert!(messages.iter().any(|value| value.content.contains("Attachment excerpt:")));
+        assert!(messages.iter().any(|value| value.content.contains("The attachment contains project notes about tool execution.")));
+
+        let _ = std::fs::remove_file(&attachment_path);
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

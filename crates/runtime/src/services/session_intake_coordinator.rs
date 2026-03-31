@@ -44,6 +44,17 @@ fn build_session_message(
     role: SessionMessageRole,
     content: String,
 ) -> SessionMessage {
+    build_session_message_with_data(session_id, run_id, message_type, role, content, "{}".to_string())
+}
+
+fn build_session_message_with_data(
+    session_id: &str,
+    run_id: Option<String>,
+    message_type: &str,
+    role: SessionMessageRole,
+    content: String,
+    data_json: String,
+) -> SessionMessage {
     SessionMessage {
         id: format!("message-{}", Uuid::new_v4()),
         session_id: session_id.to_string(),
@@ -51,7 +62,7 @@ fn build_session_message(
         message_type: message_type.to_string(),
         role,
         content,
-        data_json: "{}".to_string(),
+        data_json,
         created_at: Utc::now().to_string(),
     }
 }
@@ -99,10 +110,12 @@ pub async fn decide_and_record_intake(
         })?;
 
         let executor = ToolExecutor::new();
-        let executed_tool_result = executor.execute(runtime, &invocation).await;
+        let executed_tool_result = executor
+            .execute_with_attachments(runtime, &invocation, &intake.attachments)
+            .await;
         tool_result = Some(executed_tool_result.clone());
 
-        let tool_result_message = build_session_message(
+        let tool_result_message = build_session_message_with_data(
             &session.id,
             None,
             "tool_result_message",
@@ -112,6 +125,11 @@ pub async fn decide_and_record_intake(
                 .clone()
                 .or_else(|| executed_tool_result.error_message.clone())
                 .unwrap_or_else(|| format!("tool executed: {}", executed_tool_result.tool_name)),
+            serde_json::json!({
+                "tool_name": invocation.tool_name,
+                "arguments": invocation.arguments,
+            })
+            .to_string(),
         );
         insert_session_message(&conn, &tool_result_message)?;
 

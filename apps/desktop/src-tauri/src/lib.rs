@@ -6,7 +6,7 @@ use runtime::{
     resolve_current_provider_model, set_current_provider_model, upsert_provider_entry,
 };
 use runtime::flows::attachment_storage::store_attachment_copy;
-use schema::{SessionIntake, SessionMessage};
+use schema::{SessionIntake, SessionMessage, SessionMessageRole};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,9 +127,37 @@ fn format_session_messages_text(messages: &[SessionMessage]) -> String {
 
     messages
         .iter()
-        .map(|message| format!("[{}] {}", message.role.as_str(), message.content))
+        .map(|message| {
+            if message.message_type == "tool_result_message" {
+                let tool_header = serde_json::from_str::<serde_json::Value>(&message.data_json)
+                    .ok()
+                    .and_then(|value| {
+                        let tool_name = value.get("tool_name").and_then(|v| v.as_str())?;
+                        let arguments = value.get("arguments")?;
+                        Some(format!("[Tool] {}({})", tool_name, arguments))
+                    })
+                    .unwrap_or_else(|| "[Tool] unknown()".to_string());
+
+                format!("{}\n{}", tool_header, indent_block(&message.content))
+            } else {
+                let role_header = match message.role {
+                    SessionMessageRole::User => "[User]",
+                    SessionMessageRole::Assistant => "[Assistant]",
+                    SessionMessageRole::System => "[System]",
+                };
+
+                format!("{}\n{}", role_header, indent_block(&message.content))
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn indent_block(text: &str) -> String {
+    text.lines()
+        .map(|line| format!("  {}", line))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn format_app_config_text(config_json: &str) -> Result<String, String> {
@@ -835,8 +863,25 @@ mod tests {
             },
         ]);
 
-        assert!(text.contains("[user] Hello timeline"));
-        assert!(text.contains("[assistant] Hello back"));
+        assert!(text.contains("[User]\n  Hello timeline"));
+        assert!(text.contains("[Assistant]\n  Hello back"));
+    }
+
+    #[test]
+    fn formats_tool_result_messages_with_tool_header_style() {
+        let text = format_session_messages_text(&[SessionMessage {
+            id: "message-1".to_string(),
+            session_id: "session-1".to_string(),
+            run_id: None,
+            message_type: "tool_result_message".to_string(),
+            role: SessionMessageRole::System,
+            content: "Attachment excerpt: hello".to_string(),
+            data_json: r#"{"tool_name":"read_attachment_excerpt","arguments":{"attachment_index":0,"max_chars":400}}"#.to_string(),
+            created_at: "2026-03-29T00:00:00Z".to_string(),
+        }]);
+
+        assert!(text.contains("[Tool] read_attachment_excerpt({\"attachment_index\":0,\"max_chars\":400})"));
+        assert!(text.contains("  Attachment excerpt: hello"));
     }
 
     #[test]

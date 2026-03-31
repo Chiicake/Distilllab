@@ -82,8 +82,13 @@ pub struct ToolInvocation {
     /// The name of the tool to invoke.
     pub tool_name: String,
 
-    /// JSON-encoded arguments to pass to the tool.
-    pub arguments_json: String,
+    /// Structured arguments to pass to the tool.
+    #[serde(
+        default,
+        alias = "arguments_json",
+        deserialize_with = "deserialize_tool_arguments"
+    )]
+    pub arguments: serde_json::Value,
 
     /// Optional summary of why this tool is being called.
     pub reasoning_summary: Option<String>,
@@ -92,12 +97,25 @@ pub struct ToolInvocation {
     pub expected_follow_up: Option<String>,
 }
 
+fn deserialize_tool_arguments<'de, D>(deserializer: D) -> Result<serde_json::Value, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::String(text) => {
+            Ok(serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "raw": text })))
+        }
+        other => Ok(other),
+    }
+}
+
 impl ToolInvocation {
     /// Create a new tool invocation with just the tool name.
     pub fn new(tool_name: &str) -> Self {
         Self {
             tool_name: tool_name.to_string(),
-            arguments_json: "{}".to_string(),
+            arguments: serde_json::json!({}),
             reasoning_summary: None,
             expected_follow_up: None,
         }
@@ -107,10 +125,26 @@ impl ToolInvocation {
     pub fn with_args(tool_name: &str, arguments_json: &str) -> Self {
         Self {
             tool_name: tool_name.to_string(),
-            arguments_json: arguments_json.to_string(),
+            arguments: serde_json::from_str(arguments_json)
+                .unwrap_or_else(|_| serde_json::json!({ "raw": arguments_json })),
             reasoning_summary: None,
             expected_follow_up: None,
         }
+    }
+
+    /// Create a tool invocation with structured arguments.
+    pub fn with_value_args(tool_name: &str, arguments: serde_json::Value) -> Self {
+        Self {
+            tool_name: tool_name.to_string(),
+            arguments,
+            reasoning_summary: None,
+            expected_follow_up: None,
+        }
+    }
+
+    /// Return arguments as a JSON string for compatibility surfaces.
+    pub fn arguments_json(&self) -> String {
+        self.arguments.to_string()
     }
 
     /// Add reasoning summary to the invocation.
@@ -339,6 +373,45 @@ pub fn builtin_tool_registry() -> ToolRegistry {
         .expect("builtin tool registration should not fail");
 
     registry
+        .register(
+            ToolDefinition::read_only(
+                "read_attachment_excerpt",
+                "Read a short excerpt from the current attachment for planning or reply grounding",
+            )
+            .with_input_schema(r#"{"locator": "string", "max_chars": "number?"}"#),
+        )
+        .expect("builtin tool registration should not fail");
+
+    registry
+        .register(
+            ToolDefinition::read_only(
+                "read_text",
+                "Read text content from a file or current attachment using locator, attachment_id, or attachment_index",
+            )
+            .with_input_schema(
+                r#"{"locator": "string?", "attachment_id": "string?", "attachment_index": "number?", "max_chars": "number?"}"#,
+            ),
+        )
+        .expect("builtin tool registration should not fail");
+
+    registry
+        .register(ToolDefinition::read_only(
+            "list_attachments",
+            "List attachments available in the current intake context",
+        ))
+        .expect("builtin tool registration should not fail");
+
+    registry
+        .register(
+            ToolDefinition::read_only(
+                "web_fetch",
+                "Fetch lightweight text content from a URL for planning or direct answers",
+            )
+            .with_input_schema(r#"{"url": "string", "max_chars": "number?"}"#),
+        )
+        .expect("builtin tool registration should not fail");
+
+    registry
 }
 
 #[cfg(test)]
@@ -386,7 +459,7 @@ mod tests {
         let invocation = ToolInvocation::new("list_sources");
 
         assert_eq!(invocation.tool_name, "list_sources");
-        assert_eq!(invocation.arguments_json, "{}");
+        assert_eq!(invocation.arguments, serde_json::json!({}));
         assert!(invocation.reasoning_summary.is_none());
         assert!(invocation.expected_follow_up.is_none());
     }
@@ -397,7 +470,29 @@ mod tests {
             ToolInvocation::with_args("search_memory", r#"{"query": "session notes"}"#);
 
         assert_eq!(invocation.tool_name, "search_memory");
-        assert_eq!(invocation.arguments_json, r#"{"query": "session notes"}"#);
+        assert_eq!(
+            invocation.arguments,
+            serde_json::json!({"query": "session notes"})
+        );
+    }
+
+    #[test]
+    fn tool_invocation_can_expose_arguments_as_structured_json() {
+        let invocation = ToolInvocation::with_args(
+            "read_attachment_excerpt",
+            r#"{"attachment_index":0,"max_chars":400}"#,
+        );
+
+        let arguments = invocation.arguments.clone();
+
+        assert_eq!(
+            arguments.get("attachment_index").and_then(|v| v.as_u64()),
+            Some(0)
+        );
+        assert_eq!(
+            arguments.get("max_chars").and_then(|v| v.as_u64()),
+            Some(400)
+        );
     }
 
     #[test]
@@ -515,6 +610,9 @@ mod tests {
         assert!(registry.contains("get_project"));
         assert!(registry.contains("get_asset"));
         assert!(registry.contains("search_memory"));
+        assert!(registry.contains("read_attachment_excerpt"));
+        assert!(registry.contains("read_text"));
+        assert!(registry.contains("list_attachments"));
     }
 
     #[test]
@@ -526,7 +624,7 @@ mod tests {
         let restored: ToolInvocation = serde_json::from_str(&json).expect("should deserialize");
 
         assert_eq!(restored.tool_name, invocation.tool_name);
-        assert_eq!(restored.arguments_json, invocation.arguments_json);
+        assert_eq!(restored.arguments, invocation.arguments);
         assert_eq!(restored.reasoning_summary, invocation.reasoning_summary);
     }
 

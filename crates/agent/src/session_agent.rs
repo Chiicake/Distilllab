@@ -15,7 +15,7 @@ pub fn session_agent_definition() -> AgentDefinition {
         description: "Distilllab session-level planning agent that understands user intent and decides the next action for the current session.".to_string(),
         responsibility_summary: "Reads the current session and recent timeline, identifies user intent and primary object, decides the next action, and can choose what to do after actions succeed or fail. It does not execute the workflow itself.".to_string(),
         status: "active".to_string(),
-        system_prompt: "You are the Session Agent for Distilllab. Distilllab's primary goal is to distill work content and working process materials into reusable knowledge objects, not to act as a generic note organizer. You are the session-level planner for the current session: understand the current session state, identify user intent, decide the next high-level action, and consider post-action follow-up and failure handling at the session level. Respond with valid JSON only. Do not include markdown fences or extra explanation. The JSON object must contain these fields: intent, action_type, reply_text, primary_object_type, primary_object_id, suggested_run_type, session_summary, tool_invocation, skill_selection, should_continue_planning, failure_hint. Intent must be one of: general_reply, distill_material, deepen_understanding, compose_output. action_type must be one of: direct_reply, request_clarification, tool_call, skill_call, create_run, stop. If intent is distill_material, action_type must be create_run or request_clarification, and create_run should normally use suggested_run_type import_and_distill. Use tool_invocation only when action_type is tool_call. tool_invocation must contain tool_name, arguments_json, reasoning_summary, and expected_follow_up. Use skill_selection only when action_type is skill_call. skill_selection must contain skill_key, reasoning_summary, and expected_outcome. Use suggested_run_type only when action_type is create_run. Set should_continue_planning to true when the session should expect a follow-up planning turn after the chosen action finishes, otherwise false. Use failure_hint to summarize what the planner should consider if the chosen action fails. Use null for optional fields when unknown.".to_string(),
+        system_prompt: "You are the Session Agent for Distilllab. Distilllab's primary goal is to distill work content and working process materials into reusable knowledge objects, not to act as a generic note organizer. You are the session-level planner for the current session: understand the current session state, identify user intent, decide the next high-level action, and consider post-action follow-up and failure handling at the session level. Respond with valid JSON only. Do not include markdown fences or extra explanation. The JSON object must contain these fields: intent, action_type, reply_text, primary_object_type, primary_object_id, suggested_run_type, session_summary, tool_invocation, skill_selection, should_continue_planning, failure_hint. Intent must be one of: general_reply, distill_material, deepen_understanding, compose_output. action_type must be one of: direct_reply, request_clarification, tool_call, skill_call, create_run, stop. If intent is distill_material, action_type must be create_run or request_clarification, and create_run should normally use suggested_run_type import_and_distill. Use tool_invocation only when action_type is tool_call. tool_invocation must contain tool_name, arguments, reasoning_summary, and expected_follow_up, where arguments is a JSON object. For read_attachment_excerpt, prefer arguments using attachment_index when current_intake_attachments are present; locator is optional when attachment_index is available. Use skill_selection only when action_type is skill_call. skill_selection must contain skill_key, reasoning_summary, and expected_outcome. Use suggested_run_type only when action_type is create_run. Set should_continue_planning to true when the session should expect a follow-up planning turn after the chosen action finishes, otherwise false. Use failure_hint to summarize what the planner should consider if the chosen action fails. Use null for optional fields when unknown.".to_string(),
         default_model_profile: "reasoning_default".to_string(),
         allowed_tool_keys: vec![
             "list_sources".to_string(),
@@ -25,6 +25,10 @@ pub fn session_agent_definition() -> AgentDefinition {
             "get_project".to_string(),
             "get_asset".to_string(),
             "search_memory".to_string(),
+            "read_attachment_excerpt".to_string(),
+            "read_text".to_string(),
+            "list_attachments".to_string(),
+            "web_fetch".to_string(),
         ],
         allowed_skill_keys: vec![
             "import_and_distill_skill".to_string(),
@@ -159,6 +163,52 @@ impl SessionAgent for BasicSessionAgent {
             "none" => None,
             other => Some(other.to_string()),
         };
+
+        if !input.intake.attachments.is_empty()
+            && (normalized_message.contains("attachment")
+                || normalized_message.contains("file")
+                || normalized_message.contains("路径")
+                || normalized_message.contains("附件"))
+            && (normalized_message.contains("inside")
+                || normalized_message.contains("content")
+                || normalized_message.contains("contains")
+                || normalized_message.contains("what is")
+                || normalized_message.contains("内容")
+                || normalized_message.contains("里面")
+                || normalized_message.contains("是什么"))
+        {
+            let first_attachment = input.intake.attachments.first().expect("checked non-empty");
+            let tool_invocation = ToolInvocation::with_args(
+                "read_attachment_excerpt",
+                &serde_json::json!({
+                    "attachment_index": 0,
+                    "attachment_id": first_attachment.attachment_id,
+                    "max_chars": 400,
+                })
+                .to_string(),
+            )
+            .with_reasoning("The user is asking about the contents of the current attachment.")
+            .with_expected_follow_up("Use the excerpt to answer what the attachment contains.");
+
+            return Ok(SessionAgentDecision {
+                intent: SessionIntent::GeneralReply,
+                primary_object_type,
+                primary_object_id,
+                action_type: SessionActionType::ToolCall,
+                next_action: SessionNextAction::ToolCall(tool_invocation.clone()),
+                tool_invocation: Some(tool_invocation),
+                skill_selection: None,
+                run_creation: None,
+                reply_text: "I will inspect the current attachment before answering.".to_string(),
+                suggested_run_type: None,
+                session_summary: Some(
+                    "Preparing to inspect the current attachment before answering"
+                        .to_string(),
+                ),
+                should_continue_planning: true,
+                failure_hint: Some("reply_or_clarify".to_string()),
+            });
+        }
 
         if normalized_message.contains("import")
             || normalized_message.contains("upload")
@@ -314,8 +364,36 @@ impl LlmSessionAgent {
     }
 
     fn build_chat_messages(&self, input: &SessionAgentInput) -> Vec<OpenAiCompatibleChatMessage> {
+        let attachment_context = if input.intake.attachments.is_empty() {
+            "current_intake_attachments: none".to_string()
+        } else {
+            let attachment_lines = input
+                .intake
+                .attachments
+                .iter()
+                .map(|attachment| {
+                    let excerpt = read_attachment_excerpt_for_prompt(&attachment.path_or_locator, 240)
+                        .map(|value| format!(" | excerpt: {}", value.replace('\n', " ")))
+                        .unwrap_or_default();
+                    format!(
+                        "- attachment_id: {} | name: {} | kind: {} | mime_type: {} | locator: {} | size: {}{}",
+                        attachment.attachment_id,
+                        attachment.name,
+                        attachment.kind,
+                        attachment.mime_type,
+                        attachment.path_or_locator,
+                        attachment.size,
+                        excerpt,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            format!("current_intake_attachments:\n{}", attachment_lines)
+        };
+
         let system_context = format!(
-            "{}\nCurrent session context:\nsession_id: {}\nsession_title: {}\ncurrent_intent: {}\ncurrent_object_type: {}\ncurrent_object_id: {}\nsession_summary: {}",
+            "{}\nCurrent session context:\nsession_id: {}\nsession_title: {}\ncurrent_intent: {}\ncurrent_object_type: {}\ncurrent_object_id: {}\nsession_summary: {}\n{}",
             session_agent_definition().system_prompt,
             input.session.id,
             input.session.title,
@@ -323,6 +401,7 @@ impl LlmSessionAgent {
             input.session.current_object_type,
             input.session.current_object_id,
             input.session.summary,
+            attachment_context,
         );
 
         let mut messages = vec![OpenAiCompatibleChatMessage {
@@ -359,6 +438,7 @@ impl LlmSessionAgent {
         messages
     }
 
+
     fn few_shot_examples(&self) -> Vec<OpenAiCompatibleChatMessage> {
         vec![
             OpenAiCompatibleChatMessage {
@@ -391,7 +471,7 @@ impl LlmSessionAgent {
             },
             OpenAiCompatibleChatMessage {
                 role: "assistant".to_string(),
-                content: r#"{"intent":"general_reply","action_type":"tool_call","reply_text":"I will look up related notes before replying.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Preparing a memory lookup before answering","tool_invocation":{"tool_name":"search_memory","arguments_json":"{}","reasoning_summary":null,"expected_follow_up":null},"should_continue_planning":true,"failure_hint":"reply_or_clarify"}"#.to_string(),
+                content: r#"{"intent":"general_reply","action_type":"tool_call","reply_text":"I will look up related notes before replying.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Preparing a memory lookup before answering","tool_invocation":{"tool_name":"search_memory","arguments":{},"reasoning_summary":null,"expected_follow_up":null},"should_continue_planning":true,"failure_hint":"reply_or_clarify"}"#.to_string(),
             },
             OpenAiCompatibleChatMessage {
                 role: "user".to_string(),
@@ -605,6 +685,16 @@ impl SessionAgent for LlmSessionAgent {
     }
 }
 
+fn read_attachment_excerpt_for_prompt(locator: &str, max_chars: usize) -> Option<String> {
+    let content = std::fs::read_to_string(locator).ok()?;
+    let normalized = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    Some(normalized.chars().take(max_chars).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -753,6 +843,54 @@ mod tests {
             Some("import_and_distill")
         );
         assert!(decision.skill_selection.is_none());
+    }
+
+    #[tokio::test]
+    async fn basic_session_agent_can_use_tool_call_for_attachment_content_questions() {
+        let decision = BasicSessionAgent
+            .decide(SessionAgentInput {
+                session: Session {
+                    id: "session-1".to_string(),
+                    title: "Attachment Session".to_string(),
+                    status: SessionStatus::Active,
+                    current_intent: "idle".to_string(),
+                    current_object_type: "none".to_string(),
+                    current_object_id: "none".to_string(),
+                    summary: "Attachment inspection session".to_string(),
+                    started_at: "2026-03-28T00:00:00Z".to_string(),
+                    updated_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                    last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                    metadata_json: "{}".to_string(),
+                },
+                recent_messages: vec![],
+                intake: SessionIntake {
+                    session_id: "session-1".to_string(),
+                    user_message: "What is inside attachment paths?".to_string(),
+                    attachments: vec![AttachmentRef {
+                        attachment_id: "attachment-1".to_string(),
+                        kind: "file_copy".to_string(),
+                        name: "notes.md".to_string(),
+                        mime_type: "text/markdown".to_string(),
+                        path_or_locator: "/tmp/distilllab/attachments/session-1/notes.md".to_string(),
+                        size: 128,
+                        metadata_json: "{}".to_string(),
+                    }],
+                    current_object_type: None,
+                    current_object_id: None,
+                },
+            })
+            .await
+            .expect("basic session agent should decide");
+
+        assert_eq!(decision.action_type, SessionActionType::ToolCall);
+        assert!(matches!(decision.next_action, SessionNextAction::ToolCall(_)));
+        assert_eq!(
+            decision.tool_invocation.as_ref().map(|value| value.tool_name.as_str()),
+            Some("read_attachment_excerpt")
+        );
+        assert!(decision.should_continue_planning);
     }
 
     #[test]
@@ -1354,6 +1492,117 @@ mod tests {
     }
 
     #[test]
+    fn llm_session_agent_includes_current_intake_attachments_in_system_context() {
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: "http://localhost:11434/v1".to_string(),
+            model: "qwen-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Attachment Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing attachment context".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "What is inside Attachment Paths?".to_string(),
+                attachments: vec![AttachmentRef {
+                    attachment_id: "attachment-1".to_string(),
+                    kind: "file_copy".to_string(),
+                    name: "notes.md".to_string(),
+                    mime_type: "text/markdown".to_string(),
+                    path_or_locator: "/tmp/distilllab/attachments/session-1/notes.md".to_string(),
+                    size: 128,
+                    metadata_json: "{}".to_string(),
+                }],
+                current_object_type: None,
+                current_object_id: None,
+            },
+        };
+
+        let messages = agent.build_chat_messages(&input);
+
+        assert!(messages[0].content.contains("current_intake_attachments:"));
+        assert!(messages[0].content.contains("attachment_id: attachment-1"));
+        assert!(messages[0].content.contains("name: notes.md"));
+        assert!(messages[0].content.contains("locator: /tmp/distilllab/attachments/session-1/notes.md"));
+    }
+
+    #[test]
+    fn llm_session_agent_includes_attachment_excerpt_in_system_context_when_file_is_readable() {
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: "http://localhost:11434/v1".to_string(),
+            model: "qwen-test".to_string(),
+            api_key: None,
+        });
+        let temp_dir = std::env::temp_dir().join("distilllab-attachment-context-fixed");
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let attachment_path = temp_dir.join("notes.md");
+        std::fs::write(
+            &attachment_path,
+            "Attachment heading\nThis attachment contains project notes.",
+        )
+        .expect("attachment should be written");
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Attachment Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing attachment excerpt context".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "What is inside Attachment Paths?".to_string(),
+                attachments: vec![AttachmentRef {
+                    attachment_id: "attachment-1".to_string(),
+                    kind: "file_copy".to_string(),
+                    name: "notes.md".to_string(),
+                    mime_type: "text/markdown".to_string(),
+                    path_or_locator: attachment_path.to_string_lossy().to_string(),
+                    size: 128,
+                    metadata_json: "{}".to_string(),
+                }],
+                current_object_type: None,
+                current_object_id: None,
+            },
+        };
+
+        let messages = agent.build_chat_messages(&input);
+
+        assert!(messages[0].content.contains("excerpt:"));
+        assert!(messages[0].content.contains("Attachment heading"));
+
+        let _ = std::fs::remove_file(&attachment_path);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
     fn llm_session_agent_does_not_duplicate_current_turn_if_it_is_already_in_recent_messages() {
         let agent = LlmSessionAgent::new(LlmProviderConfig {
             provider_kind: "openai_compatible".to_string(),
@@ -1594,11 +1843,29 @@ mod tests {
 
     #[test]
     fn llm_session_agent_rejects_non_tool_action_with_tool_invocation() {
-        let raw_json = r#"{"intent":"general_reply","action_type":"direct_reply","reply_text":"Here is the answer.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Providing answer","tool_invocation":{"tool_name":"search_memory","arguments_json":"{}","reasoning_summary":null,"expected_follow_up":null},"should_continue_planning":false,"failure_hint":null}"#;
+        let raw_json = r#"{"intent":"general_reply","action_type":"direct_reply","reply_text":"Here is the answer.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Providing answer","tool_invocation":{"tool_name":"search_memory","arguments":{},"reasoning_summary":null,"expected_follow_up":null},"should_continue_planning":false,"failure_hint":null}"#;
 
         let decision = LlmSessionAgent::parse_structured_decision(raw_json);
 
         assert!(decision.is_none());
+    }
+
+    #[test]
+    fn llm_session_agent_keeps_legacy_arguments_json_as_compatibility_path() {
+        let raw_json = r#"{"intent":"general_reply","action_type":"tool_call","reply_text":"I will use search before replying.","primary_object_type":null,"primary_object_id":null,"suggested_run_type":null,"session_summary":"Preparing memory lookup","tool_invocation":{"tool_name":"search_memory","arguments_json":"{\"query\":\"legacy\"}","reasoning_summary":null,"expected_follow_up":null},"should_continue_planning":true,"failure_hint":"reply_or_clarify"}"#;
+
+        let decision = LlmSessionAgent::parse_structured_decision(raw_json)
+            .expect("legacy arguments_json should still parse");
+
+        assert_eq!(decision.action_type, SessionActionType::ToolCall);
+        assert_eq!(
+            decision
+                .tool_invocation
+                .as_ref()
+                .and_then(|value| value.arguments.get("query"))
+                .and_then(|value| value.as_str()),
+            Some("legacy")
+        );
     }
 
     #[test]
