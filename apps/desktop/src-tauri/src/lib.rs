@@ -34,6 +34,15 @@ struct SessionMessageForm {
     attachment_paths: Vec<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionSelectorOption {
+    session_id: String,
+    title: String,
+    status: String,
+    label: String,
+}
+
 fn format_action_type(action_type: &SessionActionType) -> &'static str {
     match action_type {
         SessionActionType::DirectReply => "direct_reply",
@@ -47,6 +56,10 @@ fn format_action_type(action_type: &SessionActionType) -> &'static str {
 
 fn format_optional_text(value: Option<&str>) -> &str {
     value.unwrap_or("none")
+}
+
+fn format_session_selector_label(session: &schema::Session) -> String {
+    format!("{} ({})", session.title, session.id)
 }
 
 fn format_session_agent_decision_text(decision: &SessionAgentDecision) -> String {
@@ -341,6 +354,23 @@ fn list_sessions() -> Result<String, String> {
         .join("\n");
 
     Ok(summary)
+}
+
+#[tauri::command]
+fn list_session_selector_options() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let sessions = runtime::list_sessions(&runtime).map_err(|e| e.to_string())?;
+    let options = sessions
+        .iter()
+        .map(|session| SessionSelectorOption {
+            session_id: session.id.clone(),
+            title: session.title.clone(),
+            status: session.status.as_str().to_string(),
+            label: format_session_selector_label(session),
+        })
+        .collect::<Vec<_>>();
+
+    serde_json::to_string(&options).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -744,6 +774,7 @@ pub fn run() {
             create_demo_source,
             list_runs,
             list_sessions,
+            list_session_selector_options,
             list_sources,
             chunk_demo_source,
             list_chunks_for_source,
@@ -774,6 +805,7 @@ mod tests {
     use super::{
         format_app_config_text, format_intake_preview_text, format_llm_debug_comparison_text,
         format_provider_test_text, format_session_agent_decision_text, format_session_messages_text,
+        format_session_selector_label,
     };
     use agent::{
         RunCreationRequest, SessionActionType, SessionAgentDecision, SessionIntent,
@@ -882,6 +914,27 @@ mod tests {
 
         assert!(text.contains("[Tool] read_attachment_excerpt({\"attachment_index\":0,\"max_chars\":400})"));
         assert!(text.contains("  Attachment excerpt: hello"));
+    }
+
+    #[test]
+    fn formats_session_selector_label_with_title_and_session_id() {
+        let label = format_session_selector_label(&schema::Session {
+            id: "session-123".to_string(),
+            title: "Attachment Tooling Debug".to_string(),
+            status: schema::SessionStatus::Active,
+            current_intent: "idle".to_string(),
+            current_object_type: "none".to_string(),
+            current_object_id: "none".to_string(),
+            summary: "debugging attachment tools".to_string(),
+            started_at: "2026-03-31T00:00:00Z".to_string(),
+            updated_at: "2026-03-31T00:00:00Z".to_string(),
+            last_user_message_at: "2026-03-31T00:00:00Z".to_string(),
+            last_run_at: "2026-03-31T00:00:00Z".to_string(),
+            last_compacted_at: "2026-03-31T00:00:00Z".to_string(),
+            metadata_json: "{}".to_string(),
+        });
+
+        assert_eq!(label, "Attachment Tooling Debug (session-123)");
     }
 
     #[test]

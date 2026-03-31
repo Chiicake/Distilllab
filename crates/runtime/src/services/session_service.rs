@@ -21,6 +21,77 @@ use uuid::Uuid;
 
 type RuntimeError = Box<dyn std::error::Error + Send + Sync>;
 
+pub(crate) fn derive_initial_session_title(first_user_message: &str) -> String {
+    let cleaned = first_user_message
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\''))
+        .to_string();
+
+    if cleaned.is_empty() {
+        return "Untitled Session".to_string();
+    }
+
+    cleaned.chars().take(80).collect()
+}
+
+pub(crate) fn should_refresh_session_title(new_messages_since_last_refresh: usize) -> bool {
+    new_messages_since_last_refresh > 0 && new_messages_since_last_refresh % 6 == 0
+}
+
+pub(crate) fn should_assign_initial_session_title(current_title: &str, user_message_count: usize) -> bool {
+    user_message_count == 1 && is_generic_session_title(current_title)
+}
+
+pub(crate) fn should_attempt_session_title_refresh(user_message_count: usize) -> bool {
+    user_message_count > 1 && should_refresh_session_title(user_message_count - 1)
+}
+
+pub(crate) fn should_replace_session_title(current_title: &str, candidate_title: &str) -> bool {
+    if is_generic_session_title(current_title) {
+        return true;
+    }
+
+    let current = current_title.trim();
+    let candidate = candidate_title.trim();
+    !candidate.is_empty() && candidate != current && candidate.len() > current.len()
+}
+
+pub(crate) fn derive_refreshed_session_title(recent_user_messages: &[String]) -> String {
+    let recent_window = recent_user_messages
+        .iter()
+        .rev()
+        .take(6)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let meaningful = recent_window
+        .iter()
+        .filter(|message| !message.trim().is_empty())
+        .filter(|message| !is_placeholder_title_candidate(message))
+        .max_by_key(|message| message.len())
+        .cloned();
+
+    meaningful
+        .map(|message| derive_initial_session_title(&message))
+        .unwrap_or_else(|| "Untitled Session".to_string())
+}
+
+fn is_generic_session_title(title: &str) -> bool {
+    let normalized = title.trim().to_ascii_lowercase();
+    normalized.is_empty() || normalized == "demo session" || normalized == "untitled session"
+}
+
+fn is_placeholder_title_candidate(message: &str) -> bool {
+    let normalized = message.trim().to_ascii_lowercase();
+    normalized.is_empty()
+        || normalized == "short placeholder"
+        || normalized == "placeholder"
+        || normalized == "test"
+}
+
 fn build_demo_agent_session(session_id: &str, title: &str, summary: &str) -> Session {
     let now = Utc::now().to_string();
 
@@ -411,6 +482,62 @@ mod tests {
     use tokio::net::TcpListener;
     use uuid::Uuid;
 
+    #[test]
+    fn derive_initial_session_title_uses_first_user_message_meaningfully() {
+        let title = super::derive_initial_session_title(
+            "Please help me design the session selector and title lifecycle UI flow",
+        );
+
+        assert!(title.contains("session selector") || title.contains("title lifecycle"));
+        assert!(title.len() <= 80);
+    }
+
+    #[test]
+    fn title_refresh_checkpoint_triggers_every_six_messages() {
+        assert!(!super::should_refresh_session_title(0));
+        assert!(!super::should_refresh_session_title(5));
+        assert!(super::should_refresh_session_title(6));
+        assert!(super::should_refresh_session_title(12));
+    }
+
+    #[test]
+    fn title_refresh_attempt_only_triggers_on_exact_checkpoints() {
+        assert!(!super::should_attempt_session_title_refresh(2));
+        assert!(!super::should_attempt_session_title_refresh(6));
+        assert!(super::should_attempt_session_title_refresh(7));
+        assert!(!super::should_attempt_session_title_refresh(8));
+        assert!(super::should_attempt_session_title_refresh(13));
+    }
+
+    #[test]
+    fn refreshed_title_is_derived_from_recent_history_not_only_latest_prompt() {
+        let title = super::derive_refreshed_session_title(&[
+            "Short placeholder".to_string(),
+            "Session selector refinement iteration 1".to_string(),
+            "Session selector refinement iteration 2".to_string(),
+            "Title lifecycle update policy".to_string(),
+        ]);
+
+        assert!(title.contains("Session selector") || title.contains("Title lifecycle"));
+        assert!(!title.contains("Short placeholder"));
+    }
+
+    #[test]
+    fn refreshed_title_prefers_recent_window_over_older_long_prompt() {
+        let title = super::derive_refreshed_session_title(&[
+            "Very long early title candidate that should not dominate forever once the session topic clearly shifts to session selector work".to_string(),
+            "placeholder".to_string(),
+            "Attachment tools".to_string(),
+            "Session selector polish".to_string(),
+            "Session selector dropdown behavior".to_string(),
+            "Title refresh checkpoint".to_string(),
+            "Recent session selector context".to_string(),
+        ]);
+
+        assert!(title.contains("Session selector") || title.contains("Title refresh"));
+        assert!(!title.contains("Very long early title candidate"));
+    }
+
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
@@ -656,6 +783,69 @@ mod tests {
 
         assert_eq!(updated_session.current_intent, reply.intent.as_str());
         assert_eq!(updated_session.summary, "General session assistance");
+    }
+
+    #[tokio::test]
+    async fn send_session_message_assigns_initial_session_title_after_first_real_message() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-title-init-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        send_session_message(
+            &runtime,
+            &session.id,
+            "Design the session selector and title lifecycle flow",
+        )
+        .await
+        .expect("runtime should send a session message");
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let updated_session = get_session_by_id(&conn, &session.id)
+            .expect("query should succeed")
+            .expect("session should exist");
+
+        assert_ne!(updated_session.title, "Demo Session");
+        assert!(updated_session.title.contains("session selector") || updated_session.title.contains("title lifecycle"));
+    }
+
+    #[tokio::test]
+    async fn send_session_message_refreshes_title_after_six_new_messages() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-title-refresh-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        send_session_message(
+            &runtime,
+            &session.id,
+            "Short placeholder",
+        )
+        .await
+        .expect("first message should succeed");
+
+        for index in 0..6 {
+            send_session_message(
+                &runtime,
+                &session.id,
+                &format!("Session selector refinement iteration {}", index + 1),
+            )
+            .await
+            .expect("follow-up message should succeed");
+        }
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let updated_session = get_session_by_id(&conn, &session.id)
+            .expect("query should succeed")
+            .expect("session should exist");
+
+        assert!(updated_session.title.contains("Session selector") || updated_session.title.contains("refinement"));
     }
 
     #[tokio::test]
@@ -1357,6 +1547,131 @@ mod tests {
             .expect("session messages should load");
         assert!(messages.iter().any(|value| value.content.contains("Attachment excerpt:")));
         assert!(messages.iter().any(|value| value.content.contains("The attachment contains project notes about tool execution.")));
+
+        let _ = std::fs::remove_file(&attachment_path);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn send_session_message_with_config_can_execute_two_sequential_tool_calls_before_final_reply() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "distilllab-runtime-two-step-tool-loop-{}",
+            Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let attachment_path = temp_dir.join("notes.md");
+        std::fs::write(
+            &attachment_path,
+            "Attachment notes about session tool loops and follow-up reasoning.",
+        )
+        .expect("attachment should be written");
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener.local_addr().expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            for request_index in 0..3 {
+                let (mut stream, _) = listener.accept().await.expect("server should accept");
+                let mut buffer = [0_u8; 8192];
+                let bytes_read = stream.read(&mut buffer).await.expect("server should read request");
+                let request_text = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+                let response_body = if request_index == 0 {
+                    assert!(request_text.contains("https://platform.claude.com/docs/en/build-with-claude/overview"));
+                    r#"{
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "{\"intent\":\"general_reply\",\"action_type\":\"tool_call\",\"reply_text\":\"I will fetch the webpage first.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Preparing web fetch\",\"tool_invocation\":{\"tool_name\":\"web_fetch\",\"arguments\":{\"url\":\"https://platform.claude.com/docs/en/build-with-claude/overview\"},\"reasoning_summary\":null,\"expected_follow_up\":null},\"skill_selection\":null,\"should_continue_planning\":true,\"failure_hint\":\"reply_or_clarify\"}"
+                                }
+                            }
+                        ]
+                    }"#
+                    .to_string()
+                } else if request_index == 1 {
+                    assert!(request_text.contains("[Tool] web_fetch") || request_text.contains("Web content:"));
+                    r#"{
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "{\"intent\":\"general_reply\",\"action_type\":\"tool_call\",\"reply_text\":\"I will read the attachment next.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Preparing attachment read\",\"tool_invocation\":{\"tool_name\":\"read_text\",\"arguments\":{\"attachment_index\":0},\"reasoning_summary\":null,\"expected_follow_up\":null},\"skill_selection\":null,\"should_continue_planning\":true,\"failure_hint\":\"reply_or_clarify\"}"
+                                }
+                            }
+                        ]
+                    }"#
+                    .to_string()
+                } else {
+                    r#"{
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "{\"intent\":\"general_reply\",\"action_type\":\"direct_reply\",\"reply_text\":\"The website is an overview of Claude platform capabilities, and the attachment discusses session tool loops.\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Summarized both sources\",\"tool_invocation\":null,\"skill_selection\":null,\"should_continue_planning\":false,\"failure_hint\":null}"
+                                }
+                            }
+                        ]
+                    }"#
+                    .to_string()
+                };
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                stream.write_all(response.as_bytes()).await.expect("server should write");
+            }
+        });
+
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-two-step-tool-loop-db-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let reply = super::send_session_message_with_config(
+            &runtime,
+            SessionMessageRequest {
+                session_id: session.id.clone(),
+                user_message: "帮我先总结一下网站：https://platform.claude.com/docs/en/build-with-claude/overview 以及附件的内容，不要进行蒸馏"
+                    .to_string(),
+                attachments: vec![schema::AttachmentRef {
+                    attachment_id: "attachment-1".to_string(),
+                    kind: "file_copy".to_string(),
+                    name: "notes.md".to_string(),
+                    mime_type: "text/markdown".to_string(),
+                    path_or_locator: attachment_path.to_string_lossy().to_string(),
+                    size: 128,
+                    metadata_json: "{}".to_string(),
+                }],
+                provider_kind: "openai_compatible".to_string(),
+                base_url: format!("http://{}", address),
+                model: "gpt-test".to_string(),
+                api_key: Some(String::new()),
+            },
+        )
+        .await
+        .expect("runtime should complete iterative tool loop");
+
+        assert_eq!(reply.action_type, agent::SessionActionType::DirectReply);
+        assert!(reply.reply_text.contains("website") || reply.reply_text.contains("attachment"));
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let messages = list_session_messages_for_session(&conn, &session.id)
+            .expect("messages should load");
+        let tool_messages = messages
+            .iter()
+            .filter(|message| message.message_type == "tool_result_message")
+            .count();
+
+        assert_eq!(tool_messages, 2);
 
         let _ = std::fs::remove_file(&attachment_path);
         let _ = std::fs::remove_dir_all(&temp_dir);

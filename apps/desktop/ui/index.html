@@ -177,6 +177,12 @@
         <p>Use the formal session flow below to send messages and inspect the current timeline.</p>
         <div class="form-grid">
           <div class="field field-full">
+            <label for="timeline-session-selector">Existing Sessions</label>
+            <select id="timeline-session-selector">
+              <option value="">Select an existing session...</option>
+            </select>
+          </div>
+          <div class="field field-full">
             <label for="timeline-session-id-input">Session ID</label>
             <input id="timeline-session-id-input" type="text" placeholder="session-..." />
           </div>
@@ -190,6 +196,7 @@
           </div>
         </div>
         <button id="timeline-create-session-button">Create and Use New Session</button>
+        <button id="timeline-refresh-sessions-button">Refresh Sessions</button>
         <button id="timeline-send-button">Send Session Message</button>
         <button id="timeline-refresh-button">Refresh Timeline</button>
       </div>
@@ -234,9 +241,11 @@
       const configTestButton = document.getElementById("config-test-button");
       const configResult = document.getElementById("config-result");
       const timelineSessionIdInput = document.getElementById("timeline-session-id-input");
+      const timelineSessionSelector = document.getElementById("timeline-session-selector");
       const timelineMessageInput = document.getElementById("timeline-message-input");
       const timelineAttachmentsInput = document.getElementById("timeline-attachments-input");
       const timelineCreateSessionButton = document.getElementById("timeline-create-session-button");
+      const timelineRefreshSessionsButton = document.getElementById("timeline-refresh-sessions-button");
       const timelineSendButton = document.getElementById("timeline-send-button");
       const timelineRefreshButton = document.getElementById("timeline-refresh-button");
       const timelineResult = document.getElementById("timeline-result");
@@ -268,6 +277,51 @@
         } catch (error) {
           timelineResult.textContent = `Error: ${error}`;
         }
+      }
+
+      async function refreshSessionSelector() {
+        try {
+          const response = await invokeTauri("list_session_selector_options");
+          const sessions = JSON.parse(response);
+          const currentValue = timelineSessionSelector.value || timelineSessionIdInput.value.trim();
+
+          timelineSessionSelector.innerHTML = "";
+          const placeholder = document.createElement("option");
+          placeholder.value = "";
+          placeholder.textContent = "Select an existing session...";
+          timelineSessionSelector.appendChild(placeholder);
+
+          for (const session of sessions) {
+            const option = document.createElement("option");
+            option.value = session.sessionId;
+            option.textContent = session.label;
+            timelineSessionSelector.appendChild(option);
+          }
+
+          if (currentValue && sessions.some((session) => session.sessionId === currentValue)) {
+            timelineSessionSelector.value = currentValue;
+          }
+        } catch (error) {
+          result.textContent = `Error: ${error}`;
+        }
+      }
+
+      async function switchToSession(sessionId) {
+        if (!sessionId) {
+          timelineSessionIdInput.value = "";
+          timelineResult.textContent = "No active session selected.";
+          result.textContent = "No active session selected.";
+          return;
+        }
+
+        timelineSessionIdInput.value = sessionId;
+        const selectedOption = timelineSessionSelector.selectedOptions?.[0];
+        if (selectedOption && selectedOption.value) {
+          result.textContent = `Switched to session: ${selectedOption.textContent}`;
+        } else {
+          result.textContent = `Switched to session: ${sessionId}`;
+        }
+        await refreshTimeline();
       }
 
       function rebuildProviderOptions(config, selectedProvider) {
@@ -520,10 +574,23 @@
           const sessionId = match[1];
           timelineSessionIdInput.value = sessionId;
           timelineResult.textContent = `Using session ${sessionId}`;
+          await refreshSessionSelector();
+          timelineSessionSelector.value = sessionId;
           await refreshTimeline();
         } catch (error) {
           timelineResult.textContent = `Error: ${error}`;
         }
+      });
+
+      timelineRefreshSessionsButton.addEventListener("click", async () => {
+        result.textContent = "Loading sessions...";
+        await refreshSessionSelector();
+        result.textContent = "Sessions refreshed.";
+      });
+
+      timelineSessionSelector.addEventListener("change", async () => {
+        const sessionId = timelineSessionSelector.value.trim();
+        await switchToSession(sessionId);
       });
 
       timelineSendButton.addEventListener("click", async () => {
@@ -560,6 +627,8 @@
             },
           });
           timelineResult.textContent = response;
+          await refreshSessionSelector();
+          timelineSessionSelector.value = sessionId;
           timelineMessageInput.value = "";
         } catch (error) {
           timelineResult.textContent = `Error: ${error}`;
@@ -642,6 +711,7 @@
       });
 
       configLoadButton.click();
+      refreshSessionSelector();
     </script>
   </body>
 </html>

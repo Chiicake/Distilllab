@@ -1,5 +1,10 @@
 use crate::app::AppRuntime;
 use crate::contracts::RunInput;
+use crate::services::session_service::{
+    derive_initial_session_title, derive_refreshed_session_title,
+    should_assign_initial_session_title, should_attempt_session_title_refresh,
+    should_replace_session_title,
+};
 use crate::services::ToolExecutor;
 use agent::{
     BasicSessionAgent, LlmProviderConfig, LlmSessionAgent, SessionAgent, SessionAgentDecision,
@@ -92,6 +97,10 @@ pub async fn decide_and_record_intake(
     insert_session_message(&conn, &user_session_message)?;
 
     let recent_messages = list_session_messages_for_session(&conn, &session.id)?;
+    let user_message_count = recent_messages
+        .iter()
+        .filter(|message| message.role == SessionMessageRole::User)
+        .count();
     let input = SessionAgentInput {
         session: session.clone(),
         recent_messages,
@@ -101,7 +110,7 @@ pub async fn decide_and_record_intake(
     let mut decision = decide_with_provider(provider_config.clone(), input).await?;
     let mut tool_result = None;
 
-    if decision.action_type == SessionActionType::ToolCall {
+    while decision.action_type == SessionActionType::ToolCall {
         let invocation = decision.tool_invocation.clone().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -133,14 +142,16 @@ pub async fn decide_and_record_intake(
         );
         insert_session_message(&conn, &tool_result_message)?;
 
-        if decision.should_continue_planning && executed_tool_result.should_continue_planning {
-            let follow_up_input = SessionAgentInput {
-                session: session.clone(),
-                recent_messages: list_session_messages_for_session(&conn, &session.id)?,
-                intake: intake.clone(),
-            };
-            decision = decide_with_provider(provider_config.clone(), follow_up_input).await?;
+        if !(decision.should_continue_planning && executed_tool_result.should_continue_planning) {
+            break;
         }
+
+        let follow_up_input = SessionAgentInput {
+            session: session.clone(),
+            recent_messages: list_session_messages_for_session(&conn, &session.id)?,
+            intake: intake.clone(),
+        };
+        decision = decide_with_provider(provider_config.clone(), follow_up_input).await?;
     }
 
     let assistant_message_type = match decision.action_type {
@@ -175,6 +186,22 @@ pub async fn decide_and_record_intake(
         .session_summary
         .clone()
         .unwrap_or_else(|| session.summary.clone());
+    let candidate_title = if should_assign_initial_session_title(&session.title, user_message_count) {
+        derive_initial_session_title(&intake.user_message)
+    } else {
+        let recent_user_messages = list_session_messages_for_session(&conn, &session.id)?
+            .into_iter()
+            .filter(|message| message.role == SessionMessageRole::User)
+            .map(|message| message.content)
+            .collect::<Vec<_>>();
+        derive_refreshed_session_title(&recent_user_messages)
+    };
+    if should_assign_initial_session_title(&session.title, user_message_count)
+        || (should_attempt_session_title_refresh(user_message_count)
+            && should_replace_session_title(&session.title, &candidate_title))
+    {
+        session.title = candidate_title;
+    }
     session.updated_at = now.clone();
     session.last_user_message_at = now;
     update_session(&conn, &session)?;
