@@ -28,5 +28,9 @@ pub struct Source {
     pub id: String,
     pub source_type: SourceType,
     pub title: String,
+    pub run_id: Option<String>,
+    pub origin_key: Option<String>,
+    pub locator: Option<String>,
+    pub metadata_json: String,
     pub created_at: String,
 }

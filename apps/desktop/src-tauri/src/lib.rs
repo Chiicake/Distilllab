@@ -502,12 +502,21 @@ async fn send_session_message_command(form: SessionMessageForm) -> Result<String
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
     let (config_path, config) = load_or_create_app_config()?;
     let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
+    let storage_root = config_path
+        .parent()
+        .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?;
+    let attachments = form
+        .attachment_paths
+        .iter()
+        .map(|path| store_attachment_copy(storage_root, &form.session_id, path).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let decision = runtime::send_session_message_with_config(
         &runtime,
         SessionMessageRequest {
             session_id: form.session_id,
             user_message: form.user_message,
+            attachments,
             provider_kind: resolved.provider_type.replace('-', "_"),
             base_url: resolved.base_url,
             model: resolved.model_id,

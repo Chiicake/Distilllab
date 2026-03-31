@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Error, Result, params, types::Type};
+use rusqlite::{params, types::Type, Connection, Error, Result};
 use schema::run::RunType;
 use schema::{Run, RunState};
 
@@ -13,6 +13,14 @@ pub fn insert_run(conn: &Connection, run: &Run) -> Result<()> {
             run.primary_object_id.as_str(),
             run.created_at
         ],
+    )?;
+    Ok(())
+}
+
+pub fn update_run_status(conn: &Connection, run_id: &str, status: &RunState) -> Result<()> {
+    conn.execute(
+        "UPDATE runs SET status = ?1 WHERE id = ?2",
+        params![status.as_str(), run_id],
     )?;
     Ok(())
 }
@@ -95,5 +103,27 @@ mod tests {
         assert_eq!(runs[0].status.as_str(), "completed");
         assert_eq!(runs[0].primary_object_type, "source");
         assert_eq!(runs[0].primary_object_id, "source-1");
+    }
+
+    #[test]
+    fn updates_run_status() {
+        let conn = Connection::open_in_memory().expect("failed to open in-memory database");
+        run_migrations(&conn).expect("failed to run migrations");
+
+        let run = Run {
+            id: "run-1".to_string(),
+            run_type: RunType::Demo,
+            status: RunState::Pending,
+            primary_object_type: "source".to_string(),
+            primary_object_id: "source-1".to_string(),
+            created_at: "2026-03-25T00:00:00Z".to_string(),
+        };
+
+        insert_run(&conn, &run).expect("failed to insert run");
+        update_run_status(&conn, "run-1", &RunState::Completed)
+            .expect("failed to update run status");
+
+        let runs = list_runs(&conn).expect("failed to list runs");
+        assert_eq!(runs[0].status.as_str(), "completed");
     }
 }

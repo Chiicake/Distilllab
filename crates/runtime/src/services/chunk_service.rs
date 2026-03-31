@@ -19,6 +19,10 @@ pub fn chunk_demo_source(
         id: format!("source-{}", Uuid::new_v4()),
         source_type: SourceType::Document,
         title: "Demo Chunk Source".to_string(),
+        run_id: None,
+        origin_key: None,
+        locator: None,
+        metadata_json: "{}".to_string(),
         created_at: Utc::now().to_string(),
     };
 

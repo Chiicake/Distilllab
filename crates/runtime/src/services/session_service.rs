@@ -1,6 +1,6 @@
 use crate::app::AppRuntime;
 use crate::contracts::{LlmSessionDebugRequest, SessionIntakePreview, SessionMessageRequest};
-use crate::flows::build_import_and_distill_handoff_preview;
+use crate::flows::{build_import_and_distill_handoff_preview, execute_materialize_sources};
 use agent::{
     BasicSessionAgent, LlmProviderConfig, LlmSessionAgent, SessionAgent, SessionAgentDecision,
     SessionAgentInput, SessionIntent,
@@ -8,6 +8,7 @@ use agent::{
 use chrono::Utc;
 use memory::db::open_database;
 use memory::migrations::run_migrations;
+use memory::run_store::{insert_run, update_run_status};
 use memory::session_message_store::{
     insert_session_message, list_session_messages_for_session,
 };
@@ -15,6 +16,8 @@ use memory::session_store::{
     get_session_by_id, insert_session, list_sessions as memory_list_sessions, update_session,
 };
 use schema::{Session, SessionIntake, SessionMessage, SessionMessageRole, SessionStatus};
+use schema::{Run, RunState};
+use schema::run::RunType;
 use uuid::Uuid;
 
 type RuntimeError = Box<dyn std::error::Error + Send + Sync>;
@@ -101,6 +104,7 @@ async fn send_session_message_with_optional_provider_config(
     runtime: &AppRuntime,
     session_id: &str,
     user_message: &str,
+    attachments: Vec<schema::AttachmentRef>,
     provider_config: Option<LlmProviderConfig>,
 ) -> Result<SessionAgentDecision, RuntimeError> {
     let conn = open_database(&runtime.database_path)?;
@@ -129,7 +133,7 @@ async fn send_session_message_with_optional_provider_config(
         intake: SessionIntake {
             session_id: session.id.clone(),
             user_message: user_message.to_string(),
-            attachments: vec![],
+            attachments: attachments.clone(),
             current_object_type: match session.current_object_type.as_str() {
                 "none" => None,
                 other => Some(other.to_string()),
@@ -149,6 +153,72 @@ async fn send_session_message_with_optional_provider_config(
         session_agent.decide(input).await?
     };
 
+    let created_run = if decision.action_type == agent::SessionActionType::CreateRun {
+        let run_type = match decision.suggested_run_type.as_deref() {
+            Some("import_and_distill") => Some(RunType::ImportAndDistill),
+            Some("deepening") => Some(RunType::Deepening),
+            Some("compose_and_verify") => Some(RunType::ComposeAndVerify),
+            _ => None,
+        };
+
+        if let Some(run_type) = run_type {
+            let run = Run {
+                id: format!("run-{}", Uuid::new_v4()),
+                run_type,
+                status: RunState::Pending,
+                primary_object_type: decision
+                    .primary_object_type
+                    .clone()
+                    .unwrap_or_else(|| "material".to_string()),
+                primary_object_id: decision
+                    .primary_object_id
+                    .clone()
+                    .unwrap_or_else(|| "pending".to_string()),
+                created_at: Utc::now().to_string(),
+            };
+
+            insert_run(&conn, &run)?;
+            Some(run)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let created_run_id = created_run.as_ref().map(|run| run.id.clone());
+
+    let materialize_result = if let Some(run) = &created_run {
+        if run.run_type.as_str() == "import_and_distill" {
+            let run_input = crate::contracts::RunInput {
+                session_id: session.id.clone(),
+                trigger_message: user_message.to_string(),
+                attachment_refs: attachments.clone(),
+                current_object_type: match session.current_object_type.as_str() {
+                    "none" => None,
+                    other => Some(other.to_string()),
+                },
+                current_object_id: match session.current_object_id.as_str() {
+                    "none" => None,
+                    other => Some(other.to_string()),
+                },
+                decision_summary: decision.reply_text.clone(),
+            };
+
+            let result = execute_materialize_sources(runtime, &run.id, run_input)?;
+            let next_status = if result.can_continue {
+                RunState::Completed
+            } else {
+                RunState::Failed
+            };
+            update_run_status(&conn, &run.id, &next_status)?;
+            Some(result)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let assistant_message_type = match decision.action_type {
         agent::SessionActionType::DirectReply => "assistant_message",
         agent::SessionActionType::RequestClarification => "clarification_message",
@@ -158,10 +228,13 @@ async fn send_session_message_with_optional_provider_config(
 
     let assistant_session_message = build_session_message(
         &session.id,
-        None,
+        created_run_id.clone(),
         assistant_message_type,
         SessionMessageRole::Assistant,
-        decision.reply_text.clone(),
+        match &materialize_result {
+            Some(result) => format!("{}\n\n{}", decision.reply_text, result.summary),
+            None => decision.reply_text.clone(),
+        },
     );
     insert_session_message(&conn, &assistant_session_message)?;
 
@@ -265,6 +338,7 @@ pub async fn send_session_message(
         runtime,
         session_id,
         user_message,
+        vec![],
         llm_provider_config_from_env()?,
     )
     .await
@@ -285,6 +359,7 @@ pub async fn send_session_message_with_config(
         runtime,
         &request.session_id,
         &request.user_message,
+        request.attachments,
         Some(provider_config),
     )
     .await
@@ -427,10 +502,11 @@ mod tests {
     };
     use crate::app::AppRuntime;
     use agent::{LlmProviderConfig, SessionIntent};
-    use schema::SessionIntake;
     use memory::db::open_database;
+    use memory::run_store::list_runs as list_persisted_runs;
     use memory::session_message_store::list_session_messages_for_session;
     use memory::session_store::get_session_by_id;
+    use schema::SessionIntake;
     use std::sync::{Mutex, OnceLock};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -686,6 +762,166 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn send_session_message_creates_run_for_import_and_distill_decision() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-create-run-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let reply = send_session_message(
+            &runtime,
+            &session.id,
+            "Please distill these work notes into Distilllab",
+        )
+        .await
+        .expect("runtime should send a session message");
+
+        assert_eq!(reply.intent, SessionIntent::DistillMaterial);
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let runs = list_persisted_runs(&conn).expect("runs should load");
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].run_type.as_str(), "import_and_distill");
+        assert_eq!(runs[0].status.as_str(), "completed");
+        assert_eq!(runs[0].primary_object_type, "material");
+    }
+
+    #[tokio::test]
+    async fn send_session_message_links_assistant_system_message_to_created_run() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-create-run-link-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        send_session_message(
+            &runtime,
+            &session.id,
+            "Please distill these work notes into Distilllab",
+        )
+        .await
+        .expect("runtime should send a session message");
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let runs = list_persisted_runs(&conn).expect("runs should load");
+        let messages = list_session_messages_for_session(&conn, &session.id)
+            .expect("session messages should load");
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].message_type, "system_message");
+        assert_eq!(messages[1].run_id.as_deref(), Some(runs[0].id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn send_session_message_executes_materialize_sources_and_completes_run() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-run-exec-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        send_session_message(
+            &runtime,
+            &session.id,
+            "Please distill these work notes into Distilllab",
+        )
+        .await
+        .expect("runtime should send a session message");
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let runs = list_persisted_runs(&conn).expect("runs should load");
+        let sources = memory::source_store::list_sources(&conn).expect("sources should load");
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status.as_str(), "completed");
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].run_id.as_deref(), Some(runs[0].id.as_str()));
+        assert_eq!(sources[0].source_type.as_str(), "session");
+    }
+
+    #[tokio::test]
+    async fn send_session_message_appends_materialize_summary_to_system_message() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-run-summary-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        send_session_message(
+            &runtime,
+            &session.id,
+            "Please distill these work notes into Distilllab",
+        )
+        .await
+        .expect("runtime should send a session message");
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let messages = list_session_messages_for_session(&conn, &session.id)
+            .expect("session messages should load");
+
+        assert_eq!(messages.len(), 2);
+        assert!(messages[1].content.contains("materialized 1 sources"));
+    }
+
+    #[tokio::test]
+    async fn send_session_message_with_attachments_materializes_attachment_sources_for_run() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-attachment-run-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let attachment_path = format!(
+            "/tmp/distilllab-runtime-session-attachment-{}.md",
+            Uuid::new_v4()
+        );
+        std::fs::write(&attachment_path, "# Work notes\nshipped feature")
+            .expect("attachment fixture should be written");
+
+        let reply = super::send_session_message_with_optional_provider_config(
+            &runtime,
+            &session.id,
+            "Please distill these work notes into Distilllab",
+            vec![schema::AttachmentRef {
+                attachment_id: "attachment-1".to_string(),
+                kind: "file_path".to_string(),
+                name: "notes.md".to_string(),
+                mime_type: "text/markdown".to_string(),
+                path_or_locator: attachment_path.clone(),
+                size: 64,
+                metadata_json: "{}".to_string(),
+            }],
+            None,
+        )
+        .await
+        .expect("runtime should send attachment-aware session message");
+
+        assert_eq!(reply.intent, SessionIntent::DistillMaterial);
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let sources = memory::source_store::list_sources(&conn).expect("sources should load");
+
+        assert_eq!(sources.len(), 2);
+        assert!(sources.iter().any(|source| source.source_type.as_str() == "document"));
+        assert!(sources.iter().any(|source| source.source_type.as_str() == "session"));
+
+        let _ = std::fs::remove_file(attachment_path);
+    }
+
+    #[tokio::test]
     async fn send_session_message_uses_llm_path_when_env_config_is_present() {
         let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -844,6 +1080,7 @@ mod tests {
             SessionMessageRequest {
                 session_id: session.id.clone(),
                 user_message: "Current explicit message".to_string(),
+                attachments: vec![],
                 provider_kind: "openai_compatible".to_string(),
                 base_url: format!("http://{}", address),
                 model: "gpt-test".to_string(),

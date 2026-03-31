@@ -15,5 +15,8 @@ pub use session_service::{
     list_sessions, preview_session_intake, preview_session_intake_with_config,
     send_session_message, send_session_message_with_config,
 };
-pub use source_service::{create_demo_source, list_sources};
+pub use source_service::{
+    create_attachment_source, create_demo_source, create_message_source,
+    find_source_for_run_origin, list_sources, list_sources_for_run,
+};
 pub use work_item_service::{extract_demo_work_items, list_work_items};

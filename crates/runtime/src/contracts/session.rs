@@ -1,3 +1,5 @@
+use schema::AttachmentRef;
+
 #[derive(Debug, Clone)]
 pub struct LlmSessionDebugRequest {
     pub provider_kind: String,
@@ -11,6 +13,7 @@ pub struct LlmSessionDebugRequest {
 pub struct SessionMessageRequest {
     pub session_id: String,
     pub user_message: String,
+    pub attachments: Vec<AttachmentRef>,
     pub provider_kind: String,
     pub base_url: String,
     pub model: String,

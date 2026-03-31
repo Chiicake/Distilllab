@@ -20,6 +20,10 @@ pub fn extract_demo_work_items(
         id: format!("source-{}", Uuid::new_v4()),
         source_type: SourceType::Document,
         title: "Demo Work Item Source".to_string(),
+        run_id: None,
+        origin_key: None,
+        locator: None,
+        metadata_json: "{}".to_string(),
         created_at: Utc::now().to_string(),
     };
     insert_source(&conn, &source)?;

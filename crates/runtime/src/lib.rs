@@ -18,7 +18,7 @@ pub use contracts::{
     MaterializeSourcesInput, MaterializeSourcesResult, MaterializedSourceRef,
     SourceOriginKind,
 };
-pub use flows::build_import_and_distill_handoff_preview;
+pub use flows::{build_import_and_distill_handoff_preview, execute_materialize_sources};
 pub use services::{
     build_demo_assets, chunk_demo_source, create_demo_run, create_demo_session,
     create_demo_source, decide_llm_session_message_with_config, extract_demo_work_items,

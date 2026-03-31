@@ -8,6 +8,10 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             id TEXT PRIMARY KEY,
             source_type TEXT NOT NULL,
             title TEXT NOT NULL,
+            run_id TEXT,
+            origin_key TEXT,
+            locator TEXT,
+            metadata_json TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS sessions (
@@ -72,6 +76,45 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         );
         "#,
     )?;
+
+    add_column_if_missing(conn, "sources", "run_id", "TEXT")?;
+    add_column_if_missing(conn, "sources", "origin_key", "TEXT")?;
+    add_column_if_missing(conn, "sources", "locator", "TEXT")?;
+    add_column_if_missing(
+        conn,
+        "sources",
+        "metadata_json",
+        "TEXT NOT NULL DEFAULT '{}' ",
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sources_run_id_origin_key ON sources (run_id, origin_key)",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table_name: &str,
+    column_name: &str,
+    column_definition: &str,
+) -> Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+    for column in columns {
+        if column? == column_name {
+            return Ok(());
+        }
+    }
+
+    conn.execute(
+        &format!("ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"),
+        [],
+    )?;
+
     Ok(())
 }
 
