@@ -119,6 +119,7 @@ async fn send_session_message_with_optional_provider_config(
 
     let decision = outcome.decision;
     let assistant_message_id = outcome.assistant_message_id;
+    let coordinator_run_input = outcome.run_input;
 
     let created_run = if decision.action_type == agent::SessionActionType::CreateRun {
         let run_type = match decision.suggested_run_type.as_deref() {
@@ -156,20 +157,12 @@ async fn send_session_message_with_optional_provider_config(
 
     let materialize_result = if let Some(run) = &created_run {
         if run.run_type.as_str() == "import_and_distill" {
-            let run_input = crate::contracts::RunInput {
-                session_id: session.id.clone(),
-                trigger_message: user_message.to_string(),
-                attachment_refs: attachments.clone(),
-                current_object_type: match session.current_object_type.as_str() {
-                    "none" => None,
-                    other => Some(other.to_string()),
-                },
-                current_object_id: match session.current_object_id.as_str() {
-                    "none" => None,
-                    other => Some(other.to_string()),
-                },
-                decision_summary: decision.reply_text.clone(),
-            };
+            let run_input = coordinator_run_input.clone().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "missing run_input for create_run decision",
+                )
+            })?;
 
             let result = execute_materialize_sources(runtime, &run.id, run_input)?;
             let next_status = if result.can_continue {
@@ -708,6 +701,32 @@ mod tests {
 
         assert_eq!(updated_session.current_intent, reply.intent.as_str());
         assert_eq!(updated_session.summary, "General session assistance");
+    }
+
+    #[tokio::test]
+    async fn send_session_message_persists_planner_primary_object_hints_back_to_session() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-primary-object-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let _reply = send_session_message(
+            &runtime,
+            &session.id,
+            "Please distill these work notes into Distilllab",
+        )
+        .await
+        .expect("runtime should send a session message");
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let updated_session = get_session_by_id(&conn, &session.id)
+            .expect("query should succeed")
+            .expect("session should exist");
+
+        assert_eq!(updated_session.current_object_type, "material");
     }
 
     #[tokio::test]

@@ -147,7 +147,7 @@ impl SessionAgent for BasicSessionAgent {
         {
             return Ok(SessionAgentDecision {
                 intent: SessionIntent::DistillMaterial,
-                primary_object_type,
+                primary_object_type: primary_object_type.or(Some("material".to_string())),
                 primary_object_id,
                 action_type: SessionActionType::CreateRun,
                 tool_call_key: None,
@@ -278,10 +278,16 @@ impl LlmSessionAgent {
             });
         }
 
-        messages.push(OpenAiCompatibleChatMessage {
-            role: "user".to_string(),
-                content: input.intake.user_message.clone(),
+        let current_turn_already_present = input.recent_messages.iter().rev().any(|message| {
+            message.role == SessionMessageRole::User && message.content == input.intake.user_message
         });
+
+        if !current_turn_already_present {
+            messages.push(OpenAiCompatibleChatMessage {
+                role: "user".to_string(),
+                content: input.intake.user_message.clone(),
+            });
+        }
 
         messages
     }
@@ -366,6 +372,17 @@ impl LlmSessionAgent {
             decision.tool_call_key = None;
             decision.should_continue_planning = true;
             decision.failure_hint = Some("clarify_or_stop".to_string());
+        }
+
+        if decision.action_type == SessionActionType::CreateRun {
+            let valid_run_type = matches!(
+                decision.suggested_run_type.as_deref(),
+                Some("import_and_distill") | Some("deepening") | Some("compose_and_verify")
+            );
+
+            if !valid_run_type {
+                return None;
+            }
         }
 
         Some(decision)
@@ -1078,6 +1095,59 @@ mod tests {
         assert!(messages[0].content.contains("session_summary: The session is focused on one imported source"));
     }
 
+    #[test]
+    fn llm_session_agent_does_not_duplicate_current_turn_if_it_is_already_in_recent_messages() {
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: "http://localhost:11434/v1".to_string(),
+            model: "qwen-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Duplicate Turn Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing duplicate current turn handling".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![SessionMessage {
+                id: "message-current".to_string(),
+                session_id: "session-1".to_string(),
+                run_id: None,
+                message_type: "user_message".to_string(),
+                role: SessionMessageRole::User,
+                content: "Current message".to_string(),
+                data_json: "{}".to_string(),
+                created_at: "2026-03-28T00:00:00Z".to_string(),
+            }],
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Current message".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
+        };
+
+        let messages = agent.build_chat_messages(&input);
+        let current_turn_count = messages
+            .iter()
+            .filter(|message| message.content == "Current message")
+            .count();
+
+        assert_eq!(current_turn_count, 1);
+    }
+
     #[tokio::test]
     async fn llm_session_agent_returns_direct_reply_from_llm_response() {
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -1159,6 +1229,15 @@ mod tests {
         assert_eq!(decision.action_type, SessionActionType::DirectReply);
         assert_eq!(decision.intent, SessionIntent::GeneralReply);
         assert_eq!(decision.reply_text, "Hello from fake llm");
+    }
+
+    #[test]
+    fn llm_session_agent_rejects_create_run_without_valid_run_type() {
+        let raw_json = r#"{"intent":"compose_output","action_type":"create_run","reply_text":"I will start a run.","primary_object_type":"project","primary_object_id":"project-1","suggested_run_type":null,"session_summary":"Preparing to compose output","tool_call_key":null,"should_continue_planning":true,"failure_hint":"clarify_or_stop"}"#;
+
+        let decision = LlmSessionAgent::parse_structured_decision(raw_json);
+
+        assert!(decision.is_none());
     }
 
     #[tokio::test]

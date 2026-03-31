@@ -66,10 +66,14 @@ pub fn update_session_message_run_and_content(
     run_id: Option<&str>,
     content: &str,
 ) -> Result<()> {
-    conn.execute(
+    let updated = conn.execute(
         "UPDATE session_messages SET run_id = ?1, content = ?2 WHERE id = ?3",
         params![run_id, content, message_id],
     )?;
+
+    if updated == 0 {
+        return Err(Error::QueryReturnedNoRows);
+    }
 
     Ok(())
 }

@@ -98,6 +98,14 @@ pub async fn decide_and_record_intake(
 
     let now = Utc::now().to_string();
     session.current_intent = decision.intent.as_str().to_string();
+    session.current_object_type = decision
+        .primary_object_type
+        .clone()
+        .unwrap_or_else(|| "none".to_string());
+    session.current_object_id = decision
+        .primary_object_id
+        .clone()
+        .unwrap_or_else(|| "none".to_string());
     session.summary = decision
         .session_summary
         .clone()
