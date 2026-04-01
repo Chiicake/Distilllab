@@ -46,9 +46,22 @@ pub fn store_attachment_copy(
     })
 }
 
+pub fn remove_session_attachment_storage(
+    storage_root: &Path,
+    session_id: &str,
+) -> Result<(), FlowError> {
+    let session_attachment_dir = storage_root.join("attachments").join(session_id);
+
+    match fs::remove_dir_all(&session_attachment_dir) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(Box::new(error)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::store_attachment_copy;
+    use super::{remove_session_attachment_storage, store_attachment_copy};
     use std::fs;
     use uuid::Uuid;
 
@@ -72,5 +85,43 @@ mod tests {
         assert_ne!(attachment.path_or_locator, original_path.to_string_lossy());
         assert!(attachment.path_or_locator.contains("attachments"));
         assert!(std::path::Path::new(&attachment.path_or_locator).exists());
+    }
+
+    #[test]
+    fn removes_session_attachment_storage_directory_when_present() {
+        let temp_root =
+            std::env::temp_dir().join(format!("distilllab-attachment-cleanup-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_root).expect("temp root should be created");
+
+        let original_path = temp_root.join("notes.md");
+        fs::write(&original_path, "runtime design notes").expect("source file should be written");
+
+        let attachment = store_attachment_copy(
+            &temp_root,
+            "session-cleanup",
+            original_path.to_string_lossy().as_ref(),
+        )
+        .expect("attachment should be stored");
+
+        let session_dir = temp_root.join("attachments").join("session-cleanup");
+        assert!(session_dir.exists());
+        assert!(std::path::Path::new(&attachment.path_or_locator).exists());
+
+        remove_session_attachment_storage(&temp_root, "session-cleanup")
+            .expect("attachment storage should be removed");
+
+        assert!(!session_dir.exists());
+    }
+
+    #[test]
+    fn removing_missing_session_attachment_storage_is_a_noop() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "distilllab-attachment-missing-cleanup-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&temp_root).expect("temp root should be created");
+
+        remove_session_attachment_storage(&temp_root, "session-missing")
+            .expect("missing attachment storage should not error");
     }
 }

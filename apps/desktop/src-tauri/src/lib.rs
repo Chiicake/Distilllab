@@ -8,7 +8,7 @@ use runtime::{
     resolve_current_provider_model, save_app_config_to_path, set_current_provider_model,
     upsert_provider_entry,
 };
-use runtime::flows::attachment_storage::store_attachment_copy;
+use runtime::flows::attachment_storage::{remove_session_attachment_storage, store_attachment_copy};
 use schema::{SessionIntake, SessionMessage, SessionMessageRole};
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -749,6 +749,7 @@ async fn create_session_and_send_first_message_command(
         Ok(attachments) => attachments,
         Err(error) => {
             delete_failed_first_send_session(&runtime, &session_id).map_err(|e| e.to_string())?;
+            remove_session_attachment_storage(storage_root, &session_id).map_err(|e| e.to_string())?;
             return Err(error);
         }
     };
@@ -769,6 +770,7 @@ async fn create_session_and_send_first_message_command(
 
     if let Err(error) = send_result {
         delete_failed_first_send_session(&runtime, &session_id).map_err(|e| e.to_string())?;
+        remove_session_attachment_storage(storage_root, &session_id).map_err(|e| e.to_string())?;
         return Err(error.to_string());
     }
 
