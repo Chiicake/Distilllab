@@ -37,3 +37,28 @@ test("shell view state tracks selected chat session through transitions", () => 
   assert.equal(snapshot.currentView, "chatDraft");
   assert.equal(snapshot.selectedSession, "draft");
 });
+
+test("shell view state tracks selected canvas scope through transitions", () => {
+  const shell = createShellViewState();
+
+  let snapshot = shell.transition("canvasGlobal");
+  assert.equal(snapshot.currentView, "canvasGlobal");
+  assert.equal(snapshot.selectedCanvasScope, "global");
+
+  snapshot = shell.transition("canvasDetail");
+  assert.equal(snapshot.currentView, "canvasDetail");
+  assert.equal(snapshot.selectedCanvasScope, "detail");
+
+  snapshot = shell.transition("settingsGeneral");
+  assert.equal(snapshot.currentView, "settingsGeneral");
+  assert.equal(snapshot.selectedCanvasScope, "detail");
+});
+
+test("shell view state preserves the most recent canvas scope when returning", () => {
+  const shell = createShellViewState({ currentView: "canvasDetail", selectedCanvasScope: "detail" });
+
+  const snapshot = shell.transition("canvasGlobal");
+
+  assert.equal(snapshot.currentView, "canvasGlobal");
+  assert.equal(snapshot.selectedCanvasScope, "global");
+});

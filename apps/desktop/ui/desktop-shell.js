@@ -415,6 +415,12 @@ function renderRailSelection(currentView) {
     button.dataset.active = String(active);
     button.setAttribute("aria-current", active ? "page" : "false");
   }
+
+  for (const button of document.querySelectorAll("[data-active-when-view]")) {
+    const active = button.dataset.activeWhenView === currentView;
+    button.dataset.active = String(active);
+    button.setAttribute("aria-pressed", String(active));
+  }
 }
 
 function renderShellView() {

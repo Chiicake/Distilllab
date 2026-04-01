@@ -92,8 +92,22 @@
             <p data-i18n="canvas.rail.description">Switch between global structure and a focused detail view.</p>
           </div>
           <nav id="canvas-scope-rail" class="rail-list" data-i18n-aria-label="canvas.rail.aria">
-            <button class="rail-item" type="button" data-view-target="canvasGlobal" data-canvas-scope="global" data-i18n="canvas.scope.global">Global Structure</button>
-            <button class="rail-item" type="button" data-view-target="canvasDetail" data-canvas-scope="detail" data-i18n="canvas.scope.detail">Focused Detail</button>
+            <button class="rail-item rail-item-card" type="button" data-view-target="canvasGlobal" data-canvas-scope="global">
+              <span class="rail-item-icon" aria-hidden="true">RA</span>
+              <span class="rail-item-copy">
+                <span class="rail-item-title" data-i18n="canvas.scope.global">Global Structure</span>
+                <span class="rail-item-description" data-i18n="canvas.scope.globalDescription">Recent Active Set stays explicit while projects, work items, and assets remain visible around it.</span>
+                <span class="rail-item-meta" data-i18n="canvas.scope.globalMeta">Default object-space view</span>
+              </span>
+            </button>
+            <button class="rail-item" type="button" data-view-target="canvasDetail" data-canvas-scope="detail">
+              <span class="rail-item-icon" aria-hidden="true">FD</span>
+              <span class="rail-item-copy">
+                <span class="rail-item-title" data-i18n="canvas.scope.detail">Focused Detail</span>
+                <span class="rail-item-description" data-i18n="canvas.scope.detailDescription">Center one object, show nearby context, and keep inspection details alongside it.</span>
+                <span class="rail-item-meta" data-i18n="canvas.scope.detailMeta">Object neighborhood view</span>
+              </span>
+            </button>
           </nav>
         </section>
 
@@ -242,27 +256,296 @@
           </section>
         </section>
 
-        <section id="canvas-global-view" class="view-panel" data-view="canvasGlobal" hidden>
-          <div class="view-copy surface">
-            <p class="eyebrow" data-i18n="canvas.surface.eyebrow">Canvas Space</p>
-            <h2 data-i18n="canvas.global.title">Canvas Global View</h2>
-            <p data-i18n="canvas.global.description">The shell reserves a dedicated object-space surface for global structure and cross-project shape.</p>
-          </div>
-          <section class="panel surface-muted">
-            <h3 data-i18n="canvas.global.card.title">Global Structure Placeholder</h3>
-            <p data-i18n="canvas.global.card.description">Later canvas tasks can fill this viewport without reworking navigation or inspector placement.</p>
+        <section id="canvas-global-view" class="view-panel canvas-view" data-view="canvasGlobal" hidden>
+          <section class="canvas-shell surface">
+            <header class="canvas-toolbar surface-muted">
+              <div class="canvas-toolbar-copy">
+                <p class="eyebrow" data-i18n="canvas.surface.eyebrow">Canvas Space</p>
+                <h2 data-i18n="canvas.global.title">Canvas Global View</h2>
+                <p data-i18n="canvas.global.description">The shell reserves a dedicated object-space surface for global structure and cross-project shape.</p>
+              </div>
+              <div class="canvas-toolbar-switch" role="group" data-i18n-aria-label="canvas.toolbar.switchAria">
+                <button class="canvas-toggle" type="button" data-view-target="canvasGlobal" data-active-when-view="canvasGlobal" data-i18n="canvas.toggle.global">Global</button>
+                <button class="canvas-toggle" type="button" data-view-target="canvasDetail" data-active-when-view="canvasDetail" data-i18n="canvas.toggle.detail">Detail</button>
+              </div>
+            </header>
+
+            <div class="canvas-workspace canvas-workspace-global">
+              <aside class="canvas-side-panel canvas-global-sidebar surface-muted">
+                <div class="canvas-side-header">
+                  <p class="eyebrow" data-i18n="canvas.sidebar.eyebrow">Canvas Views</p>
+                  <h3 data-i18n="canvas.sidebar.title">Recent Active Set</h3>
+                  <p data-i18n="canvas.sidebar.description">Keep the current object model explicit instead of implying it only by placement.</p>
+                </div>
+
+                <div class="canvas-collection-card surface-strong">
+                  <div>
+                    <p class="canvas-collection-label" data-i18n="canvas.sidebar.recentActiveLabel">Recent Active Set</p>
+                    <h4 data-i18n="canvas.sidebar.recentActiveTitle">Current Workspace Focus</h4>
+                  </div>
+                  <p data-i18n="canvas.sidebar.recentActiveBody">Analysis, reporting, and linked assets are centered here. Older objects stay visible as surrounding context.</p>
+                </div>
+
+                <nav class="canvas-mode-list" aria-label="Canvas modes">
+                  <button class="canvas-mode-row" type="button" data-view-target="canvasGlobal" data-active-when-view="canvasGlobal">
+                    <span class="canvas-mode-icon" aria-hidden="true">RA</span>
+                    <span>
+                      <strong data-i18n="canvas.sidebar.modeRecent">Recent Active</strong>
+                      <small data-i18n="canvas.sidebar.modeRecentBody">Center the working set and preserve peripheral context.</small>
+                    </span>
+                  </button>
+                  <button class="canvas-mode-row" type="button">
+                    <span class="canvas-mode-icon" aria-hidden="true">AO</span>
+                    <span>
+                      <strong data-i18n="canvas.sidebar.modeAll">All Objects</strong>
+                      <small data-i18n="canvas.sidebar.modeAllBody">Project inventory remains visible in the outline below.</small>
+                    </span>
+                  </button>
+                  <button class="canvas-mode-row" type="button">
+                    <span class="canvas-mode-icon" aria-hidden="true">FL</span>
+                    <span>
+                      <strong data-i18n="canvas.sidebar.modeFilters">Filters</strong>
+                      <small data-i18n="canvas.sidebar.modeFiltersBody">Static filter chips preview future graph slicing.</small>
+                    </span>
+                  </button>
+                  <button class="canvas-mode-row" type="button">
+                    <span class="canvas-mode-icon" aria-hidden="true">SR</span>
+                    <span>
+                      <strong data-i18n="canvas.sidebar.modeSearch">Search</strong>
+                      <small data-i18n="canvas.sidebar.modeSearchBody">Jump to object anchors and local clusters.</small>
+                    </span>
+                  </button>
+                  <button class="canvas-mode-row" type="button">
+                    <span class="canvas-mode-icon" aria-hidden="true">OL</span>
+                    <span>
+                      <strong data-i18n="canvas.sidebar.modeOutline">Outline</strong>
+                      <small data-i18n="canvas.sidebar.modeOutlineBody">Projects, work items, and assets stay readable as hierarchy.</small>
+                    </span>
+                  </button>
+                </nav>
+
+                <div class="canvas-filter-chip-row">
+                  <span class="canvas-filter-chip" data-i18n="canvas.sidebar.filterProject">Project Delta</span>
+                  <span class="canvas-filter-chip" data-i18n="canvas.sidebar.filterRunning">Running</span>
+                  <span class="canvas-filter-chip" data-i18n="canvas.sidebar.filterAssets">Assets Linked</span>
+                </div>
+
+                <div class="canvas-search-card surface">
+                  <label for="canvas-global-search" data-i18n="canvas.sidebar.searchLabel">Search</label>
+                  <input id="canvas-global-search" type="text" data-i18n-placeholder="canvas.sidebar.searchPlaceholder" placeholder="Find object anchors, assets, or work items" />
+                </div>
+
+                <section class="canvas-outline surface">
+                  <p class="canvas-outline-label" data-i18n="canvas.sidebar.outlineLabel">Outline</p>
+                  <div class="canvas-outline-tree">
+                    <div class="canvas-outline-group">
+                      <p class="canvas-outline-heading" data-i18n="canvas.sidebar.projectGroup">Project</p>
+                      <button class="canvas-outline-item canvas-outline-item-strong" type="button">Project Delta</button>
+                    </div>
+                    <div class="canvas-outline-group">
+                      <p class="canvas-outline-heading" data-i18n="canvas.sidebar.workItemGroup">Work Items</p>
+                      <button class="canvas-outline-item canvas-outline-item-branch" type="button">Analysis</button>
+                      <button class="canvas-outline-item" type="button">Reporting</button>
+                      <button class="canvas-outline-item" type="button">Review</button>
+                    </div>
+                    <div class="canvas-outline-group">
+                      <p class="canvas-outline-heading" data-i18n="canvas.sidebar.assetGroup">Assets</p>
+                      <button class="canvas-outline-item canvas-outline-item-leaf" type="button">summary_report.pdf</button>
+                      <button class="canvas-outline-item canvas-outline-item-leaf" type="button">log_files.zip</button>
+                      <button class="canvas-outline-item canvas-outline-item-leaf" type="button">metrics_sheet.xls</button>
+                    </div>
+                  </div>
+                </section>
+              </aside>
+
+              <section class="canvas-viewport surface">
+                <header class="canvas-viewport-header">
+                  <div class="canvas-view-labels">
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.scopeLabel">Scope</strong><span data-i18n="canvas.header.scopeValue">Current Workspace</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.viewLabel">View</strong><span data-i18n="canvas.header.viewValue">Recent Active</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.layoutLabel">Layout</strong><span data-i18n="canvas.header.layoutValue">Hybrid</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.focusLabel">Focus</strong><span data-i18n="canvas.header.focusValue">Analysis Cluster</span></span>
+                  </div>
+                  <div class="canvas-zoom-pill">
+                    <span data-i18n="canvas.header.zoomLabel">Zoom</span>
+                    <strong>100%</strong>
+                  </div>
+                </header>
+
+                <div class="canvas-grid-stage">
+                  <div class="canvas-active-note surface-strong">
+                    <p class="canvas-active-note-label" data-i18n="canvas.global.recentSetLabel">Recent Active Set</p>
+                    <p data-i18n="canvas.global.recentSetBody">The center grouping is intentional: this is the working set, not just whatever happens to be in the middle.</p>
+                  </div>
+
+                  <div class="canvas-object project-anchor surface-strong">
+                    <span class="canvas-object-type" data-i18n="canvas.global.projectAnchor">Project Anchor</span>
+                    <h3>Project Delta</h3>
+                    <p data-i18n="canvas.global.projectBody">Workspace anchor for linked analysis, reporting, and review work.</p>
+                    <div class="canvas-object-tags">
+                      <span>v2.4.0</span>
+                      <span data-i18n="canvas.global.activeTag">Active</span>
+                    </div>
+                  </div>
+
+                  <div class="canvas-object workitem-analysis surface">
+                    <div class="canvas-object-heading">
+                      <span class="canvas-object-rail"></span>
+                      <h3>Analysis</h3>
+                      <span class="canvas-status-chip" data-i18n="canvas.global.analysisStatus">Running</span>
+                    </div>
+                    <p data-i18n="canvas.global.analysisBody">Baseline metric derivation from historical repository data and current run outputs.</p>
+                    <div class="canvas-progress-meta">
+                      <span data-i18n="canvas.global.analysisFocus">Current Focus</span>
+                      <strong>84%</strong>
+                    </div>
+                    <span class="canvas-progress-bar"><span class="canvas-progress-bar-fill"></span></span>
+                  </div>
+
+                  <div class="canvas-object workitem-reporting surface-muted">
+                    <div class="canvas-object-heading">
+                      <span class="canvas-object-rail canvas-object-rail-secondary"></span>
+                      <h3>Reporting</h3>
+                    </div>
+                    <p data-i18n="canvas.global.reportingBody">Draft generation of executive summaries and technical logs.</p>
+                    <div class="canvas-object-footnote" data-i18n="canvas.global.reportingStatus">Status: Complete</div>
+                  </div>
+
+                  <div class="canvas-object workitem-review surface-muted">
+                    <div class="canvas-object-heading">
+                      <span class="canvas-object-rail canvas-object-rail-alert"></span>
+                      <h3>Review</h3>
+                    </div>
+                    <p data-i18n="canvas.global.reviewBody">Stakeholder gate verification for phase-gate transition.</p>
+                    <div class="canvas-object-footnote" data-i18n="canvas.global.reviewStatus">Status: Pending Input</div>
+                  </div>
+
+                  <div class="canvas-asset-cluster asset-cluster-left">
+                    <div class="canvas-asset-pill surface-muted">log_files.zip</div>
+                    <div class="canvas-asset-pill surface-muted">raw_data_v1.csv</div>
+                  </div>
+                  <div class="canvas-asset-cluster asset-cluster-right">
+                    <div class="canvas-asset-pill canvas-asset-pill-strong surface">summary_report.pdf</div>
+                  </div>
+                  <div class="canvas-asset-cluster asset-cluster-bottom">
+                    <div class="canvas-asset-pill surface-muted">metrics_sheet.xls</div>
+                  </div>
+
+                  <div class="canvas-peripheral-object surface-muted">
+                    <span class="canvas-object-type" data-i18n="canvas.global.peripheralLabel">Peripheral Project</span>
+                    <h3>Project Beta</h3>
+                    <p data-i18n="canvas.global.peripheralBody">Legacy migration archives remain visible but de-emphasized outside the active set.</p>
+                  </div>
+
+                  <svg class="canvas-connection-layer" viewBox="0 0 1000 700" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M 500 332 L 310 190"></path>
+                    <path d="M 500 332 L 706 214"></path>
+                    <path d="M 500 332 L 500 540"></path>
+                    <path d="M 310 190 L 150 138"></path>
+                    <path d="M 310 190 L 160 208"></path>
+                    <path d="M 706 214 L 856 168"></path>
+                    <path d="M 500 540 L 706 622"></path>
+                  </svg>
+
+                  <div class="canvas-minimap surface-muted" aria-hidden="true">
+                    <span class="canvas-minimap-node canvas-minimap-node-center"></span>
+                    <span class="canvas-minimap-node canvas-minimap-node-a"></span>
+                    <span class="canvas-minimap-node canvas-minimap-node-b"></span>
+                    <span class="canvas-minimap-node canvas-minimap-node-c"></span>
+                    <span class="canvas-minimap-frame"></span>
+                  </div>
+                </div>
+              </section>
+            </div>
           </section>
         </section>
 
-        <section id="canvas-detail-view" class="view-panel" data-view="canvasDetail" hidden>
-          <div class="view-copy surface">
-            <p class="eyebrow" data-i18n="canvas.surface.eyebrow">Canvas Space</p>
-            <h2 data-i18n="canvas.detail.title">Canvas Detail View</h2>
-            <p data-i18n="canvas.detail.description">Focused detail view keeps room for future object inspection and scoped emphasis.</p>
-          </div>
-          <section class="panel surface-muted">
-            <h3 data-i18n="canvas.detail.card.title">Detail Focus Placeholder</h3>
-            <p data-i18n="canvas.detail.card.description">This region is intentionally lightweight while preserving the real shell behavior for later iterations.</p>
+        <section id="canvas-detail-view" class="view-panel canvas-view" data-view="canvasDetail" hidden>
+          <section class="canvas-shell surface">
+            <header class="canvas-toolbar surface-muted">
+              <div class="canvas-toolbar-copy">
+                <p class="eyebrow" data-i18n="canvas.surface.eyebrow">Canvas Space</p>
+                <h2 data-i18n="canvas.detail.title">Canvas Detail View</h2>
+                <p data-i18n="canvas.detail.description">Focused detail view keeps room for future object inspection and scoped emphasis.</p>
+              </div>
+              <div class="canvas-toolbar-switch" role="group" data-i18n-aria-label="canvas.toolbar.switchAria">
+                <button class="canvas-toggle" type="button" data-view-target="canvasGlobal" data-active-when-view="canvasGlobal" data-i18n="canvas.toggle.global">Global</button>
+                <button class="canvas-toggle" type="button" data-view-target="canvasDetail" data-active-when-view="canvasDetail" data-i18n="canvas.toggle.detail">Detail</button>
+              </div>
+            </header>
+
+            <div class="canvas-workspace canvas-workspace-detail">
+              <section class="canvas-viewport surface">
+                <header class="canvas-viewport-header">
+                  <div class="canvas-view-labels">
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.scopeLabel">Scope</strong><span data-i18n="canvas.detail.scopeValue">Object Neighborhood</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.viewLabel">View</strong><span data-i18n="canvas.detail.viewValue">Focused Detail</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.layoutLabel">Layout</strong><span data-i18n="canvas.detail.layoutValue">Centered Card</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.focusLabel">Focus</strong><span data-i18n="canvas.detail.focusValue">Analysis / AN-402-DELTA</span></span>
+                  </div>
+                  <button class="canvas-return-link" type="button" data-view-target="canvasGlobal" data-i18n="canvas.detail.backToGlobal">Return to global map</button>
+                </header>
+
+                <div class="canvas-detail-stage">
+                  <div class="canvas-detail-node canvas-detail-node-top surface-muted">
+                    <span data-i18n="canvas.detail.neighborTopType">Neighbor</span>
+                    <strong>Review</strong>
+                  </div>
+                  <div class="canvas-detail-node canvas-detail-node-right surface-muted">
+                    <span data-i18n="canvas.detail.neighborRightType">Asset</span>
+                    <strong>summary_report.pdf</strong>
+                  </div>
+                  <div class="canvas-detail-node canvas-detail-node-bottom surface-muted">
+                    <span data-i18n="canvas.detail.neighborBottomType">Project</span>
+                    <strong>Project Delta</strong>
+                  </div>
+
+                  <div class="canvas-detail-card surface-strong">
+                    <div class="canvas-detail-card-glow" aria-hidden="true"></div>
+                    <div class="canvas-detail-card-header">
+                      <div>
+                        <p class="canvas-detail-card-kicker">WorkItem / AN-402-DELTA</p>
+                        <h3>Analysis</h3>
+                      </div>
+                      <span class="canvas-status-chip" data-i18n="canvas.detail.statusChip">In Progress</span>
+                    </div>
+                    <p class="canvas-detail-card-body" data-i18n="canvas.detail.focusBody">Analyzing the latest Delta results, correlating telemetry with baseline patterns, and identifying structural drift in the current sprint.</p>
+
+                    <section class="canvas-local-context surface-muted">
+                      <div class="canvas-local-context-header">
+                        <p class="canvas-outline-label" data-i18n="canvas.detail.localNeighborhoodLabel">Local Neighborhood</p>
+                        <span data-i18n="canvas.detail.localNeighborhoodMeta">Recent Active Focus</span>
+                      </div>
+                      <div class="canvas-local-bars" aria-hidden="true">
+                        <span style="height: 40%"></span>
+                        <span style="height: 65%"></span>
+                        <span style="height: 50%"></span>
+                        <span style="height: 90%"></span>
+                        <span style="height: 75%"></span>
+                        <span style="height: 85%"></span>
+                        <span style="height: 45%"></span>
+                      </div>
+                      <div class="canvas-local-axis">
+                        <span>T-12h</span>
+                        <span data-i18n="canvas.detail.localAxisCenter">Live Stream</span>
+                        <span data-i18n="canvas.detail.localAxisRight">Current Phase</span>
+                      </div>
+                    </section>
+
+                    <div class="canvas-detail-actions">
+                      <button class="canvas-action-primary" type="button" data-i18n="canvas.detail.openChat">Open related chat</button>
+                      <button class="canvas-action-secondary" type="button" data-view-target="canvasGlobal" data-i18n="canvas.detail.viewMap">View global map</button>
+                    </div>
+                  </div>
+
+                  <svg class="canvas-detail-links" viewBox="0 0 1000 700" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M 290 160 L 500 318"></path>
+                    <path d="M 760 198 L 564 336"></path>
+                    <path d="M 340 554 L 472 438"></path>
+                  </svg>
+                </div>
+              </section>
+            </div>
           </section>
         </section>
 
@@ -510,6 +793,35 @@
           <p class="eyebrow" data-i18n="inspector.eyebrow">Inspector</p>
           <h2 data-i18n="inspector.canvas.title">Canvas Inspector</h2>
           <p data-i18n="inspector.canvas.description">Reserve this panel for object metadata, filters, and detail summaries.</p>
+          <div class="inspector-chat-stack">
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.stateLabel">Visible Model</p>
+              <p data-i18n="inspector.canvas.stateBody">The prototype keeps Recent Active Set explicit so the center cluster reads as a view model, not just decoration.</p>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.statusLabel">Status</p>
+              <dl class="inspector-meta-list inspector-meta-list-single">
+                <div>
+                  <dt data-i18n="inspector.canvas.statusPrimaryLabel">Focused object</dt>
+                  <dd data-i18n="inspector.canvas.statusPrimaryValue">Analysis / AN-402-DELTA</dd>
+                </div>
+                <div>
+                  <dt data-i18n="inspector.canvas.statusSecondaryLabel">Current state</dt>
+                  <dd data-i18n="inspector.canvas.statusSecondaryValue">Running with linked reporting and review context</dd>
+                </div>
+              </dl>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.relatedLabel">Related Objects</p>
+              <div class="inspector-chip-wrap">
+                <span class="inspector-chip">Project Delta</span>
+                <span class="inspector-chip">Reporting</span>
+                <span class="inspector-chip">Review</span>
+                <span class="inspector-chip">summary_report.pdf</span>
+                <span class="inspector-chip">log_files.zip</span>
+              </div>
+            </section>
+          </div>
         </section>
         <section class="inspector-surface" data-inspector-view="settings" hidden>
           <p class="eyebrow" data-i18n="inspector.eyebrow">Inspector</p>
