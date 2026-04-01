@@ -32,66 +32,132 @@ const state = {
   dictionaries: {},
   preferences: { ...DEFAULT_PREFERENCES },
   view: { ...DEFAULT_VIEW_STATE },
+  chatSurface: createMockChatSurfaceState(),
 };
 
 let translateImpl = function t(key) {
   throw new Error(`Missing translator for ${key}`);
 };
 
-const ui = {
-  root: document.documentElement,
-  tabChat: getElement("tab-chat"),
-  tabCanvas: getElement("tab-canvas"),
-  settingsButton: getElement("open-settings-button"),
-  railButtons: Array.from(document.querySelectorAll(".rail-item[data-view-target]")),
-  railSections: Array.from(document.querySelectorAll("[data-rail-view]")),
-  inspectorSections: Array.from(document.querySelectorAll("[data-inspector-view]")),
-  viewPanels: Array.from(document.querySelectorAll("[data-view]")),
-  debugUnavailable: getElement("debug-unavailable"),
-  localeSelector: getElement("locale-selector"),
-  themeSelector: getElement("theme-selector"),
-  debugShell: getElement("debug-shell"),
-  runButton: getElement("create-run-button"),
-  sessionButton: getElement("create-session-button"),
-  sourceButton: getElement("create-source-button"),
-  chunkSourceButton: getElement("chunk-source-button"),
-  extractWorkItemsButton: getElement("extract-work-items-button"),
-  groupProjectButton: getElement("group-project-button"),
-  buildAssetsButton: getElement("build-assets-button"),
-  listRunsButton: getElement("list-runs-button"),
-  listSessionsButton: getElement("list-sessions-button"),
-  listSourcesButton: getElement("list-sources-button"),
-  listWorkItemsButton: getElement("list-work-items-button"),
-  listProjectsButton: getElement("list-projects-button"),
-  listAssetsButton: getElement("list-assets-button"),
-  listChunksButton: getElement("list-chunks-button"),
-  sourceIdInput: getElement("source-id-input"),
-  configProviderInput: getElement("config-provider-input"),
-  configModelInput: getElement("config-model-input"),
-  configProviderNameInput: getElement("config-provider-name-input"),
-  configProviderNpmInput: getElement("config-provider-npm-input"),
-  configBaseUrlInput: getElement("config-base-url-input"),
-  configApiKeyInput: getElement("config-api-key-input"),
-  configProviderJsonInput: getElement("config-provider-json-input"),
-  configImportPathInput: getElement("config-import-path-input"),
-  configLoadButton: getElement("config-load-button"),
-  configNewButton: getElement("config-new-button"),
-  configSaveButton: getElement("config-save-button"),
-  configDeleteButton: getElement("config-delete-button"),
-  configImportButton: getElement("config-import-button"),
-  configTestButton: getElement("config-test-button"),
-  configResult: getElement("config-result"),
-  timelineSessionIdInput: getElement("timeline-session-id-input"),
-  timelineSessionSelector: getElement("timeline-session-selector"),
-  timelineMessageInput: getElement("timeline-message-input"),
-  timelineAttachmentsInput: getElement("timeline-attachments-input"),
-  timelineCreateSessionButton: getElement("timeline-create-session-button"),
-  timelineRefreshSessionsButton: getElement("timeline-refresh-sessions-button"),
-  timelineSendButton: getElement("timeline-send-button"),
-  timelineRefreshButton: getElement("timeline-refresh-button"),
-  timelineResult: getElement("timeline-result"),
-  result: getElement("result"),
-};
+const HAS_DOCUMENT = typeof document !== "undefined";
+
+function createUiStub() {
+  return {
+    root: null,
+    tabChat: null,
+    tabCanvas: null,
+    settingsButton: null,
+    railButtons: [],
+    railSections: [],
+    inspectorSections: [],
+    viewPanels: [],
+    chatInspectorStates: [],
+    chatTransitionButtons: [],
+    debugUnavailable: null,
+    localeSelector: null,
+    themeSelector: null,
+    debugShell: null,
+    runButton: null,
+    sessionButton: null,
+    sourceButton: null,
+    chunkSourceButton: null,
+    extractWorkItemsButton: null,
+    groupProjectButton: null,
+    buildAssetsButton: null,
+    listRunsButton: null,
+    listSessionsButton: null,
+    listSourcesButton: null,
+    listWorkItemsButton: null,
+    listProjectsButton: null,
+    listAssetsButton: null,
+    listChunksButton: null,
+    sourceIdInput: null,
+    configProviderInput: null,
+    configModelInput: null,
+    configProviderNameInput: null,
+    configProviderNpmInput: null,
+    configBaseUrlInput: null,
+    configApiKeyInput: null,
+    configProviderJsonInput: null,
+    configImportPathInput: null,
+    configLoadButton: null,
+    configNewButton: null,
+    configSaveButton: null,
+    configDeleteButton: null,
+    configImportButton: null,
+    configTestButton: null,
+    configResult: null,
+    timelineSessionIdInput: null,
+    timelineSessionSelector: null,
+    timelineMessageInput: null,
+    timelineAttachmentsInput: null,
+    timelineCreateSessionButton: null,
+    timelineRefreshSessionsButton: null,
+    timelineSendButton: null,
+    timelineRefreshButton: null,
+    timelineResult: null,
+    result: null,
+  };
+}
+
+const ui = HAS_DOCUMENT
+  ? {
+      root: document.documentElement,
+      tabChat: getElement("tab-chat"),
+      tabCanvas: getElement("tab-canvas"),
+      settingsButton: getElement("open-settings-button"),
+      railButtons: Array.from(document.querySelectorAll(".rail-item[data-view-target]")),
+      railSections: Array.from(document.querySelectorAll("[data-rail-view]")),
+      inspectorSections: Array.from(document.querySelectorAll("[data-inspector-view]")),
+      viewPanels: Array.from(document.querySelectorAll("[data-view]")),
+      chatInspectorStates: Array.from(document.querySelectorAll("[data-chat-inspector-state]")),
+      chatTransitionButtons: Array.from(document.querySelectorAll("[data-chat-transition]")),
+      debugUnavailable: getElement("debug-unavailable"),
+      localeSelector: getElement("locale-selector"),
+      themeSelector: getElement("theme-selector"),
+      debugShell: getElement("debug-shell"),
+      runButton: getElement("create-run-button"),
+      sessionButton: getElement("create-session-button"),
+      sourceButton: getElement("create-source-button"),
+      chunkSourceButton: getElement("chunk-source-button"),
+      extractWorkItemsButton: getElement("extract-work-items-button"),
+      groupProjectButton: getElement("group-project-button"),
+      buildAssetsButton: getElement("build-assets-button"),
+      listRunsButton: getElement("list-runs-button"),
+      listSessionsButton: getElement("list-sessions-button"),
+      listSourcesButton: getElement("list-sources-button"),
+      listWorkItemsButton: getElement("list-work-items-button"),
+      listProjectsButton: getElement("list-projects-button"),
+      listAssetsButton: getElement("list-assets-button"),
+      listChunksButton: getElement("list-chunks-button"),
+      sourceIdInput: getElement("source-id-input"),
+      configProviderInput: getElement("config-provider-input"),
+      configModelInput: getElement("config-model-input"),
+      configProviderNameInput: getElement("config-provider-name-input"),
+      configProviderNpmInput: getElement("config-provider-npm-input"),
+      configBaseUrlInput: getElement("config-base-url-input"),
+      configApiKeyInput: getElement("config-api-key-input"),
+      configProviderJsonInput: getElement("config-provider-json-input"),
+      configImportPathInput: getElement("config-import-path-input"),
+      configLoadButton: getElement("config-load-button"),
+      configNewButton: getElement("config-new-button"),
+      configSaveButton: getElement("config-save-button"),
+      configDeleteButton: getElement("config-delete-button"),
+      configImportButton: getElement("config-import-button"),
+      configTestButton: getElement("config-test-button"),
+      configResult: getElement("config-result"),
+      timelineSessionIdInput: getElement("timeline-session-id-input"),
+      timelineSessionSelector: getElement("timeline-session-selector"),
+      timelineMessageInput: getElement("timeline-message-input"),
+      timelineAttachmentsInput: getElement("timeline-attachments-input"),
+      timelineCreateSessionButton: getElement("timeline-create-session-button"),
+      timelineRefreshSessionsButton: getElement("timeline-refresh-sessions-button"),
+      timelineSendButton: getElement("timeline-send-button"),
+      timelineRefreshButton: getElement("timeline-refresh-button"),
+      timelineResult: getElement("timeline-result"),
+      result: getElement("result"),
+    }
+  : createUiStub();
 
 const {
   tabChat,
@@ -101,6 +167,8 @@ const {
   railSections,
   inspectorSections,
   viewPanels,
+  chatInspectorStates,
+  chatTransitionButtons,
   debugUnavailable,
   localeSelector,
   themeSelector,
@@ -147,9 +215,11 @@ const {
   result,
 } = ui;
 
-configResult.dataset.defaultState = "true";
-timelineResult.dataset.defaultState = "true";
-result.dataset.defaultState = "true";
+if (configResult && timelineResult && result) {
+  configResult.dataset.defaultState = "true";
+  timelineResult.dataset.defaultState = "true";
+  result.dataset.defaultState = "true";
+}
 
 function t(key, replacements) {
   return translateImpl(key, replacements);
@@ -171,6 +241,20 @@ function normalizeTheme(theme) {
 
 function normalizeView(viewId) {
   return VIEW_DEFINITIONS[viewId] ? viewId : DEFAULT_VIEW_STATE.currentView;
+}
+
+function normalizeChatMockState(chatState) {
+  return chatState === "active" ? "active" : "draft";
+}
+
+function createMockChatSurfaceState(initial = {}) {
+  return {
+    mode: normalizeChatMockState(initial.mode),
+  };
+}
+
+function deriveChatMockStateFromView(viewId) {
+  return getViewDefinition(viewId).session === "active" ? "active" : "draft";
 }
 
 function getViewDefinition(viewId) {
@@ -325,6 +409,12 @@ function renderSurfaceSections(attributeName, activeValue, sections) {
   }
 }
 
+function renderChatInspectorState(chatState) {
+  for (const section of chatInspectorStates) {
+    section.hidden = section.dataset.chatInspectorState !== chatState;
+  }
+}
+
 function renderRailSelection(currentView) {
   for (const button of railButtons) {
     const targetView = normalizeView(button.dataset.viewTarget);
@@ -337,12 +427,17 @@ function renderRailSelection(currentView) {
 function renderShellView() {
   const currentView = normalizeView(state.view.currentView);
   const viewDefinition = getViewDefinition(currentView);
+  const chatState = deriveChatMockStateFromView(currentView);
 
   renderTopTabs(viewDefinition);
   renderViewPanels(currentView);
   renderSurfaceSections("railView", viewDefinition.rail, railSections);
   renderSurfaceSections("inspectorView", viewDefinition.inspector, inspectorSections);
   renderRailSelection(currentView);
+
+  if (viewDefinition.family === "chat") {
+    renderChatInspectorState(chatState);
+  }
 
   const showingDebugView = currentView === "settingsDebug";
   const debugAvailable = state.preferences.showDebugPanel;
@@ -358,6 +453,7 @@ function transitionToView(viewId) {
 
   if (definition.session) {
     state.view.selectedSession = definition.session;
+    state.chatSurface.mode = deriveChatMockStateFromView(currentView);
   }
 
   if (definition.canvasScope) {
@@ -369,6 +465,13 @@ function transitionToView(viewId) {
   }
 
   renderShellView();
+}
+
+function transitionChatMockSurface(targetMode = "active") {
+  const normalizedMode = normalizeChatMockState(targetMode);
+  state.chatSurface.mode = normalizedMode;
+  transitionToView(normalizedMode === "active" ? "chatActive" : "chatDraft");
+  return state.chatSurface.mode;
 }
 
 async function invokeTauri(commandName, args) {
@@ -631,6 +734,12 @@ function bindShellViewEvents() {
 
     button.addEventListener("click", () => {
       transitionToView(button.dataset.viewTarget);
+    });
+  }
+
+  for (const button of chatTransitionButtons) {
+    button.addEventListener("click", () => {
+      transitionChatMockSurface(button.dataset.chatTransition);
     });
   }
 }
@@ -1028,3 +1137,9 @@ export function createShellViewState(initial = {}) {
     },
   };
 }
+
+export {
+  createMockChatSurfaceState,
+  deriveChatMockStateFromView,
+  transitionChatMockSurface,
+};

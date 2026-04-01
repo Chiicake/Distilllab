@@ -43,10 +43,47 @@
             <h2 data-i18n="chat.rail.title">Sessions</h2>
             <p data-i18n="chat.rail.description">Keep draft and active conversation states reachable without losing the selected session.</p>
           </div>
-          <nav id="chat-session-rail" class="rail-list" data-i18n-aria-label="chat.rail.aria">
-            <button class="rail-item" type="button" data-view-target="chatDraft" data-session="draft" data-i18n="chat.session.draft">Draft Session</button>
-            <button class="rail-item" type="button" data-view-target="chatActive" data-session="active" data-i18n="chat.session.active">Active Session</button>
-          </nav>
+
+          <div class="chat-rail-stack">
+            <section class="chat-rail-group">
+              <p class="rail-group-label" data-i18n="chat.rail.currentLabel">Current</p>
+              <button class="rail-item rail-item-card" type="button" data-view-target="chatDraft" data-session="draft">
+                <span class="rail-item-icon" aria-hidden="true">D</span>
+                <span class="rail-item-copy">
+                  <span class="rail-item-title" data-i18n="chat.session.draft">Draft Session</span>
+                  <span class="rail-item-description" data-i18n="chat.session.draftDescription">Pre-persistence workspace. The first send creates the real session.</span>
+                  <span class="rail-item-meta" data-i18n="chat.session.draftMeta">Draft only</span>
+                </span>
+              </button>
+            </section>
+
+            <section class="chat-rail-group">
+              <p class="rail-group-label" data-i18n="chat.rail.recentLabel">Recent Sessions</p>
+              <nav id="chat-session-rail" class="rail-list" data-i18n-aria-label="chat.rail.aria">
+                <button class="rail-item" type="button" data-view-target="chatActive" data-session="active">
+                  <span class="rail-item-icon" aria-hidden="true">A</span>
+                  <span class="rail-item-copy">
+                    <span class="rail-item-title" data-i18n="chat.session.active">Active Session</span>
+                    <span class="rail-item-description" data-i18n="chat.session.activeDescription">Project Delta analysis with one in-progress evidence run.</span>
+                  </span>
+                </button>
+                <button class="rail-item rail-item-muted" type="button">
+                  <span class="rail-item-icon" aria-hidden="true">F</span>
+                  <span class="rail-item-copy">
+                    <span class="rail-item-title" data-i18n="chat.session.recentA">Data Filtering Logic</span>
+                    <span class="rail-item-description" data-i18n="chat.session.recentADescription">Schema cleanup and validation notes.</span>
+                  </span>
+                </button>
+                <button class="rail-item rail-item-muted" type="button">
+                  <span class="rail-item-icon" aria-hidden="true">W</span>
+                  <span class="rail-item-copy">
+                    <span class="rail-item-title" data-i18n="chat.session.recentB">Workflow Schema v2</span>
+                    <span class="rail-item-description" data-i18n="chat.session.recentBDescription">Earlier exploration for object relations and naming.</span>
+                  </span>
+                </button>
+              </nav>
+            </section>
+          </div>
         </section>
 
         <section class="rail-surface" data-rail-view="canvas" hidden>
@@ -73,27 +110,135 @@
       </aside>
 
       <main class="center-content" aria-live="polite">
-        <section id="chat-draft-view" class="view-panel" data-view="chatDraft">
-          <div class="view-copy surface">
-            <p class="eyebrow" data-i18n="chat.surface.eyebrow">Chat Workbench</p>
-            <h2 data-i18n="chat.draft.title">Draft Session</h2>
-            <p data-i18n="chat.draft.description">Use this shell surface for the next composed prompt before an active run is underway.</p>
-          </div>
-          <section class="panel surface-muted">
-            <h3 data-i18n="chat.draft.card.title">Draft Composer Placeholder</h3>
-            <p data-i18n="chat.draft.card.description">Later tasks can replace this region with the full timeline and composer without changing shell routing.</p>
+        <section id="chat-draft-view" class="view-panel chat-view" data-view="chatDraft" data-chat-state="draft">
+          <section class="chat-stage surface">
+            <div class="chat-stage-header">
+              <div class="view-copy chat-view-copy surface">
+                <p class="eyebrow" data-i18n="chat.surface.eyebrow">Chat Workbench</p>
+                <h2 data-i18n="chat.draft.title">Draft Session</h2>
+                <p data-i18n="chat.draft.description">Use this shell surface for the next composed prompt before an active run is underway.</p>
+              </div>
+              <span class="chat-state-pill draft-pill" data-i18n="chat.draft.statePill">Ready to distill</span>
+            </div>
+
+            <section class="chat-empty-state surface-muted">
+              <div class="chat-empty-icon" aria-hidden="true">+</div>
+              <h3 data-i18n="chat.draft.emptyTitle">New Session</h3>
+              <p data-i18n="chat.draft.emptyDescription">Start with a task, transcript, or working question. The first message creates the session and opens a real run surface.</p>
+              <div class="chat-prompt-grid">
+                <button class="chat-prompt-card" type="button" data-chat-transition="active">
+                  <span class="chat-prompt-title" data-i18n="chat.draft.promptA.title">Distill a session</span>
+                  <span class="chat-prompt-description" data-i18n="chat.draft.promptA.description">Turn a coding or research exchange into structured work items and assets.</span>
+                </button>
+                <button class="chat-prompt-card" type="button" data-chat-transition="active">
+                  <span class="chat-prompt-title" data-i18n="chat.draft.promptB.title">Extract work items</span>
+                  <span class="chat-prompt-description" data-i18n="chat.draft.promptB.description">Break a messy discussion into explicit tasks, constraints, and open threads.</span>
+                </button>
+                <button class="chat-prompt-card" type="button" data-chat-transition="active">
+                  <span class="chat-prompt-title" data-i18n="chat.draft.promptC.title">Shape a project</span>
+                  <span class="chat-prompt-description" data-i18n="chat.draft.promptC.description">Create a project frame and connect the next message to an evolving work graph.</span>
+                </button>
+                <button class="chat-prompt-card" type="button" data-chat-transition="active">
+                  <span class="chat-prompt-title" data-i18n="chat.draft.promptD.title">Create assets</span>
+                  <span class="chat-prompt-description" data-i18n="chat.draft.promptD.description">Promote useful notes and outputs into reusable assets after the first run.</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="chat-composer surface">
+              <label class="chat-composer-label" for="chat-draft-composer" data-i18n="chat.draft.composerLabel">Draft composer</label>
+              <textarea id="chat-draft-composer" class="chat-composer-input" rows="4" data-i18n-placeholder="chat.draft.composerPlaceholder" placeholder="Describe the work you want to distill into structure..."></textarea>
+              <div class="chat-composer-footer">
+                <div class="chat-composer-tools">
+                  <span class="chat-composer-tool" data-i18n="chat.draft.tool.attach">Attach</span>
+                  <span class="chat-composer-tool" data-i18n="chat.draft.tool.context">Context</span>
+                </div>
+                <button class="chat-send-button" type="button" data-chat-transition="active" data-i18n="chat.draft.send">Send</button>
+              </div>
+              <p class="chat-composer-hint" data-i18n="chat.draft.hint">The first send transitions from draft semantics into an active session shell.</p>
+            </section>
           </section>
         </section>
 
-        <section id="chat-active-view" class="view-panel" data-view="chatActive" hidden>
-          <div class="view-copy surface">
-            <p class="eyebrow" data-i18n="chat.surface.eyebrow">Chat Workbench</p>
-            <h2 data-i18n="chat.active.title">Active Session</h2>
-            <p data-i18n="chat.active.description">The selected session stays active while the shell switches between chat, canvas, and settings surfaces.</p>
-          </div>
-          <section class="panel surface-muted">
-            <h3 data-i18n="chat.active.card.title">Timeline Placeholder</h3>
-            <p data-i18n="chat.active.card.description">This reserved center region will host the formal conversation timeline in later tasks.</p>
+        <section id="chat-active-view" class="view-panel chat-view" data-view="chatActive" data-chat-state="active" hidden>
+          <section class="chat-stage surface">
+            <div class="chat-stage-header">
+              <div class="view-copy chat-view-copy surface">
+                <p class="eyebrow" data-i18n="chat.surface.eyebrow">Chat Workbench</p>
+                <h2 data-i18n="chat.active.title">Active Session</h2>
+                <p data-i18n="chat.active.description">The selected session stays active while the shell switches between chat, canvas, and settings surfaces.</p>
+              </div>
+              <span class="chat-state-pill active-pill" data-i18n="chat.active.statePill">Active run</span>
+            </div>
+
+            <section class="chat-session-banner surface-muted">
+              <div>
+                <p class="eyebrow" data-i18n="chat.active.bannerLabel">Selected session</p>
+                <h3 data-i18n="chat.active.bannerTitle">Project Delta Analysis</h3>
+              </div>
+              <p data-i18n="chat.active.bannerMeta">One user turn, one assistant response, and one in-progress evidence distillation run.</p>
+            </section>
+
+            <section class="chat-timeline" aria-label="Chat timeline">
+              <article class="timeline-event timeline-event-user surface-muted">
+                <p class="timeline-role" data-i18n="chat.active.userLabel">You</p>
+                <p class="timeline-message" data-i18n="chat.active.userMessage">Analyze the latest results for Project Delta.</p>
+              </article>
+
+              <article class="timeline-event timeline-event-assistant surface">
+                <p class="timeline-role" data-i18n="chat.active.assistantLabel">Agent / Analyst</p>
+                <p class="timeline-message" data-i18n="chat.active.assistantMessage">Starting the analysis now. I am gathering evidence, updating active work items, and checking which assets should stay linked to this run.</p>
+              </article>
+
+              <article class="run-block surface-muted">
+                <div class="run-block-header">
+                  <div>
+                    <p class="eyebrow" data-i18n="chat.active.runLabel">Run block</p>
+                    <h3 data-i18n="chat.active.runTitle">Evidence Distillation Run</h3>
+                  </div>
+                  <div class="run-status">
+                    <span class="run-status-text" data-i18n="chat.active.runStatus">In progress</span>
+                    <span class="run-status-bar" aria-hidden="true"><span class="run-status-bar-fill"></span></span>
+                  </div>
+                </div>
+
+                <div class="run-summary-card surface">
+                  <p class="run-summary-label" data-i18n="chat.active.progressLabel">Partial progress</p>
+                  <p data-i18n="chat.active.progressBody">One work item updated, two related assets linked, and the current object graph is synchronized with the latest evidence.</p>
+                </div>
+
+                <div class="tool-card-stack">
+                  <article class="tool-card tool-card-success surface">
+                    <div class="tool-card-header">
+                      <h4>fetch_logs</h4>
+                      <span class="tool-card-status" data-i18n="chat.active.toolSuccess">Success</span>
+                    </div>
+                    <p data-i18n="chat.active.toolSuccessBody">Retrieved 1,240 evidence rows from the Delta analysis set. No continuity gaps were found in the imported run history.</p>
+                  </article>
+
+                  <article class="tool-card tool-card-working surface">
+                    <div class="tool-card-header">
+                      <h4>derive_workitem_state</h4>
+                      <span class="tool-card-status" data-i18n="chat.active.toolWorking">Working</span>
+                    </div>
+                    <p data-i18n="chat.active.toolWorkingBody">Deriving the next stable work-item state from the latest anomalies and linked evidence.</p>
+                    <span class="tool-progress" aria-hidden="true"><span class="tool-progress-fill"></span></span>
+                  </article>
+                </div>
+              </article>
+            </section>
+
+            <section class="chat-composer surface">
+              <label class="chat-composer-label" for="chat-active-composer" data-i18n="chat.active.composerLabel">Follow-up composer</label>
+              <textarea id="chat-active-composer" class="chat-composer-input" rows="3" data-i18n-placeholder="chat.active.composerPlaceholder" placeholder="Type a command or follow-up question..."></textarea>
+              <div class="chat-composer-footer">
+                <div class="chat-composer-tools">
+                  <span class="chat-composer-tool" data-i18n="chat.active.tool.attach">Attach</span>
+                  <span class="chat-composer-tool" data-i18n="chat.active.tool.library">Library</span>
+                </div>
+                <button class="chat-send-button" type="button" data-i18n="chat.active.send">Send</button>
+              </div>
+            </section>
           </section>
         </section>
 
@@ -304,6 +449,62 @@
           <p class="eyebrow" data-i18n="inspector.eyebrow">Inspector</p>
           <h2 data-i18n="inspector.chat.title">Chat Inspector</h2>
           <p data-i18n="inspector.chat.description">Keep room for session context, pinned excerpts, and structured outputs.</p>
+
+          <div class="inspector-chat-stack" data-chat-inspector-state="draft">
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.draft.stateLabel">Active state</p>
+              <p data-i18n="inspector.chat.draft.stateBody">Draft mode. Structured objects appear here only after work is created or explicitly linked.</p>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.draft.metaLabel">Metadata</p>
+              <dl class="inspector-meta-list">
+                <div>
+                  <dt data-i18n="inspector.chat.draft.engineLabel">Engine</dt>
+                  <dd data-i18n="inspector.chat.draft.engineValue">Distill-v4-Core</dd>
+                </div>
+                <div>
+                  <dt data-i18n="inspector.chat.draft.privacyLabel">Privacy</dt>
+                  <dd data-i18n="inspector.chat.draft.privacyValue">Private</dd>
+                </div>
+              </dl>
+            </section>
+            <section class="inspector-card inspector-empty surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.draft.emptyLabel">No structured objects yet</p>
+              <p data-i18n="inspector.chat.draft.emptyBody">Objects appear after the first send creates or links them.</p>
+            </section>
+          </div>
+
+          <div class="inspector-chat-stack" data-chat-inspector-state="active" hidden>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.active.contextLabel">Run context</p>
+              <dl class="inspector-meta-list inspector-meta-list-single">
+                <div>
+                  <dt data-i18n="inspector.chat.active.goalLabel">Goal</dt>
+                  <dd data-i18n="inspector.chat.active.goalValue">Distill the latest Delta evidence into updated work items, linked assets, and a clearer project state.</dd>
+                </div>
+                <div>
+                  <dt data-i18n="inspector.chat.active.stageLabel">Current stage</dt>
+                  <dd data-i18n="inspector.chat.active.stageValue">Evidence review and work-item update</dd>
+                </div>
+                <div>
+                  <dt data-i18n="inspector.chat.active.actionLabel">Recent action</dt>
+                  <dd data-i18n="inspector.chat.active.actionValue">derive_workitem_state (active)</dd>
+                </div>
+              </dl>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.active.objectsLabel">Related objects</p>
+              <div class="inspector-chip-wrap">
+                <span class="inspector-chip" data-i18n="inspector.chat.active.objectProject">Project / Delta</span>
+                <span class="inspector-chip" data-i18n="inspector.chat.active.objectAssetA">Delta_Raw_01.csv</span>
+                <span class="inspector-chip" data-i18n="inspector.chat.active.objectAssetB">Cluster_Meta.json</span>
+              </div>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.active.agentLabel">Agent state</p>
+              <p data-i18n="inspector.chat.active.agentBody">Focused on extracting anomalies, preserving structure, and linking outputs to related work objects.</p>
+            </section>
+          </div>
         </section>
         <section class="inspector-surface" data-inspector-view="canvas" hidden>
           <p class="eyebrow" data-i18n="inspector.eyebrow">Inspector</p>
