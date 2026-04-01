@@ -598,6 +598,10 @@ function renderChatSessionRail(sessions) {
   ui.railButtons = Array.from(document.querySelectorAll(".rail-item[data-view-target]"));
 }
 
+function isTimelineHeaderLine(line) {
+  return /^\[(User|Assistant|System|Tool)\]/.test(line);
+}
+
 function parseTimelineEntries(timelineText) {
   const normalized = timelineText.trim();
 
@@ -605,13 +609,53 @@ function parseTimelineEntries(timelineText) {
     return [];
   }
 
-  return normalized.split(/\n\n+/).map((block) => {
-    const [header = "", ...bodyLines] = block.split("\n");
-    return {
-      header: header.trim(),
-      body: bodyLines.map((line) => line.replace(/^  /, "")).join("\n").trim(),
-    };
-  }).filter((entry) => entry.header);
+  const entries = [];
+  let currentEntry = null;
+
+  for (const line of normalized.split("\n")) {
+    if (isTimelineHeaderLine(line)) {
+      if (currentEntry) {
+        entries.push({
+          header: currentEntry.header,
+          body: currentEntry.bodyLines.join("\n").trim(),
+        });
+      }
+
+      currentEntry = {
+        header: line.trim(),
+        bodyLines: [],
+      };
+      continue;
+    }
+
+    if (!currentEntry) {
+      currentEntry = {
+        header: "[Transcript]",
+        bodyLines: [],
+      };
+    }
+
+    currentEntry.bodyLines.push(line.replace(/^  /, ""));
+  }
+
+  if (currentEntry) {
+    entries.push({
+      header: currentEntry.header,
+      body: currentEntry.bodyLines.join("\n").trim(),
+    });
+  }
+
+  return entries.filter((entry) => entry.header);
+}
+
+function reconcileSelectedSessionId(selectedSessionId, sessions) {
+  if (!selectedSessionId) {
+    return "";
+  }
+
+  return sessions.some((session) => session.sessionId === selectedSessionId)
+    ? selectedSessionId
+    : "";
 }
 
 function createTimelineEntryElement(entry) {
@@ -818,7 +862,8 @@ async function refreshSessionSelector() {
   try {
     const response = await invokeTauri("list_session_selector_options");
     const sessions = JSON.parse(response);
-    const currentValue = state.view.selectedSessionId || timelineSessionSelector.value || timelineSessionIdInput.value.trim();
+    const requestedValue = state.view.selectedSessionId || timelineSessionSelector.value || timelineSessionIdInput.value.trim();
+    const currentValue = reconcileSelectedSessionId(requestedValue, sessions);
 
     timelineSessionSelector.innerHTML = "";
     renderTimelineSelectorPlaceholder();
@@ -832,11 +877,19 @@ async function refreshSessionSelector() {
 
     renderChatSessionRail(sessions);
 
-    if (currentValue && sessions.some((session) => session.sessionId === currentValue)) {
+    if (currentValue) {
+      state.view.selectedSessionId = currentValue;
+      state.view.selectedSession = "active";
       timelineSessionSelector.value = currentValue;
       const selectedSession = sessions.find((session) => session.sessionId === currentValue) ?? null;
       renderActiveSessionBanner(selectedSession);
-    } else if (!currentValue) {
+    } else {
+      applyDraftSelection();
+      if (state.view.currentView === "chatActive") {
+        transitionToView("chatDraft");
+      } else {
+        renderShellView();
+      }
       renderActiveSessionBanner(null);
     }
   } catch (error) {
@@ -1433,6 +1486,8 @@ export {
   deriveChatStateFromView,
   deriveChatMockStateFromView,
   isDebugPanelVisible,
+  parseTimelineEntries,
+  reconcileSelectedSessionId,
   resolveChatTransitionView,
   transitionChatMockSurface,
 };

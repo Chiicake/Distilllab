@@ -7,6 +7,8 @@ import {
   deriveChatStateFromView,
   deriveChatMockStateFromView,
   isDebugPanelVisible,
+  parseTimelineEntries,
+  reconcileSelectedSessionId,
   resolveChatTransitionView,
 } from "./desktop-shell.js";
 
@@ -33,6 +35,42 @@ test("chat transition helper maps requested modes to chat views", () => {
   assert.equal(resolveChatTransitionView("active"), "chatActive");
   assert.equal(resolveChatTransitionView("draft"), "chatDraft");
   assert.equal(resolveChatTransitionView("other"), "chatDraft");
+});
+
+test("timeline parser keeps blank lines inside a message body", () => {
+  const entries = parseTimelineEntries([
+    "[User]",
+    "  First line",
+    "  ",
+    "  Second paragraph",
+    "[Assistant]",
+    "  Reply line",
+  ].join("\n"));
+
+  assert.deepEqual(entries, [
+    { header: "[User]", body: "First line\n\nSecond paragraph" },
+    { header: "[Assistant]", body: "Reply line" },
+  ]);
+});
+
+test("selected session falls back to draft when refreshed options no longer include it", () => {
+  assert.equal(
+    reconcileSelectedSessionId("session-missing", [
+      { sessionId: "session-1" },
+      { sessionId: "session-2" },
+    ]),
+    "",
+  );
+});
+
+test("selected session stays active when refreshed options still include it", () => {
+  assert.equal(
+    reconcileSelectedSessionId("session-2", [
+      { sessionId: "session-1" },
+      { sessionId: "session-2" },
+    ]),
+    "session-2",
+  );
 });
 
 test("shell view state preserves a real selected chat session through transitions", () => {
