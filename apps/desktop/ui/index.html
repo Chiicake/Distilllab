@@ -4,105 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Distilllab</title>
-    <style>
-      button {
-        margin-top: 16px;
-        margin-right: 12px;
-        padding: 10px 16px;
-        border: none;
-        border-radius: 10px;
-        background: #38bdf8;
-        color: #0f172a;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      button:hover {
-        background: #7dd3fc;
-      }
-      body {
-        margin: 0;
-        font-family: "Noto Sans", "DejaVu Sans", "Liberation Sans", Arial, sans-serif;
-        background: #0f172a;
-        color: #e2e8f0;
-        display: grid;
-        place-items: center;
-        min-height: 100vh;
-      }
-      button,
-      p,
-      h1,
-      label,
-      input,
-      textarea,
-      select {
-        font-family: "Noto Sans", "DejaVu Sans", "Liberation Sans", Arial, sans-serif;
-      }
-      main {
-        width: min(960px, calc(100vw - 32px));
-        padding: 32px;
-      }
-      h1 { margin-top: 0; font-size: 2.2rem; }
-      p { line-height: 1.6; color: #cbd5e1; }
-      h2 {
-        margin-top: 32px;
-        font-size: 1.2rem;
-      }
-      code {
-        font-family: "DejaVu Sans Mono", "Liberation Mono", monospace;
-        background: #1e293b;
-        padding: 2px 6px;
-        border-radius: 6px;
-      }
-      .panel {
-        margin-top: 24px;
-        padding: 20px;
-        border: 1px solid #334155;
-        border-radius: 16px;
-        background: rgba(15, 23, 42, 0.75);
-      }
-      .form-grid {
-        display: grid;
-        gap: 16px;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-      .field-full {
-        grid-column: 1 / -1;
-      }
-      label {
-        font-size: 0.95rem;
-        color: #bfdbfe;
-      }
-      input,
-      textarea,
-      select {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 10px 12px;
-        border-radius: 10px;
-        border: 1px solid #475569;
-        background: #0f172a;
-        color: #e2e8f0;
-      }
-      textarea {
-        min-height: 120px;
-        resize: vertical;
-      }
-      pre {
-        margin: 0;
-        white-space: pre-wrap;
-        word-break: break-word;
-        font-family: "DejaVu Sans Mono", "Liberation Mono", monospace;
-        line-height: 1.6;
-      }
-    </style>
+    <link rel="stylesheet" href="./desktop-shell.css" />
   </head>
-  <body>
-    <main>
+  <body class="desktop-shell-body">
+    <div class="app-shell">
+      <div class="center-content">
+        <main class="settings-page-shell debug-panel-container">
       <h1>Distilllab</h1>
       <p>Tauri shell initialized. This is the temporary Phase 0 desktop page.</p>
       <p>Next we will replace this with the <code>Home / Runtime Console</code>.</p>
@@ -208,7 +115,9 @@
         <h2>Output</h2>
         <pre id="result">No result yet.</pre>
       </div>
-    </main>
+        </main>
+      </div>
+    </div>
     <script>
       const runButton = document.getElementById("create-run-button");
       const sessionButton = document.getElementById("create-session-button");
@@ -250,6 +159,20 @@
       const timelineRefreshButton = document.getElementById("timeline-refresh-button");
       const timelineResult = document.getElementById("timeline-result");
       const result = document.getElementById("result");
+
+      async function applyDesktopThemePreference() {
+        try {
+          const preferencesText = await invokeTauri("load_desktop_ui_preferences_command");
+          const preferences = JSON.parse(preferencesText);
+          const theme = preferences?.theme === "light" || preferences?.theme === "dark"
+            ? preferences.theme
+            : "system";
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (error) {
+          document.documentElement.setAttribute("data-theme", "system");
+          result.textContent = `Error: ${error}`;
+        }
+      }
 
       async function invokeTauri(commandName, args) {
         const invoke = window.__TAURI_INTERNALS__?.invoke;
@@ -710,6 +633,7 @@
         }
       });
 
+      applyDesktopThemePreference();
       configLoadButton.click();
       refreshSessionSelector();
     </script>

@@ -1,0 +1,365 @@
+:root {
+  color-scheme: light;
+  --font-family-sans: "Noto Sans", "DejaVu Sans", "Liberation Sans", Arial, sans-serif;
+  --font-family-mono: "DejaVu Sans Mono", "Liberation Mono", monospace;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 2.2rem;
+  --line-height-body: 1.6;
+  --line-height-tight: 1.2;
+  --shell-space-1: 4px;
+  --shell-space-2: 8px;
+  --shell-space-3: 12px;
+  --shell-space-4: 16px;
+  --shell-space-5: 20px;
+  --shell-space-6: 24px;
+  --shell-space-7: 32px;
+  --shell-space-8: 40px;
+  --shell-radius-sm: 10px;
+  --shell-radius-md: 16px;
+  --shell-radius-lg: 20px;
+  --shell-border-width: 1px;
+  --shell-shadow: 0 20px 60px rgba(15, 23, 42, 0.12);
+  --shell-background: #f8fafc;
+  --shell-background-accent: radial-gradient(circle at top, rgba(56, 189, 248, 0.16), transparent 38%);
+  --shell-text: #0f172a;
+  --shell-text-muted: #475569;
+  --shell-heading: #0f172a;
+  --shell-code-bg: #e2e8f0;
+  --shell-code-text: #0f172a;
+  --shell-border: #cbd5e1;
+  --shell-surface: rgba(255, 255, 255, 0.9);
+  --shell-surface-strong: #ffffff;
+  --shell-surface-muted: #eef2ff;
+  --shell-surface-debug: rgba(255, 255, 255, 0.94);
+  --shell-input-bg: #ffffff;
+  --shell-input-border: #94a3b8;
+  --shell-input-text: #0f172a;
+  --shell-label: #1d4ed8;
+  --shell-button-bg: #38bdf8;
+  --shell-button-bg-hover: #7dd3fc;
+  --shell-button-text: #0f172a;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --shell-background: #0f172a;
+  --shell-background-accent: radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 42%);
+  --shell-text: #e2e8f0;
+  --shell-text-muted: #cbd5e1;
+  --shell-heading: #f8fafc;
+  --shell-code-bg: #1e293b;
+  --shell-code-text: #e2e8f0;
+  --shell-border: #334155;
+  --shell-surface: rgba(15, 23, 42, 0.78);
+  --shell-surface-strong: rgba(15, 23, 42, 0.9);
+  --shell-surface-muted: rgba(30, 41, 59, 0.92);
+  --shell-surface-debug: rgba(15, 23, 42, 0.82);
+  --shell-input-bg: #0f172a;
+  --shell-input-border: #475569;
+  --shell-input-text: #e2e8f0;
+  --shell-label: #bfdbfe;
+  --shell-button-bg: #38bdf8;
+  --shell-button-bg-hover: #7dd3fc;
+  --shell-button-text: #0f172a;
+  --shell-shadow: 0 24px 72px rgba(2, 6, 23, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]),
+  html[data-theme="system"] {
+    color-scheme: dark;
+    --shell-background: #0f172a;
+    --shell-background-accent: radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 42%);
+    --shell-text: #e2e8f0;
+    --shell-text-muted: #cbd5e1;
+    --shell-heading: #f8fafc;
+    --shell-code-bg: #1e293b;
+    --shell-code-text: #e2e8f0;
+    --shell-border: #334155;
+    --shell-surface: rgba(15, 23, 42, 0.78);
+    --shell-surface-strong: rgba(15, 23, 42, 0.9);
+    --shell-surface-muted: rgba(30, 41, 59, 0.92);
+    --shell-surface-debug: rgba(15, 23, 42, 0.82);
+    --shell-input-bg: #0f172a;
+    --shell-input-border: #475569;
+    --shell-input-text: #e2e8f0;
+    --shell-label: #bfdbfe;
+    --shell-button-bg: #38bdf8;
+    --shell-button-bg-hover: #7dd3fc;
+    --shell-button-text: #0f172a;
+    --shell-shadow: 0 24px 72px rgba(2, 6, 23, 0.45);
+  }
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-body);
+  background: var(--shell-background-accent), var(--shell-background);
+  color: var(--shell-text);
+}
+
+button,
+p,
+h1,
+h2,
+label,
+input,
+textarea,
+select {
+  font-family: var(--font-family-sans);
+}
+
+button {
+  margin-top: var(--shell-space-4);
+  margin-right: var(--shell-space-3);
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--shell-radius-sm);
+  background: var(--shell-button-bg);
+  color: var(--shell-button-text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--shell-button-bg-hover);
+}
+
+main {
+  width: min(960px, calc(100vw - 32px));
+  padding: var(--shell-space-7);
+}
+
+h1 {
+  margin-top: 0;
+  margin-bottom: var(--shell-space-4);
+  font-size: var(--font-size-2xl);
+  line-height: var(--line-height-tight);
+  color: var(--shell-heading);
+}
+
+h2 {
+  margin-top: var(--shell-space-7);
+  margin-bottom: var(--shell-space-3);
+  font-size: var(--font-size-xl);
+  color: var(--shell-heading);
+}
+
+p {
+  color: var(--shell-text-muted);
+}
+
+code {
+  font-family: var(--font-family-mono);
+  background: var(--shell-code-bg);
+  color: var(--shell-code-text);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-family-mono);
+  line-height: var(--line-height-body);
+}
+
+label {
+  font-size: 0.95rem;
+  color: var(--shell-label);
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: var(--shell-radius-sm);
+  border: var(--shell-border-width) solid var(--shell-input-border);
+  background: var(--shell-input-bg);
+  color: var(--shell-input-text);
+}
+
+textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.desktop-shell-body {
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "top-nav"
+    "content";
+  align-content: start;
+  justify-items: center;
+  padding: var(--shell-space-6) 0;
+}
+
+.top-nav {
+  grid-area: top-nav;
+  width: min(1200px, calc(100vw - 32px));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--shell-space-4);
+  padding: 0 var(--shell-space-7) var(--shell-space-4);
+  box-sizing: border-box;
+}
+
+.left-rail {
+  grid-area: left-rail;
+}
+
+.center-content {
+  grid-area: content;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.right-inspector {
+  grid-area: right-inspector;
+}
+
+.settings-page-shell {
+  width: min(960px, calc(100vw - 32px));
+}
+
+.debug-panel-container,
+.panel {
+  margin-top: var(--shell-space-6);
+  padding: var(--shell-space-5);
+  border: var(--shell-border-width) solid var(--shell-border);
+  border-radius: var(--shell-radius-md);
+  background: var(--shell-surface-debug);
+  box-shadow: var(--shell-shadow);
+  backdrop-filter: blur(10px);
+}
+
+.form-grid {
+  display: grid;
+  gap: var(--shell-space-4);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--shell-space-2);
+}
+
+.field-full {
+  grid-column: 1 / -1;
+}
+
+.surface,
+.surface-muted,
+.surface-strong,
+.debug-surface,
+.debug-stack,
+.debug-cluster,
+.debug-inline,
+.debug-scroll,
+.text-muted,
+.sr-only {
+  box-sizing: border-box;
+}
+
+.surface {
+  background: var(--shell-surface);
+}
+
+.surface-muted {
+  background: var(--shell-surface-muted);
+}
+
+.surface-strong {
+  background: var(--shell-surface-strong);
+}
+
+.debug-surface {
+  background: var(--shell-surface-debug);
+  border: var(--shell-border-width) solid var(--shell-border);
+  border-radius: var(--shell-radius-md);
+}
+
+.debug-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--shell-space-4);
+}
+
+.debug-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--shell-space-3);
+  align-items: center;
+}
+
+.debug-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--shell-space-3);
+}
+
+.debug-scroll {
+  overflow: auto;
+}
+
+.text-muted {
+  color: var(--shell-text-muted);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    padding-top: var(--shell-space-4);
+  }
+
+  .top-nav,
+  .settings-page-shell,
+  main {
+    width: min(960px, calc(100vw - 20px));
+    padding-left: var(--shell-space-5);
+    padding-right: var(--shell-space-5);
+  }
+
+  button {
+    width: 100%;
+    margin-right: 0;
+  }
+}
