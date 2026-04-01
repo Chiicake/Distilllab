@@ -432,6 +432,10 @@ function extractCreatedSessionId(responseText) {
   return match?.[1] ?? "";
 }
 
+function shouldPersistDraftSelection(firstSendSucceeded, sessionId) {
+  return firstSendSucceeded && Boolean(sessionId);
+}
+
 function deriveDraftPromptText(button) {
   const title = button.querySelector(".chat-prompt-title")?.textContent?.trim() ?? "";
   const description = button.querySelector(".chat-prompt-description")?.textContent?.trim() ?? "";
@@ -1041,26 +1045,30 @@ async function sendDraftShellMessage() {
   }
 
   setStatusText(timelineResult, "status.creatingSession");
+  setStatusText(result, "status.previewingSessionIntake");
 
   try {
-    const createResponse = await invokeTauri("create_session_command");
-    const sessionId = extractCreatedSessionId(createResponse);
-
-    if (!sessionId) {
-      setStatusText(timelineResult, "status.createdSessionCouldNotParse", { response: createResponse });
-      return false;
-    }
-
-    return await sendShellSessionMessage(
-      {
-        sessionId,
+    const response = await invokeTauri("create_session_and_send_first_message_command", {
+      form: {
+        sessionId: "draft",
         userMessage,
         attachmentPaths: [],
       },
-      { clearInput: chatDraftComposer },
-    );
+    });
+
+    syncSelectedSession(response.sessionId);
+    setRawText(timelineResult, response.timelineText);
+    renderActiveTimeline(response.timelineText);
+    chatDraftComposer.value = "";
+
+    await refreshSessionSelector();
+    timelineSessionSelector.value = response.sessionId;
+    transitionToView("chatActive");
+    await refreshTimeline();
+    return true;
   } catch (error) {
     setStatusText(timelineResult, "status.error.generic", { error });
+    setStatusText(result, "status.error.generic", { error });
     return false;
   }
 }
@@ -1657,5 +1665,6 @@ export {
   parseTimelineEntries,
   reconcileSelectedSessionId,
   resolveChatTransitionView,
+  shouldPersistDraftSelection,
   transitionChatMockSurface,
 };

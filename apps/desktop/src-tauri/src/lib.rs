@@ -2,7 +2,7 @@ use agent::{LlmProviderConfig, SessionActionType, SessionAgentDecision};
 use runtime::{
     AppConfig, AppRuntime, DesktopUiConfig, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
     ProviderOptions, SessionIntakePreview, SessionMessageRequest, default_app_config_path,
-    create_session,
+    create_session, create_session_and_send_first_message_with_config,
     delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
     resolve_current_provider_model, save_app_config_to_path, set_current_provider_model,
     upsert_provider_entry,
@@ -43,6 +43,13 @@ struct SessionSelectorOption {
     title: String,
     status: String,
     label: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FirstSendCommandResponse {
+    session_id: String,
+    timeline_text: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -718,6 +725,46 @@ async fn send_session_message_command(form: SessionMessageForm) -> Result<String
 }
 
 #[tauri::command]
+async fn create_session_and_send_first_message_command(
+    form: SessionMessageForm,
+) -> Result<FirstSendCommandResponse, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let (config_path, config) = load_or_create_app_config()?;
+    let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
+    let storage_root = config_path
+        .parent()
+        .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?;
+
+    let attachments = form
+        .attachment_paths
+        .iter()
+        .map(|path| store_attachment_copy(storage_root, "draft", path).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let session = create_session_and_send_first_message_with_config(
+        &runtime,
+        SessionMessageRequest {
+            session_id: String::new(),
+            user_message: form.user_message,
+            attachments,
+            provider_kind: resolved.provider_type.replace('-', "_"),
+            base_url: resolved.base_url,
+            model: resolved.model_id,
+            api_key: resolved.api_key,
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let messages = runtime::list_session_messages(&runtime, &session.id).map_err(|e| e.to_string())?;
+
+    Ok(FirstSendCommandResponse {
+        session_id: session.id,
+        timeline_text: format_session_messages_text(&messages),
+    })
+}
+
+#[tauri::command]
 async fn preview_session_intake_command(form: SessionMessageForm) -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
     let config_path = default_app_config_path().map_err(|e| e.to_string())?;
@@ -895,6 +942,7 @@ pub fn run() {
             create_demo_run,
             create_demo_session,
             create_session_command,
+            create_session_and_send_first_message_command,
             create_demo_source,
             list_runs,
             list_sessions,

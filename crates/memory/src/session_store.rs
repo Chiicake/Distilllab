@@ -129,6 +129,12 @@ pub fn update_session(conn: &Connection, session: &Session) -> Result<()> {
     Ok(())
 }
 
+pub fn delete_session(conn: &Connection, session_id: &str) -> Result<()> {
+    conn.execute("DELETE FROM sessions WHERE id = ?1", [session_id])?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,5 +238,34 @@ mod tests {
         assert_eq!(loaded.current_intent, "general_reply");
         assert_eq!(loaded.summary, "After update");
         assert_eq!(loaded.updated_at, "2026-03-29T00:01:00Z");
+    }
+
+    #[test]
+    fn deletes_existing_session() {
+        let conn = Connection::open_in_memory().expect("failed to open in-memory database");
+        run_migrations(&conn).expect("failed to run migrations");
+
+        let session = Session {
+            id: "session-delete".to_string(),
+            title: "Delete Session".to_string(),
+            status: SessionStatus::Active,
+            current_intent: "idle".to_string(),
+            current_object_type: "none".to_string(),
+            current_object_id: "none".to_string(),
+            summary: "Delete summary".to_string(),
+            started_at: "2026-03-29T00:00:00Z".to_string(),
+            updated_at: "2026-03-29T00:00:00Z".to_string(),
+            last_user_message_at: "2026-03-29T00:00:00Z".to_string(),
+            last_run_at: "2026-03-29T00:00:00Z".to_string(),
+            last_compacted_at: "2026-03-29T00:00:00Z".to_string(),
+            metadata_json: "{}".to_string(),
+        };
+
+        insert_session(&conn, &session).expect("failed to insert session");
+        delete_session(&conn, "session-delete").expect("failed to delete session");
+
+        let loaded = get_session_by_id(&conn, "session-delete").expect("query should succeed");
+
+        assert!(loaded.is_none());
     }
 }

@@ -78,6 +78,15 @@ pub fn update_session_message_run_and_content(
     Ok(())
 }
 
+pub fn delete_session_messages_for_session(conn: &Connection, session_id: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM session_messages WHERE session_id = ?1",
+        [session_id],
+    )?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +151,34 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].run_id.as_deref(), Some("run-1"));
         assert_eq!(messages[0].content, "Updated reply with run summary");
+    }
+
+    #[test]
+    fn deletes_session_messages_for_a_session() {
+        let conn = Connection::open_in_memory().expect("failed to open in-memory database");
+        run_migrations(&conn).expect("failed to run migrations");
+
+        insert_session_message(
+            &conn,
+            &SessionMessage {
+                id: "message-delete-1".to_string(),
+                session_id: "session-delete".to_string(),
+                run_id: None,
+                message_type: "user_message".to_string(),
+                role: SessionMessageRole::User,
+                content: "Delete me".to_string(),
+                data_json: "{}".to_string(),
+                created_at: "2026-03-29T00:00:00Z".to_string(),
+            },
+        )
+        .expect("failed to insert session message");
+
+        delete_session_messages_for_session(&conn, "session-delete")
+            .expect("failed to delete session messages");
+
+        let messages = list_session_messages_for_session(&conn, "session-delete")
+            .expect("failed to list session messages");
+
+        assert!(messages.is_empty());
     }
 }

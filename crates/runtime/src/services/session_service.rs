@@ -11,10 +11,11 @@ use chrono::Utc;
 use memory::db::open_database;
 use memory::migrations::run_migrations;
 use memory::session_message_store::{
-    list_session_messages_for_session, update_session_message_run_and_content,
+    delete_session_messages_for_session, list_session_messages_for_session,
+    update_session_message_run_and_content,
 };
 use memory::session_store::{
-    get_session_by_id, insert_session, list_sessions as memory_list_sessions,
+    delete_session, get_session_by_id, insert_session, list_sessions as memory_list_sessions,
 };
 use schema::{Session, SessionIntake, SessionMessage, SessionStatus};
 use uuid::Uuid;
@@ -335,6 +336,30 @@ pub async fn send_session_message_with_config(
     .await
 }
 
+pub async fn create_session_and_send_first_message_with_config(
+    runtime: &AppRuntime,
+    request: SessionMessageRequest,
+) -> Result<Session, RuntimeError> {
+    let session = create_session(runtime)?;
+    let session_id = session.id.clone();
+
+    let send_result = send_session_message_with_config(
+        runtime,
+        SessionMessageRequest {
+            session_id: session_id.clone(),
+            ..request
+        },
+    )
+    .await;
+
+    if let Err(error) = send_result {
+        cleanup_failed_first_send(runtime, &session_id)?;
+        return Err(error);
+    }
+
+    Ok(session)
+}
+
 pub async fn preview_session_intake(
     runtime: &AppRuntime,
     intake: SessionIntake,
@@ -468,6 +493,16 @@ pub fn create_session(runtime: &AppRuntime) -> Result<Session, RuntimeError> {
     Ok(session)
 }
 
+fn cleanup_failed_first_send(runtime: &AppRuntime, session_id: &str) -> Result<(), RuntimeError> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    delete_session_messages_for_session(&conn, session_id)?;
+    delete_session(&conn, session_id)?;
+
+    Ok(())
+}
+
 pub fn list_sessions(runtime: &AppRuntime) -> Result<Vec<Session>, RuntimeError> {
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
@@ -490,7 +525,8 @@ pub fn list_session_messages(
 #[cfg(test)]
 mod tests {
     use super::{
-        LlmSessionDebugRequest, SessionMessageRequest, create_demo_session, create_session,
+        LlmSessionDebugRequest, SessionMessageRequest, create_demo_session,
+        create_session, create_session_and_send_first_message_with_config,
         decide_demo_session_message, decide_llm_session_message,
         decide_llm_session_message_with_config, preview_session_intake,
         preview_session_intake_with_config, send_session_message,
@@ -1195,6 +1231,37 @@ mod tests {
 
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].message_type, "user_message");
+    }
+
+    #[tokio::test]
+    async fn create_session_and_send_first_message_with_config_rolls_back_failed_first_send() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-first-send-rollback-{}.db",
+            Uuid::new_v4()
+        ));
+
+        let error = create_session_and_send_first_message_with_config(
+            &runtime,
+            SessionMessageRequest {
+                session_id: String::new(),
+                user_message: "Please distill these work notes into Distilllab".to_string(),
+                attachments: vec![],
+                provider_kind: "openai_compatible".to_string(),
+                base_url: "http://127.0.0.1:1".to_string(),
+                model: "gpt-test".to_string(),
+                api_key: Some(String::new()),
+            },
+        )
+        .await
+        .expect_err("first send should fail");
+
+        assert!(error.to_string().contains("error sending request"));
+
+        let sessions = super::list_sessions(&runtime).expect("sessions should load");
+
+        assert!(sessions.is_empty());
     }
 
     #[tokio::test]

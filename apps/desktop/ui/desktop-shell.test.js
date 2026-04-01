@@ -13,6 +13,7 @@ import {
   parseTimelineEntries,
   reconcileSelectedSessionId,
   resolveChatTransitionView,
+  shouldPersistDraftSelection,
 } from "./desktop-shell.js";
 
 test("draft and active views derive expected chat mock state", () => {
@@ -82,6 +83,12 @@ test("created session id parser extracts session id from tauri response", () => 
     "session-abc123",
   );
   assert.equal(extractCreatedSessionId("unexpected response"), "");
+});
+
+test("draft selection persists only after successful first send", () => {
+  assert.equal(shouldPersistDraftSelection(false, "session-123"), false);
+  assert.equal(shouldPersistDraftSelection(true, ""), false);
+  assert.equal(shouldPersistDraftSelection(true, "session-123"), true);
 });
 
 test("draft prompt helper combines prompt title and description", () => {
