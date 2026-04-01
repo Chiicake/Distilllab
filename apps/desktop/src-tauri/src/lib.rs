@@ -135,6 +135,55 @@ fn save_app_config_value(config_path: &std::path::Path, value: &serde_json::Valu
     std::fs::write(config_path, content).map_err(|e| e.to_string())
 }
 
+fn load_desktop_ui_preferences_from_path(config_path: &std::path::Path) -> Result<String, String> {
+    let value = if config_path.exists() {
+        let content = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
+        serde_json::from_str::<serde_json::Value>(&content).map_err(|e| e.to_string())?
+    } else {
+        let config = AppConfig {
+            schema: Some("https://opencode.ai/config.json".to_string()),
+            ..Default::default()
+        };
+        serde_json::to_value(config).map_err(|e| e.to_string())?
+    };
+
+    let preferences = extract_desktop_ui_preferences(&value);
+    serde_json::to_string_pretty(&preferences).map_err(|e| e.to_string())
+}
+
+fn save_desktop_ui_preferences_to_path(
+    config_path: &std::path::Path,
+    preferences: DesktopUiPreferences,
+) -> Result<String, String> {
+    validate_desktop_ui_preferences(&preferences)?;
+
+    let mut value = if config_path.exists() {
+        let content = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
+        serde_json::from_str::<serde_json::Value>(&content).map_err(|e| e.to_string())?
+    } else {
+        let config = AppConfig {
+            schema: Some("https://opencode.ai/config.json".to_string()),
+            ..Default::default()
+        };
+        serde_json::to_value(config).map_err(|e| e.to_string())?
+    };
+    let preferences_value = serde_json::to_value(&preferences).map_err(|e| e.to_string())?;
+
+    let root = value
+        .as_object_mut()
+        .ok_or_else(|| "app config must be a JSON object".to_string())?;
+    let distilllab = root
+        .entry("distilllab".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    let distilllab_object = distilllab
+        .as_object_mut()
+        .ok_or_else(|| "distilllab config must be a JSON object".to_string())?;
+    distilllab_object.insert("desktopUi".to_string(), preferences_value);
+
+    save_app_config_value(config_path, &value)?;
+    load_desktop_ui_preferences_from_path(config_path)
+}
+
 fn format_action_type(action_type: &SessionActionType) -> &'static str {
     match action_type {
         SessionActionType::DirectReply => "direct_reply",
@@ -752,32 +801,14 @@ fn load_llm_config_json_command() -> Result<String, String> {
 
 #[tauri::command]
 fn load_desktop_ui_preferences_command() -> Result<String, String> {
-    let (_, value) = load_app_config_value()?;
-    let preferences = extract_desktop_ui_preferences(&value);
-    serde_json::to_string_pretty(&preferences).map_err(|e| e.to_string())
+    let (config_path, _) = load_app_config_value()?;
+    load_desktop_ui_preferences_from_path(&config_path)
 }
 
 #[tauri::command]
 fn save_desktop_ui_preferences_command(preferences: DesktopUiPreferences) -> Result<String, String> {
-    validate_desktop_ui_preferences(&preferences)?;
-
-    let (config_path, mut value) = load_app_config_value()?;
-    let preferences_value = serde_json::to_value(&preferences).map_err(|e| e.to_string())?;
-
-    let root = value
-        .as_object_mut()
-        .ok_or_else(|| "app config must be a JSON object".to_string())?;
-    let distilllab = root
-        .entry("distilllab".to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    let distilllab_object = distilllab
-        .as_object_mut()
-        .ok_or_else(|| "distilllab config must be a JSON object".to_string())?;
-    distilllab_object.insert("desktopUi".to_string(), preferences_value);
-
-    save_app_config_value(&config_path, &value)?;
-
-    load_desktop_ui_preferences_command()
+    let (config_path, _) = load_app_config_value()?;
+    save_desktop_ui_preferences_to_path(&config_path, preferences)
 }
 
 #[tauri::command]
@@ -927,9 +958,11 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
+        DesktopUiPreferences,
         format_app_config_text, format_intake_preview_text, format_llm_debug_comparison_text,
         format_provider_test_text, format_session_agent_decision_text, format_session_messages_text,
-        format_session_selector_label, load_desktop_ui_preferences_command,
+        format_session_selector_label, load_desktop_ui_preferences_from_path,
+        save_desktop_ui_preferences_to_path,
     };
     use agent::{
         RunCreationRequest, SessionActionType, SessionAgentDecision, SessionIntent,
@@ -937,6 +970,22 @@ mod tests {
     };
     use runtime::{DistillRunStepPreview, RunHandoffPreview, SessionIntakePreview};
     use schema::{SessionMessage, SessionMessageRole};
+
+    fn test_config_path(test_name: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time should move forward")
+            .as_nanos();
+        let path = std::env::temp_dir()
+            .join("distilllab-desktop-tests")
+            .join(format!("{}-{}-{}.json", test_name, std::process::id(), unique));
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("temp test directory should exist");
+        }
+
+        path
+    }
 
     #[test]
     fn formats_structured_session_agent_decision_as_plain_text() {
@@ -1110,7 +1159,8 @@ mod tests {
 
     #[test]
     fn load_desktop_ui_preferences_command_returns_defaults_when_missing() {
-        let text = load_desktop_ui_preferences_command().expect("preferences should load");
+        let config_path = test_config_path("load-desktop-ui-defaults");
+        let text = load_desktop_ui_preferences_from_path(&config_path).expect("preferences should load");
         let value: serde_json::Value = serde_json::from_str(&text).expect("valid json");
         assert_eq!(value.get("theme").and_then(|v| v.as_str()), Some("system"));
         assert_eq!(value.get("locale").and_then(|v| v.as_str()), Some("en"));
@@ -1118,6 +1168,106 @@ mod tests {
             value.get("showDebugPanel").and_then(|v| v.as_bool()),
             Some(true)
         );
+    }
+
+    #[test]
+    fn save_desktop_ui_preferences_command_writes_distilllab_desktop_ui_and_preserves_other_config() {
+        let config_path = test_config_path("save-desktop-ui-preferences");
+        std::fs::write(
+            &config_path,
+            r#"{
+                "$schema": "https://opencode.ai/config.json",
+                "provider": {
+                    "ice": {
+                        "name": "Ice",
+                        "models": {
+                            "gpt-5.4": { "name": "GPT-5.4" }
+                        }
+                    }
+                },
+                "distilllab": {
+                    "currentProvider": "ice",
+                    "currentModel": "gpt-5.4"
+                }
+            }"#,
+        )
+        .expect("seed config should save");
+
+        let text = save_desktop_ui_preferences_to_path(
+            &config_path,
+            DesktopUiPreferences {
+                theme: "dark".to_string(),
+                locale: "zh-CN".to_string(),
+                show_debug_panel: false,
+            },
+        )
+        .expect("preferences should save");
+
+        let saved_preferences: serde_json::Value =
+            serde_json::from_str(&text).expect("saved response should be valid json");
+        assert_eq!(saved_preferences.get("theme").and_then(|v| v.as_str()), Some("dark"));
+        assert_eq!(saved_preferences.get("locale").and_then(|v| v.as_str()), Some("zh-CN"));
+        assert_eq!(
+            saved_preferences.get("showDebugPanel").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+
+        let saved_config: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&config_path).expect("saved config should be readable"),
+        )
+        .expect("saved config should contain valid json");
+        assert_eq!(
+            saved_config
+                .get("distilllab")
+                .and_then(|v| v.get("desktopUi"))
+                .and_then(|v| v.get("theme"))
+                .and_then(|v| v.as_str()),
+            Some("dark")
+        );
+        assert_eq!(
+            saved_config
+                .get("distilllab")
+                .and_then(|v| v.get("currentProvider"))
+                .and_then(|v| v.as_str()),
+            Some("ice")
+        );
+        assert_eq!(
+            saved_config
+                .get("provider")
+                .and_then(|v| v.get("ice"))
+                .and_then(|v| v.get("models"))
+                .and_then(|v| v.get("gpt-5.4"))
+                .and_then(|v| v.get("name"))
+                .and_then(|v| v.as_str()),
+            Some("GPT-5.4")
+        );
+    }
+
+    #[test]
+    fn save_desktop_ui_preferences_command_rejects_invalid_theme_and_locale() {
+        let config_path = test_config_path("save-desktop-ui-invalid");
+
+        let invalid_theme_error = save_desktop_ui_preferences_to_path(
+            &config_path,
+            DesktopUiPreferences {
+                theme: "sepia".to_string(),
+                locale: "en".to_string(),
+                show_debug_panel: true,
+            },
+        )
+        .expect_err("invalid theme should be rejected");
+        assert!(invalid_theme_error.contains("theme must be one of"));
+
+        let invalid_locale_error = save_desktop_ui_preferences_to_path(
+            &config_path,
+            DesktopUiPreferences {
+                theme: "system".to_string(),
+                locale: "fr".to_string(),
+                show_debug_panel: true,
+            },
+        )
+        .expect_err("invalid locale should be rejected");
+        assert!(invalid_locale_error.contains("locale must be one of"));
     }
 
     #[test]
