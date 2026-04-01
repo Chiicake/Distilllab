@@ -146,7 +146,7 @@
                   <span class="chat-composer-tool" data-i18n="chat.draft.tool.attach">Attach</span>
                   <span class="chat-composer-tool" data-i18n="chat.draft.tool.context">Context</span>
                 </div>
-                <button class="chat-send-button" type="button" data-chat-transition="active" data-i18n="chat.draft.send">Send</button>
+                <button id="chat-draft-send-button" class="chat-send-button" type="button" data-chat-transition="active" data-i18n="chat.draft.send">Send</button>
               </div>
               <p class="chat-composer-hint" data-i18n="chat.draft.hint">The first send transitions from draft semantics into an active session shell.</p>
             </section>
@@ -172,7 +172,7 @@
               <p id="chat-active-session-meta" data-i18n="chat.active.bannerMeta">One user turn, one assistant response, and one in-progress evidence distillation run.</p>
             </section>
 
-            <section id="chat-active-timeline" class="chat-timeline" aria-label="Chat timeline">
+            <section id="chat-active-timeline" class="chat-timeline" data-i18n-aria-label="chat.active.timelineAria">
             </section>
 
             <section class="chat-composer surface">
@@ -183,7 +183,7 @@
                   <span class="chat-composer-tool" data-i18n="chat.active.tool.attach">Attach</span>
                   <span class="chat-composer-tool" data-i18n="chat.active.tool.library">Library</span>
                 </div>
-                <button class="chat-send-button" type="button" data-i18n="chat.active.send">Send</button>
+                <button id="chat-active-send-button" class="chat-send-button" type="button" data-i18n="chat.active.send">Send</button>
               </div>
             </section>
           </section>
@@ -219,7 +219,7 @@
                   <p data-i18n="canvas.sidebar.recentActiveBody">Analysis, reporting, and linked assets are centered here. Older objects stay visible as surrounding context.</p>
                 </div>
 
-                <nav class="canvas-mode-list" aria-label="Canvas modes">
+                <nav class="canvas-mode-list" data-i18n-aria-label="canvas.sidebar.modeListAria">
                   <button class="canvas-mode-row" type="button" data-view-target="canvasGlobal" data-active-when-view="canvasGlobal">
                     <span class="canvas-mode-icon" aria-hidden="true">RA</span>
                     <span>
@@ -273,13 +273,13 @@
                   <div class="canvas-outline-tree">
                     <div class="canvas-outline-group">
                       <p class="canvas-outline-heading" data-i18n="canvas.sidebar.projectGroup">Project</p>
-                      <button class="canvas-outline-item canvas-outline-item-strong" type="button">Project Delta</button>
+                      <button class="canvas-outline-item canvas-outline-item-strong" type="button" data-i18n="canvas.sample.projectDelta">Project Delta</button>
                     </div>
                     <div class="canvas-outline-group">
                       <p class="canvas-outline-heading" data-i18n="canvas.sidebar.workItemGroup">Work Items</p>
-                      <button class="canvas-outline-item canvas-outline-item-branch" type="button">Analysis</button>
-                      <button class="canvas-outline-item" type="button">Reporting</button>
-                      <button class="canvas-outline-item" type="button">Review</button>
+                      <button class="canvas-outline-item canvas-outline-item-branch" type="button" data-i18n="canvas.sample.analysis">Analysis</button>
+                      <button class="canvas-outline-item" type="button" data-i18n="canvas.sample.reporting">Reporting</button>
+                      <button class="canvas-outline-item" type="button" data-i18n="canvas.sample.review">Review</button>
                     </div>
                     <div class="canvas-outline-group">
                       <p class="canvas-outline-heading" data-i18n="canvas.sidebar.assetGroup">Assets</p>
@@ -313,7 +313,7 @@
 
                   <div class="canvas-object project-anchor surface-strong">
                     <span class="canvas-object-type" data-i18n="canvas.global.projectAnchor">Project Anchor</span>
-                    <h3>Project Delta</h3>
+                    <h3 data-i18n="canvas.sample.projectDelta">Project Delta</h3>
                     <p data-i18n="canvas.global.projectBody">Workspace anchor for linked analysis, reporting, and review work.</p>
                     <div class="canvas-object-tags">
                       <span>v2.4.0</span>
@@ -324,7 +324,7 @@
                   <div class="canvas-object workitem-analysis surface">
                     <div class="canvas-object-heading">
                       <span class="canvas-object-rail"></span>
-                      <h3>Analysis</h3>
+                      <h3 data-i18n="canvas.sample.analysis">Analysis</h3>
                       <span class="canvas-status-chip" data-i18n="canvas.global.analysisStatus">Running</span>
                     </div>
                     <p data-i18n="canvas.global.analysisBody">Baseline metric derivation from historical repository data and current run outputs.</p>
@@ -338,7 +338,7 @@
                   <div class="canvas-object workitem-reporting surface-muted">
                     <div class="canvas-object-heading">
                       <span class="canvas-object-rail canvas-object-rail-secondary"></span>
-                      <h3>Reporting</h3>
+                      <h3 data-i18n="canvas.sample.reporting">Reporting</h3>
                     </div>
                     <p data-i18n="canvas.global.reportingBody">Draft generation of executive summaries and technical logs.</p>
                     <div class="canvas-object-footnote" data-i18n="canvas.global.reportingStatus">Status: Complete</div>
@@ -347,7 +347,7 @@
                   <div class="canvas-object workitem-review surface-muted">
                     <div class="canvas-object-heading">
                       <span class="canvas-object-rail canvas-object-rail-alert"></span>
-                      <h3>Review</h3>
+                      <h3 data-i18n="canvas.sample.review">Review</h3>
                     </div>
                     <p data-i18n="canvas.global.reviewBody">Stakeholder gate verification for phase-gate transition.</p>
                     <div class="canvas-object-footnote" data-i18n="canvas.global.reviewStatus">Status: Pending Input</div>
@@ -366,7 +366,7 @@
 
                   <div class="canvas-peripheral-object surface-muted">
                     <span class="canvas-object-type" data-i18n="canvas.global.peripheralLabel">Peripheral Project</span>
-                    <h3>Project Beta</h3>
+                    <h3 data-i18n="canvas.sample.projectBeta">Project Beta</h3>
                     <p data-i18n="canvas.global.peripheralBody">Legacy migration archives remain visible but de-emphasized outside the active set.</p>
                   </div>
 
@@ -422,7 +422,7 @@
                 <div class="canvas-detail-stage">
                   <div class="canvas-detail-node canvas-detail-node-top surface-muted">
                     <span data-i18n="canvas.detail.neighborTopType">Neighbor</span>
-                    <strong>Review</strong>
+                    <strong data-i18n="canvas.sample.review">Review</strong>
                   </div>
                   <div class="canvas-detail-node canvas-detail-node-right surface-muted">
                     <span data-i18n="canvas.detail.neighborRightType">Asset</span>
@@ -430,15 +430,15 @@
                   </div>
                   <div class="canvas-detail-node canvas-detail-node-bottom surface-muted">
                     <span data-i18n="canvas.detail.neighborBottomType">Project</span>
-                    <strong>Project Delta</strong>
+                    <strong data-i18n="canvas.sample.projectDelta">Project Delta</strong>
                   </div>
 
                   <div class="canvas-detail-card surface-strong">
                     <div class="canvas-detail-card-glow" aria-hidden="true"></div>
                     <div class="canvas-detail-card-header">
                       <div>
-                        <p class="canvas-detail-card-kicker">WorkItem / AN-402-DELTA</p>
-                        <h3>Analysis</h3>
+                        <p class="canvas-detail-card-kicker" data-i18n="canvas.detail.cardKicker">WorkItem / AN-402-DELTA</p>
+                        <h3 data-i18n="canvas.sample.analysis">Analysis</h3>
                       </div>
                       <span class="canvas-status-chip" data-i18n="canvas.detail.statusChip">In Progress</span>
                     </div>
@@ -459,7 +459,7 @@
                         <span style="height: 45%"></span>
                       </div>
                       <div class="canvas-local-axis">
-                        <span>T-12h</span>
+                        <span data-i18n="canvas.detail.localAxisLeft">T-12h</span>
                         <span data-i18n="canvas.detail.localAxisCenter">Live Stream</span>
                         <span data-i18n="canvas.detail.localAxisRight">Current Phase</span>
                       </div>
@@ -761,12 +761,12 @@
             <section class="inspector-card surface-muted">
               <p class="inspector-card-label" data-i18n="inspector.canvas.global.contentsLabel">Contents</p>
               <div class="inspector-chip-wrap">
-                <span class="inspector-chip">Project Delta</span>
-                <span class="inspector-chip">Analysis</span>
-                <span class="inspector-chip">Reporting</span>
-                <span class="inspector-chip">Review</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.projectDelta">Project Delta</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.analysis">Analysis</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.reporting">Reporting</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.review">Review</span>
                 <span class="inspector-chip">summary_report.pdf</span>
-                <span class="inspector-chip">Project Beta</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.projectBeta">Project Beta</span>
               </div>
             </section>
           </div>
@@ -791,9 +791,9 @@
             <section class="inspector-card surface-muted">
               <p class="inspector-card-label" data-i18n="inspector.canvas.detail.relatedLabel">Related Objects</p>
               <div class="inspector-chip-wrap">
-                <span class="inspector-chip">Project Delta</span>
-                <span class="inspector-chip">Reporting</span>
-                <span class="inspector-chip">Review</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.projectDelta">Project Delta</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.reporting">Reporting</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.review">Review</span>
                 <span class="inspector-chip">summary_report.pdf</span>
                 <span class="inspector-chip">log_files.zip</span>
               </div>

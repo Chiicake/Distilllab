@@ -6,6 +6,8 @@ import {
   deriveCanvasInspectorStateFromView,
   deriveChatStateFromView,
   deriveChatMockStateFromView,
+  deriveDraftPromptText,
+  extractCreatedSessionId,
   isDebugPanelVisible,
   parseTimelineEntries,
   reconcileSelectedSessionId,
@@ -70,6 +72,35 @@ test("selected session stays active when refreshed options still include it", ()
       { sessionId: "session-2" },
     ]),
     "session-2",
+  );
+});
+
+test("created session id parser extracts session id from tauri response", () => {
+  assert.equal(
+    extractCreatedSessionId("created session: session-abc123 [active]"),
+    "session-abc123",
+  );
+  assert.equal(extractCreatedSessionId("unexpected response"), "");
+});
+
+test("draft prompt helper combines prompt title and description", () => {
+  const titleNode = { textContent: "Extract work items" };
+  const descriptionNode = { textContent: "Break a messy discussion into explicit tasks." };
+  const button = {
+    querySelector(selector) {
+      if (selector === ".chat-prompt-title") {
+        return titleNode;
+      }
+      if (selector === ".chat-prompt-description") {
+        return descriptionNode;
+      }
+      return null;
+    },
+  };
+
+  assert.equal(
+    deriveDraftPromptText(button),
+    "Extract work items: Break a messy discussion into explicit tasks.",
   );
 });
 
