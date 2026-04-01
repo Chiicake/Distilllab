@@ -170,7 +170,7 @@
           document.documentElement.setAttribute("data-theme", theme);
         } catch (error) {
           document.documentElement.setAttribute("data-theme", "system");
-          result.textContent = `Error: ${error}`;
+          console.warn("Failed to load desktop theme preference.", error);
         }
       }
 
