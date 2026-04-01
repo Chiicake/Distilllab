@@ -22,6 +22,16 @@ pub struct DistilllabConfigSection {
     pub current_provider: Option<String>,
     #[serde(rename = "currentModel")]
     pub current_model: Option<String>,
+    #[serde(rename = "desktopUi", default, skip_serializing_if = "Option::is_none")]
+    pub desktop_ui: Option<DesktopUiConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct DesktopUiConfig {
+    pub theme: String,
+    pub locale: String,
+    #[serde(rename = "showDebugPanel")]
+    pub show_debug_panel: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -332,6 +342,7 @@ mod tests {
     use super::{
         import_providers_from_opencode_path, load_app_config_from_path,
         resolve_current_model_selection, resolve_current_provider_model, save_app_config_to_path,
+        DesktopUiConfig,
     };
     use std::collections::BTreeMap;
     use std::fs;
@@ -603,6 +614,60 @@ mod tests {
             Some("copilot")
         );
         assert_eq!(config.distilllab.current_model.as_deref(), Some("gpt-4.1"));
+    }
+
+    #[test]
+    fn upsert_provider_entry_preserves_desktop_ui_preferences() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.json");
+
+        let mut config = super::AppConfig::default();
+        config.schema = Some("https://opencode.ai/config.json".to_string());
+        config.distilllab.desktop_ui = Some(DesktopUiConfig {
+            theme: "dark".to_string(),
+            locale: "zh-CN".to_string(),
+            show_debug_panel: false,
+        });
+        save_app_config_to_path(&config, &config_path).expect("seed config should save");
+
+        let updated = super::upsert_provider_entry(
+            &config_path,
+            "ice",
+            super::ProviderConfigEntry {
+                npm: Some("@ai-sdk/openai-compatible".to_string()),
+                name: "Ice".to_string(),
+                options: super::ProviderOptions {
+                    base_url: Some("https://ice.v.ua/v1".to_string()),
+                    api_key: Some("token".to_string()),
+                },
+                models: BTreeMap::from([(
+                    "gpt-5.4".to_string(),
+                    super::ModelConfigEntry {
+                        name: "GPT-5.4".to_string(),
+                        ..Default::default()
+                    },
+                )]),
+            },
+            Some("gpt-5.4".to_string()),
+        )
+        .expect("provider should upsert");
+
+        assert_eq!(
+            updated.distilllab.desktop_ui,
+            Some(DesktopUiConfig {
+                theme: "dark".to_string(),
+                locale: "zh-CN".to_string(),
+                show_debug_panel: false,
+            })
+        );
+
+        let persisted = load_app_config_from_path(&config_path).expect("config should reload");
+        assert_eq!(
+            persisted.distilllab.desktop_ui,
+            updated.distilllab.desktop_ui
+        );
     }
 
     #[test]

@@ -576,6 +576,38 @@ function getSessionRailIcon(session) {
   return (title?.charAt(0) || "S").toUpperCase();
 }
 
+function localizeSessionStatus(status) {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+
+  if (!normalizedStatus) {
+    return t("session.status.unknown");
+  }
+
+  const knownStatuses = new Set(["active", "idle", "archived"]);
+  return knownStatuses.has(normalizedStatus)
+    ? t(`session.status.${normalizedStatus}`)
+    : status;
+}
+
+function localizeTimelineHeader(header) {
+  const normalizedHeader = String(header || "").trim();
+
+  switch (normalizedHeader) {
+    case "[User]":
+      return t("timeline.role.user");
+    case "[Assistant]":
+      return t("timeline.role.assistant");
+    case "[System]":
+      return t("timeline.role.system");
+    case "[Tool]":
+      return t("timeline.role.tool");
+    case "[Transcript]":
+      return t("timeline.role.transcript");
+    default:
+      return normalizedHeader.replace(/^\[(.*)\]$/, "$1");
+  }
+}
+
 function createSessionRailButton(session) {
   const button = document.createElement("button");
   button.type = "button";
@@ -602,7 +634,7 @@ function createSessionRailButton(session) {
 
   const meta = document.createElement("span");
   meta.className = "rail-item-meta";
-  meta.textContent = session.status;
+  meta.textContent = localizeSessionStatus(session.status);
 
   copy.append(title, description, meta);
   button.append(icon, copy);
@@ -692,7 +724,7 @@ function createTimelineEntryElement(entry) {
 
   const role = document.createElement("p");
   role.className = "timeline-role";
-  role.textContent = entry.header.replace(/^\[(.*)\]$/, "$1");
+  role.textContent = localizeTimelineHeader(entry.header);
 
   const message = document.createElement("p");
   message.className = "timeline-message";
@@ -736,7 +768,7 @@ function renderActiveSessionBanner(session) {
   }
 
   chatActiveSessionTitle.textContent = session.title;
-  chatActiveSessionMeta.textContent = `${session.status} - ${session.sessionId}`;
+  chatActiveSessionMeta.textContent = `${localizeSessionStatus(session.status)} - ${session.sessionId}`;
 }
 
 function applyDraftSelection() {

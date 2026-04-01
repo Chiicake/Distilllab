@@ -1,6 +1,6 @@
 use agent::{LlmProviderConfig, SessionActionType, SessionAgentDecision};
 use runtime::{
-    AppConfig, AppRuntime, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
+    AppConfig, AppRuntime, DesktopUiConfig, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
     ProviderOptions, SessionIntakePreview, SessionMessageRequest, default_app_config_path,
     create_session,
     delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
@@ -83,72 +83,43 @@ fn validate_desktop_ui_preferences(preferences: &DesktopUiPreferences) -> Result
     Ok(())
 }
 
-fn desktop_ui_preferences_from_value(value: Option<&serde_json::Value>) -> DesktopUiPreferences {
+fn desktop_ui_preferences_from_config(config: &AppConfig) -> DesktopUiPreferences {
     let defaults = DesktopUiPreferences::default();
 
-    let theme = value
-        .and_then(|v| v.get("theme"))
-        .and_then(|v| v.as_str())
-        .filter(|value| is_valid_desktop_theme(value))
-        .unwrap_or(defaults.theme.as_str())
-        .to_string();
-    let locale = value
-        .and_then(|v| v.get("locale"))
-        .and_then(|v| v.as_str())
-        .filter(|value| is_valid_desktop_locale(value))
-        .unwrap_or(defaults.locale.as_str())
-        .to_string();
-    let show_debug_panel = value
-        .and_then(|v| v.get("showDebugPanel"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(defaults.show_debug_panel);
-
-    DesktopUiPreferences {
-        theme,
-        locale,
-        show_debug_panel,
+    match config.distilllab.desktop_ui.as_ref() {
+        Some(preferences) => DesktopUiPreferences {
+            theme: if is_valid_desktop_theme(&preferences.theme) {
+                preferences.theme.clone()
+            } else {
+                defaults.theme
+            },
+            locale: if is_valid_desktop_locale(&preferences.locale) {
+                preferences.locale.clone()
+            } else {
+                defaults.locale
+            },
+            show_debug_panel: preferences.show_debug_panel,
+        },
+        None => defaults,
     }
 }
 
-fn load_app_config_value() -> Result<(std::path::PathBuf, serde_json::Value), String> {
-    let (config_path, config) = load_or_create_app_config()?;
-
-    if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-        let value = serde_json::from_str::<serde_json::Value>(&content).map_err(|e| e.to_string())?;
-        Ok((config_path, value))
-    } else {
-        serde_json::to_value(config)
-            .map(|value| (config_path, value))
-            .map_err(|e| e.to_string())
+fn desktop_ui_config_from_preferences(preferences: &DesktopUiPreferences) -> DesktopUiConfig {
+    DesktopUiConfig {
+        theme: preferences.theme.clone(),
+        locale: preferences.locale.clone(),
+        show_debug_panel: preferences.show_debug_panel,
     }
-}
-
-fn extract_desktop_ui_preferences(value: &serde_json::Value) -> DesktopUiPreferences {
-    desktop_ui_preferences_from_value(value.get("distilllab").and_then(|v| v.get("desktopUi")))
-}
-
-fn save_app_config_value(config_path: &std::path::Path, value: &serde_json::Value) -> Result<(), String> {
-    let config: AppConfig = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
-    save_app_config_to_path(&config, config_path).map_err(|e| e.to_string())?;
-
-    let content = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
-    std::fs::write(config_path, content).map_err(|e| e.to_string())
 }
 
 fn load_desktop_ui_preferences_from_path(config_path: &std::path::Path) -> Result<String, String> {
-    let value = if config_path.exists() {
-        let content = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
-        serde_json::from_str::<serde_json::Value>(&content).map_err(|e| e.to_string())?
+    let preferences = if config_path.exists() {
+        let config = load_app_config_from_path(config_path).map_err(|e| e.to_string())?;
+        desktop_ui_preferences_from_config(&config)
     } else {
-        let config = AppConfig {
-            schema: Some("https://opencode.ai/config.json".to_string()),
-            ..Default::default()
-        };
-        serde_json::to_value(config).map_err(|e| e.to_string())?
+        DesktopUiPreferences::default()
     };
 
-    let preferences = extract_desktop_ui_preferences(&value);
     serde_json::to_string_pretty(&preferences).map_err(|e| e.to_string())
 }
 
@@ -158,30 +129,17 @@ fn save_desktop_ui_preferences_to_path(
 ) -> Result<String, String> {
     validate_desktop_ui_preferences(&preferences)?;
 
-    let mut value = if config_path.exists() {
-        let content = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
-        serde_json::from_str::<serde_json::Value>(&content).map_err(|e| e.to_string())?
+    let mut config = if config_path.exists() {
+        load_app_config_from_path(config_path).map_err(|e| e.to_string())?
     } else {
-        let config = AppConfig {
+        AppConfig {
             schema: Some("https://opencode.ai/config.json".to_string()),
             ..Default::default()
-        };
-        serde_json::to_value(config).map_err(|e| e.to_string())?
+        }
     };
-    let preferences_value = serde_json::to_value(&preferences).map_err(|e| e.to_string())?;
 
-    let root = value
-        .as_object_mut()
-        .ok_or_else(|| "app config must be a JSON object".to_string())?;
-    let distilllab = root
-        .entry("distilllab".to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    let distilllab_object = distilllab
-        .as_object_mut()
-        .ok_or_else(|| "distilllab config must be a JSON object".to_string())?;
-    distilllab_object.insert("desktopUi".to_string(), preferences_value);
-
-    save_app_config_value(config_path, &value)?;
+    config.distilllab.desktop_ui = Some(desktop_ui_config_from_preferences(&preferences));
+    save_app_config_to_path(&config, config_path).map_err(|e| e.to_string())?;
     load_desktop_ui_preferences_from_path(config_path)
 }
 
@@ -813,13 +771,13 @@ fn load_llm_config_json_command() -> Result<String, String> {
 
 #[tauri::command]
 fn load_desktop_ui_preferences_command() -> Result<String, String> {
-    let (config_path, _) = load_app_config_value()?;
+    let (config_path, _) = load_or_create_app_config()?;
     load_desktop_ui_preferences_from_path(&config_path)
 }
 
 #[tauri::command]
 fn save_desktop_ui_preferences_command(preferences: DesktopUiPreferences) -> Result<String, String> {
-    let (config_path, _) = load_app_config_value()?;
+    let (config_path, _) = load_or_create_app_config()?;
     save_desktop_ui_preferences_to_path(&config_path, preferences)
 }
 
@@ -971,7 +929,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        DesktopUiPreferences,
+        DesktopUiPreferences, desktop_ui_preferences_from_config,
         format_app_config_text, format_intake_preview_text, format_llm_debug_comparison_text,
         format_provider_test_text, format_session_agent_decision_text, format_session_messages_text,
         format_session_selector_label, load_desktop_ui_preferences_from_path,
@@ -981,7 +939,7 @@ mod tests {
         RunCreationRequest, SessionActionType, SessionAgentDecision, SessionIntent,
         SessionNextAction,
     };
-    use runtime::{DistillRunStepPreview, RunHandoffPreview, SessionIntakePreview};
+    use runtime::{AppConfig, DesktopUiConfig, DistillRunStepPreview, RunHandoffPreview, SessionIntakePreview, upsert_provider_entry};
     use schema::{SessionMessage, SessionMessageRole};
 
     fn test_config_path(test_name: &str) -> std::path::PathBuf {
@@ -1309,6 +1267,92 @@ mod tests {
         )
         .expect_err("invalid locale should be rejected");
         assert!(invalid_locale_error.contains("locale must be one of"));
+    }
+
+    #[test]
+    fn desktop_ui_preferences_round_trip_through_typed_config() {
+        let preferences = desktop_ui_preferences_from_config(&AppConfig {
+            distilllab: runtime::DistilllabConfigSection {
+                desktop_ui: Some(DesktopUiConfig {
+                    theme: "dark".to_string(),
+                    locale: "zh-CN".to_string(),
+                    show_debug_panel: false,
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        assert_eq!(preferences.theme, "dark");
+        assert_eq!(preferences.locale, "zh-CN");
+        assert!(!preferences.show_debug_panel);
+    }
+
+    #[test]
+    fn desktop_ui_preferences_survive_provider_save_mutation() {
+        let config_path = test_config_path("desktop-ui-survives-provider-save");
+
+        save_desktop_ui_preferences_to_path(
+            &config_path,
+            DesktopUiPreferences {
+                theme: "dark".to_string(),
+                locale: "zh-CN".to_string(),
+                show_debug_panel: false,
+            },
+        )
+        .expect("preferences should save");
+
+        upsert_provider_entry(
+            &config_path,
+            "ice",
+            runtime::ProviderConfigEntry {
+                npm: Some("@ai-sdk/openai-compatible".to_string()),
+                name: "Ice".to_string(),
+                options: runtime::ProviderOptions {
+                    base_url: Some("https://ice.v.ua/v1".to_string()),
+                    api_key: Some("token".to_string()),
+                },
+                models: std::collections::BTreeMap::from([(
+                    "gpt-5.4".to_string(),
+                    runtime::ModelConfigEntry {
+                        name: "GPT-5.4".to_string(),
+                        ..Default::default()
+                    },
+                )]),
+            },
+            Some("gpt-5.4".to_string()),
+        )
+        .expect("provider save should succeed");
+
+        let saved_config: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&config_path).expect("saved config should be readable"),
+        )
+        .expect("saved config should be valid json");
+
+        assert_eq!(
+            saved_config
+                .get("distilllab")
+                .and_then(|value| value.get("desktopUi"))
+                .and_then(|value| value.get("theme"))
+                .and_then(|value| value.as_str()),
+            Some("dark")
+        );
+        assert_eq!(
+            saved_config
+                .get("distilllab")
+                .and_then(|value| value.get("desktopUi"))
+                .and_then(|value| value.get("locale"))
+                .and_then(|value| value.as_str()),
+            Some("zh-CN")
+        );
+        assert_eq!(
+            saved_config
+                .get("distilllab")
+                .and_then(|value| value.get("desktopUi"))
+                .and_then(|value| value.get("showDebugPanel"))
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
     }
 
     #[test]

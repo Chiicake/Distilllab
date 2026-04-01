@@ -6,7 +6,7 @@ pub mod services;
 
 pub use app::AppRuntime;
 pub use config::{
-    AppConfig, CurrentModelSelection, DistilllabConfigSection, ModelConfigEntry,
+    AppConfig, CurrentModelSelection, DesktopUiConfig, DistilllabConfigSection, ModelConfigEntry,
     ProviderConfigEntry, ProviderOptions, ResolvedProviderModel, default_app_config_path,
     delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
     resolve_current_model_selection, resolve_current_provider_model, save_app_config_to_path,
