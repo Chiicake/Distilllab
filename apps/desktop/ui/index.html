@@ -585,6 +585,18 @@
                 </select>
                 <p data-i18n="settings.appearance.theme.description">Theme changes apply immediately and stay saved in desktop UI preferences.</p>
               </div>
+              <div class="field field-full">
+                <label class="toggle-field" for="debug-visibility-toggle">
+                  <span>
+                    <span class="toggle-field-title" data-i18n="settings.debug.visibility.label">Show debug panel</span>
+                    <span class="toggle-field-description" data-i18n="settings.debug.visibility.description">Keep the migrated Phase 0 debug workspace available in Settings > Debug.</span>
+                  </span>
+                  <input id="debug-visibility-toggle" type="checkbox" />
+                </label>
+                <p id="debug-visibility-development-note" class="settings-inline-note" data-i18n="settings.debug.visibility.developmentNote" hidden>
+                  Development builds keep Settings > Debug reachable even when this preference is turned off.
+                </p>
+              </div>
             </div>
           </section>
         </section>
@@ -612,116 +624,118 @@
           </section>
 
           <section id="debug-shell" class="debug-stack">
-            <section class="panel">
-              <div class="debug-cluster">
-                <button id="create-run-button" type="button" data-i18n="debug.actions.createRun">Create Demo Run</button>
-                <button id="create-session-button" type="button" data-i18n="debug.actions.createSession">Create Demo Session</button>
-                <button id="create-source-button" type="button" data-i18n="debug.actions.createSource">Create Demo Source</button>
-                <button id="chunk-source-button" type="button" data-i18n="debug.actions.chunkSource">Chunk Demo Source</button>
-                <button id="extract-work-items-button" type="button" data-i18n="debug.actions.extractWorkItems">Extract Demo Work Items</button>
-                <button id="group-project-button" type="button" data-i18n="debug.actions.groupProject">Group Demo Project</button>
-                <button id="build-assets-button" type="button" data-i18n="debug.actions.buildAssets">Build Demo Assets</button>
-                <button id="list-runs-button" type="button" data-i18n="debug.actions.listRuns">List Runs</button>
-                <button id="list-sessions-button" type="button" data-i18n="debug.actions.listSessions">List Sessions</button>
-                <button id="list-sources-button" type="button" data-i18n="debug.actions.listSources">List Sources</button>
-                <button id="list-work-items-button" type="button" data-i18n="debug.actions.listWorkItems">List Work Items</button>
-                <button id="list-projects-button" type="button" data-i18n="debug.actions.listProjects">List Projects</button>
-                <button id="list-assets-button" type="button" data-i18n="debug.actions.listAssets">List Assets</button>
-              </div>
-              <p>
-                <label for="source-id-input" data-i18n="debug.lookup.sourceId">Source ID for chunk lookup:</label>
-                <input id="source-id-input" type="text" placeholder="source-..." data-i18n-placeholder="debug.placeholder.sourceId" />
-                <button id="list-chunks-button" type="button" data-i18n="debug.actions.listChunks">List Chunks</button>
-              </p>
-            </section>
+            <section id="settings-debug-panel" class="debug-panel-shell">
+              <section class="panel">
+                <div class="debug-cluster">
+                  <button id="create-run-button" type="button" data-i18n="debug.actions.createRun">Create Demo Run</button>
+                  <button id="create-session-button" type="button" data-i18n="debug.actions.createSession">Create Demo Session</button>
+                  <button id="create-source-button" type="button" data-i18n="debug.actions.createSource">Create Demo Source</button>
+                  <button id="chunk-source-button" type="button" data-i18n="debug.actions.chunkSource">Chunk Demo Source</button>
+                  <button id="extract-work-items-button" type="button" data-i18n="debug.actions.extractWorkItems">Extract Demo Work Items</button>
+                  <button id="group-project-button" type="button" data-i18n="debug.actions.groupProject">Group Demo Project</button>
+                  <button id="build-assets-button" type="button" data-i18n="debug.actions.buildAssets">Build Demo Assets</button>
+                  <button id="list-runs-button" type="button" data-i18n="debug.actions.listRuns">List Runs</button>
+                  <button id="list-sessions-button" type="button" data-i18n="debug.actions.listSessions">List Sessions</button>
+                  <button id="list-sources-button" type="button" data-i18n="debug.actions.listSources">List Sources</button>
+                  <button id="list-work-items-button" type="button" data-i18n="debug.actions.listWorkItems">List Work Items</button>
+                  <button id="list-projects-button" type="button" data-i18n="debug.actions.listProjects">List Projects</button>
+                  <button id="list-assets-button" type="button" data-i18n="debug.actions.listAssets">List Assets</button>
+                </div>
+                <p>
+                  <label for="source-id-input" data-i18n="debug.lookup.sourceId">Source ID for chunk lookup:</label>
+                  <input id="source-id-input" type="text" placeholder="source-..." data-i18n-placeholder="debug.placeholder.sourceId" />
+                  <button id="list-chunks-button" type="button" data-i18n="debug.actions.listChunks">List Chunks</button>
+                </p>
+              </section>
 
-            <section class="panel">
-              <h3 data-i18n="debug.panel.config.title">LLM Config Bar</h3>
-              <p data-i18n="debug.panel.config.description">All session and debug LLM calls read from the current provider and model configured here.</p>
-              <div class="form-grid">
-                <div class="field">
-                  <label for="config-provider-input" data-i18n="debug.config.provider">Current Provider</label>
-                  <select id="config-provider-input"></select>
+              <section class="panel">
+                <h3 data-i18n="debug.panel.config.title">LLM Config Bar</h3>
+                <p data-i18n="debug.panel.config.description">All session and debug LLM calls read from the current provider and model configured here.</p>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="config-provider-input" data-i18n="debug.config.provider">Current Provider</label>
+                    <select id="config-provider-input"></select>
+                  </div>
+                  <div class="field">
+                    <label for="config-model-input" data-i18n="debug.config.model">Current Model</label>
+                    <select id="config-model-input"></select>
+                  </div>
+                  <div class="field">
+                    <label for="config-provider-name-input" data-i18n="debug.config.providerName">Provider Name</label>
+                    <input id="config-provider-name-input" type="text" placeholder="Ice" data-i18n-placeholder="debug.placeholder.providerName" />
+                  </div>
+                  <div class="field">
+                    <label for="config-provider-npm-input" data-i18n="debug.config.providerNpm">Provider NPM</label>
+                    <input id="config-provider-npm-input" type="text" value="@ai-sdk/openai-compatible" />
+                  </div>
+                  <div class="field field-full">
+                    <label for="config-base-url-input" data-i18n="debug.config.baseUrl">Base URL</label>
+                    <input id="config-base-url-input" type="text" placeholder="https://ice.v.ua/v1" data-i18n-placeholder="debug.placeholder.baseUrl" />
+                  </div>
+                  <div class="field field-full">
+                    <label for="config-api-key-input" data-i18n="debug.config.apiKey">API Key</label>
+                    <input id="config-api-key-input" type="password" placeholder="{file:secrets/ice.key} or secret value" data-i18n-placeholder="debug.placeholder.apiKey" />
+                  </div>
+                  <div class="field field-full">
+                    <label for="config-provider-json-input" data-i18n="debug.config.providerJson">Advanced Provider JSON</label>
+                    <textarea id="config-provider-json-input" data-i18n-placeholder="debug.placeholder.providerJson"></textarea>
+                  </div>
+                  <div class="field field-full">
+                    <label for="config-import-path-input" data-i18n="debug.config.importPath">OpenCode Config Path</label>
+                    <input id="config-import-path-input" type="text" placeholder="optional, defaults to ~/.config/opencode/opencode.json" data-i18n-placeholder="debug.placeholder.importPath" />
+                  </div>
                 </div>
-                <div class="field">
-                  <label for="config-model-input" data-i18n="debug.config.model">Current Model</label>
-                  <select id="config-model-input"></select>
-                </div>
-                <div class="field">
-                  <label for="config-provider-name-input" data-i18n="debug.config.providerName">Provider Name</label>
-                  <input id="config-provider-name-input" type="text" placeholder="Ice" data-i18n-placeholder="debug.placeholder.providerName" />
-                </div>
-                <div class="field">
-                  <label for="config-provider-npm-input" data-i18n="debug.config.providerNpm">Provider NPM</label>
-                  <input id="config-provider-npm-input" type="text" value="@ai-sdk/openai-compatible" />
-                </div>
-                <div class="field field-full">
-                  <label for="config-base-url-input" data-i18n="debug.config.baseUrl">Base URL</label>
-                  <input id="config-base-url-input" type="text" placeholder="https://ice.v.ua/v1" data-i18n-placeholder="debug.placeholder.baseUrl" />
-                </div>
-                <div class="field field-full">
-                  <label for="config-api-key-input" data-i18n="debug.config.apiKey">API Key</label>
-                  <input id="config-api-key-input" type="password" placeholder="{file:secrets/ice.key} or secret value" data-i18n-placeholder="debug.placeholder.apiKey" />
-                </div>
-                <div class="field field-full">
-                  <label for="config-provider-json-input" data-i18n="debug.config.providerJson">Advanced Provider JSON</label>
-                  <textarea id="config-provider-json-input" data-i18n-placeholder="debug.placeholder.providerJson"></textarea>
-                </div>
-                <div class="field field-full">
-                  <label for="config-import-path-input" data-i18n="debug.config.importPath">OpenCode Config Path</label>
-                  <input id="config-import-path-input" type="text" placeholder="optional, defaults to ~/.config/opencode/opencode.json" data-i18n-placeholder="debug.placeholder.importPath" />
-                </div>
-              </div>
-              <button id="config-load-button" type="button" data-i18n="debug.actions.loadConfig">Load Config</button>
-              <button id="config-new-button" type="button" data-i18n="debug.actions.newProvider">New Provider</button>
-              <button id="config-save-button" type="button" data-i18n="debug.actions.saveProvider">Save Current Provider</button>
-              <button id="config-delete-button" type="button" data-i18n="debug.actions.deleteProvider">Delete Provider</button>
-              <button id="config-import-button" type="button" data-i18n="debug.actions.importProviders">Import From OpenCode</button>
-              <button id="config-test-button" type="button" data-i18n="debug.actions.testProvider">Test Current Provider</button>
-            </section>
+                <button id="config-load-button" type="button" data-i18n="debug.actions.loadConfig">Load Config</button>
+                <button id="config-new-button" type="button" data-i18n="debug.actions.newProvider">New Provider</button>
+                <button id="config-save-button" type="button" data-i18n="debug.actions.saveProvider">Save Current Provider</button>
+                <button id="config-delete-button" type="button" data-i18n="debug.actions.deleteProvider">Delete Provider</button>
+                <button id="config-import-button" type="button" data-i18n="debug.actions.importProviders">Import From OpenCode</button>
+                <button id="config-test-button" type="button" data-i18n="debug.actions.testProvider">Test Current Provider</button>
+              </section>
 
-            <section class="panel">
-              <h3 data-i18n="debug.panel.configOutput">Config Output</h3>
-              <pre id="config-result">No config loaded yet.</pre>
-            </section>
+              <section class="panel">
+                <h3 data-i18n="debug.panel.configOutput">Config Output</h3>
+                <pre id="config-result">No config loaded yet.</pre>
+              </section>
 
-            <section class="panel">
-              <h3 data-i18n="debug.panel.timeline.title">Session Timeline</h3>
-              <p data-i18n="debug.panel.timeline.description">Use the formal session flow below to send messages and inspect the current timeline.</p>
-              <div class="form-grid">
-                <div class="field field-full">
-                  <label for="timeline-session-selector" data-i18n="debug.timeline.existingSessions">Existing Sessions</label>
-                  <select id="timeline-session-selector">
-                    <option value="" data-i18n="debug.timeline.placeholder.selectSession">Select an existing session...</option>
-                  </select>
+              <section class="panel">
+                <h3 data-i18n="debug.panel.timeline.title">Session Timeline</h3>
+                <p data-i18n="debug.panel.timeline.description">Use the formal session flow below to send messages and inspect the current timeline.</p>
+                <div class="form-grid">
+                  <div class="field field-full">
+                    <label for="timeline-session-selector" data-i18n="debug.timeline.existingSessions">Existing Sessions</label>
+                    <select id="timeline-session-selector">
+                      <option value="" data-i18n="debug.timeline.placeholder.selectSession">Select an existing session...</option>
+                    </select>
+                  </div>
+                  <div class="field field-full">
+                    <label for="timeline-session-id-input" data-i18n="debug.timeline.sessionId">Session ID</label>
+                    <input id="timeline-session-id-input" type="text" placeholder="session-..." data-i18n-placeholder="debug.placeholder.sessionId" />
+                  </div>
+                  <div class="field field-full">
+                    <label for="timeline-message-input" data-i18n="debug.timeline.message">Session Message</label>
+                    <textarea id="timeline-message-input" data-i18n-placeholder="debug.placeholder.message"></textarea>
+                  </div>
+                  <div class="field field-full">
+                    <label for="timeline-attachments-input" data-i18n="debug.timeline.attachments">Attachment Paths</label>
+                    <textarea id="timeline-attachments-input" data-i18n-placeholder="debug.placeholder.attachments"></textarea>
+                  </div>
                 </div>
-                <div class="field field-full">
-                  <label for="timeline-session-id-input" data-i18n="debug.timeline.sessionId">Session ID</label>
-                  <input id="timeline-session-id-input" type="text" placeholder="session-..." data-i18n-placeholder="debug.placeholder.sessionId" />
-                </div>
-                <div class="field field-full">
-                  <label for="timeline-message-input" data-i18n="debug.timeline.message">Session Message</label>
-                  <textarea id="timeline-message-input" data-i18n-placeholder="debug.placeholder.message"></textarea>
-                </div>
-                <div class="field field-full">
-                  <label for="timeline-attachments-input" data-i18n="debug.timeline.attachments">Attachment Paths</label>
-                  <textarea id="timeline-attachments-input" data-i18n-placeholder="debug.placeholder.attachments"></textarea>
-                </div>
-              </div>
-              <button id="timeline-create-session-button" type="button" data-i18n="debug.actions.createAndUseSession">Create and Use New Session</button>
-              <button id="timeline-refresh-sessions-button" type="button" data-i18n="debug.actions.refreshSessions">Refresh Sessions</button>
-              <button id="timeline-send-button" type="button" data-i18n="debug.actions.sendMessage">Send Session Message</button>
-              <button id="timeline-refresh-button" type="button" data-i18n="debug.actions.refreshTimeline">Refresh Timeline</button>
-            </section>
+                <button id="timeline-create-session-button" type="button" data-i18n="debug.actions.createAndUseSession">Create and Use New Session</button>
+                <button id="timeline-refresh-sessions-button" type="button" data-i18n="debug.actions.refreshSessions">Refresh Sessions</button>
+                <button id="timeline-send-button" type="button" data-i18n="debug.actions.sendMessage">Send Session Message</button>
+                <button id="timeline-refresh-button" type="button" data-i18n="debug.actions.refreshTimeline">Refresh Timeline</button>
+              </section>
 
-            <section class="panel">
-              <h3 data-i18n="debug.panel.timelineOutput">Timeline Output</h3>
-              <pre id="timeline-result">No timeline loaded yet.</pre>
-            </section>
+              <section class="panel">
+                <h3 data-i18n="debug.panel.timelineOutput">Timeline Output</h3>
+                <pre id="timeline-result">No timeline loaded yet.</pre>
+              </section>
 
-            <section class="panel">
-              <h3 data-i18n="debug.panel.output">Output</h3>
-              <pre id="result">No result yet.</pre>
+              <section class="panel">
+                <h3 data-i18n="debug.panel.output">Output</h3>
+                <pre id="result">No result yet.</pre>
+              </section>
             </section>
           </section>
         </section>

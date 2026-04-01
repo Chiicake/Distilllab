@@ -5,6 +5,7 @@ import {
   createShellViewState,
   deriveCanvasInspectorStateFromView,
   deriveChatMockStateFromView,
+  isDebugPanelVisible,
   resolveChatTransitionView,
 } from "./desktop-shell.js";
 
@@ -68,4 +69,39 @@ test("shell view state preserves the most recent canvas scope when returning", (
 
   assert.equal(snapshot.currentView, "canvasGlobal");
   assert.equal(snapshot.selectedCanvasScope, "global");
+});
+
+test("shell view state tracks selected settings section through transitions", () => {
+  const shell = createShellViewState();
+
+  let snapshot = shell.transition("settingsDebug");
+  assert.equal(snapshot.currentView, "settingsDebug");
+  assert.equal(snapshot.selectedSettingsSection, "debug");
+
+  snapshot = shell.transition("chatDraft");
+  assert.equal(snapshot.currentView, "chatDraft");
+  assert.equal(snapshot.selectedSettingsSection, "debug");
+
+  snapshot = shell.transition("settingsGeneral");
+  assert.equal(snapshot.currentView, "settingsGeneral");
+  assert.equal(snapshot.selectedSettingsSection, "general");
+});
+
+test("shell view state honors an initial debug settings selection", () => {
+  const shell = createShellViewState({
+    currentView: "settingsDebug",
+    selectedSettingsSection: "debug",
+  });
+
+  assert.equal(shell.currentView, "settingsDebug");
+  assert.equal(shell.selectedSettingsSection, "debug");
+});
+
+test("debug panel visibility follows preference in non-development contexts", () => {
+  assert.equal(isDebugPanelVisible({ showDebugPanel: true }, false), true);
+  assert.equal(isDebugPanelVisible({ showDebugPanel: false }, false), false);
+});
+
+test("debug panel visibility stays enabled in development contexts", () => {
+  assert.equal(isDebugPanelVisible({ showDebugPanel: false }, true), true);
 });

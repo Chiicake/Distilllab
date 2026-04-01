@@ -40,6 +40,21 @@ let translateImpl = function t(key) {
 
 const HAS_DOCUMENT = typeof document !== "undefined";
 
+function detectDevelopmentBuild() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  if (window.__DISTILLLAB_DESKTOP_DEV__ === true) {
+    return true;
+  }
+
+  const host = window.location?.hostname ?? "";
+  return host === "localhost" || host === "127.0.0.1";
+}
+
+const IS_DEVELOPMENT_BUILD = detectDevelopmentBuild();
+
 function createUiStub() {
   return {
     root: null,
@@ -55,6 +70,8 @@ function createUiStub() {
     debugUnavailable: null,
     localeSelector: null,
     themeSelector: null,
+    debugVisibilityToggle: null,
+    debugVisibilityDevelopmentNote: null,
     debugShell: null,
     runButton: null,
     sessionButton: null,
@@ -114,6 +131,8 @@ const ui = HAS_DOCUMENT
       debugUnavailable: getElement("debug-unavailable"),
       localeSelector: getElement("locale-selector"),
       themeSelector: getElement("theme-selector"),
+      debugVisibilityToggle: getElement("debug-visibility-toggle"),
+      debugVisibilityDevelopmentNote: getElement("debug-visibility-development-note"),
       debugShell: getElement("debug-shell"),
       runButton: getElement("create-run-button"),
       sessionButton: getElement("create-session-button"),
@@ -171,6 +190,8 @@ const {
   debugUnavailable,
   localeSelector,
   themeSelector,
+  debugVisibilityToggle,
+  debugVisibilityDevelopmentNote,
   debugShell,
   runButton,
   sessionButton,
@@ -312,6 +333,15 @@ function renderThemeSelector() {
   themeSelector.value = state.preferences.theme;
 }
 
+function isDebugPanelVisible(preferences = state.preferences, isDevelopmentBuild = IS_DEVELOPMENT_BUILD) {
+  return Boolean(preferences?.showDebugPanel) || isDevelopmentBuild;
+}
+
+function renderDebugVisibilityControls() {
+  debugVisibilityToggle.checked = state.preferences.showDebugPanel;
+  debugVisibilityDevelopmentNote.hidden = !IS_DEVELOPMENT_BUILD;
+}
+
 function renderDefaultStatusText() {
   if (configResult.dataset.defaultState !== "false") {
     setDefaultText(configResult, "status.noConfig");
@@ -359,6 +389,7 @@ function renderStaticTranslations() {
 
   renderLocaleSelector();
   renderThemeSelector();
+  renderDebugVisibilityControls();
   renderTimelineSelectorPlaceholder();
   renderDefaultStatusText();
   renderShellView();
@@ -454,7 +485,7 @@ function renderShellView() {
   }
 
   const showingDebugView = currentView === "settingsDebug";
-  const debugAvailable = state.preferences.showDebugPanel;
+  const debugAvailable = isDebugPanelVisible();
   debugShell.hidden = !showingDebugView || !debugAvailable;
   debugUnavailable.hidden = !showingDebugView || debugAvailable;
 }
@@ -568,6 +599,31 @@ async function setLocale(locale, options = {}) {
     await saveDesktopPreferences();
     updateTranslator();
     renderStaticTranslations();
+  }
+}
+
+async function setDebugPanelVisibility(visible, options = {}) {
+  const persist = options.persist !== false;
+  const nextValue = Boolean(visible);
+  const previousValue = state.preferences.showDebugPanel;
+
+  state.preferences.showDebugPanel = nextValue;
+  renderDebugVisibilityControls();
+  renderShellView();
+
+  if (!persist) {
+    return;
+  }
+
+  try {
+    await saveDesktopPreferences();
+    renderDebugVisibilityControls();
+    renderShellView();
+  } catch (error) {
+    state.preferences.showDebugPanel = previousValue;
+    renderDebugVisibilityControls();
+    renderShellView();
+    throw error;
   }
 }
 
@@ -770,6 +826,14 @@ function bindShellEvents() {
   themeSelector.addEventListener("change", async () => {
     try {
       await setTheme(themeSelector.value);
+    } catch (error) {
+      setStatusText(result, "status.error.generic", { error });
+    }
+  });
+
+  debugVisibilityToggle.addEventListener("change", async () => {
+    try {
+      await setDebugPanelVisibility(debugVisibilityToggle.checked);
     } catch (error) {
       setStatusText(result, "status.error.generic", { error });
     }
@@ -1153,6 +1217,7 @@ export function createShellViewState(initial = {}) {
 export {
   deriveCanvasInspectorStateFromView,
   deriveChatMockStateFromView,
+  isDebugPanelVisible,
   resolveChatTransitionView,
   transitionChatMockSurface,
 };

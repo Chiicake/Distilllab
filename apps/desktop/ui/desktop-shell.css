@@ -1659,7 +1659,53 @@ textarea {
   grid-column: 1 / -1;
 }
 
+.toggle-field {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--shell-space-4);
+  padding: var(--shell-space-4);
+  border: 1px solid var(--shell-border);
+  border-radius: var(--shell-radius-md);
+  background: var(--shell-surface);
+}
+
+.toggle-field-title,
+.toggle-field-description {
+  display: block;
+}
+
+.toggle-field-title {
+  color: var(--shell-heading);
+  font-weight: 700;
+}
+
+.toggle-field-description {
+  margin-top: 4px;
+  color: var(--shell-text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.toggle-field input[type="checkbox"] {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+}
+
+.settings-inline-note {
+  margin: var(--shell-space-3) 0 0;
+  font-size: var(--font-size-sm);
+}
+
 .debug-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--shell-space-4);
+}
+
+.debug-panel-shell {
   display: flex;
   flex-direction: column;
   gap: var(--shell-space-4);
@@ -1887,5 +1933,9 @@ textarea {
   .debug-cluster {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .toggle-field {
+    flex-direction: column;
   }
 }
