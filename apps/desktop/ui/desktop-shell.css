@@ -73,8 +73,7 @@ html[data-theme="dark"] {
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme]),
-  html[data-theme="system"] {
+  :root:not([data-theme]) {
     color-scheme: dark;
     --shell-background: #0f172a;
     --shell-background-accent: radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 42%);

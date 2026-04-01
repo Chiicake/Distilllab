@@ -34,9 +34,21 @@
                 </p>
               </section>
               <section class="panel surface-strong">
-                <h2 data-i18n="canvas.title">Canvas View</h2>
-                <p data-i18n="canvas.description">
-                  Canvas stays lightweight for now, but the shell already exposes its translated entry point.
+                <h2 data-i18n="run.title">Active Run</h2>
+                <p data-i18n="run.description">
+                  Active run rendering stays lightweight for now while the shell proves both themes across generated output surfaces.
+                </p>
+              </section>
+              <section class="panel surface-strong">
+                <h2 data-i18n="canvas.global.title">Canvas Global View</h2>
+                <p data-i18n="canvas.global.description">
+                  Canvas stays lightweight for now, but the shell already exposes its translated global entry point.
+                </p>
+              </section>
+              <section class="panel surface-strong">
+                <h2 data-i18n="canvas.detail.title">Canvas Detail View</h2>
+                <p data-i18n="canvas.detail.description">
+                  Detail placeholders keep the future canvas inspector visible while theme coverage expands.
                 </p>
               </section>
               <section class="panel surface-strong">
@@ -51,7 +63,7 @@
           <section class="panel">
             <h2 data-i18n="settings.title">Settings</h2>
             <p data-i18n="settings.description">
-              Language lives in the non-debug settings section and rerenders visible labels immediately.
+              Appearance and language live in the non-debug settings section and rerender visible labels immediately.
             </p>
             <div class="form-grid">
               <div class="field">
@@ -62,10 +74,14 @@
                 </select>
               </div>
               <div class="field">
-                <label for="current-theme-value" data-i18n="settings.theme.label">Theme</label>
-                <input id="current-theme-value" type="text" readonly />
-                <p data-i18n="settings.theme.current">
-                  Current theme preference stays managed by saved desktop settings.
+                <label for="theme-selector" data-i18n="settings.appearance.theme">Theme</label>
+                <select id="theme-selector">
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+                <p data-i18n="settings.appearance.theme.description">
+                  Theme changes apply immediately and stay saved in desktop UI preferences.
                 </p>
               </div>
             </div>

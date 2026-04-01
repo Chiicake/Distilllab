@@ -1171,6 +1171,34 @@ mod tests {
     }
 
     #[test]
+    fn load_desktop_ui_preferences_command_falls_back_to_system_for_invalid_saved_theme() {
+        let config_path = test_config_path("load-desktop-ui-invalid-theme");
+        std::fs::write(
+            &config_path,
+            r#"{
+                "$schema": "https://opencode.ai/config.json",
+                "distilllab": {
+                    "desktopUi": {
+                        "theme": "sepia",
+                        "locale": "zh-CN",
+                        "showDebugPanel": false
+                    }
+                }
+            }"#,
+        )
+        .expect("seed config should save");
+
+        let text = load_desktop_ui_preferences_from_path(&config_path).expect("preferences should load");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(value.get("theme").and_then(|v| v.as_str()), Some("system"));
+        assert_eq!(value.get("locale").and_then(|v| v.as_str()), Some("zh-CN"));
+        assert_eq!(
+            value.get("showDebugPanel").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
     fn save_desktop_ui_preferences_command_writes_distilllab_desktop_ui_and_preserves_other_config() {
         let config_path = test_config_path("save-desktop-ui-preferences");
         std::fs::write(

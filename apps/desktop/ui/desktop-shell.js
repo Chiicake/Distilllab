@@ -39,7 +39,7 @@ const ui = {
   listChunksButton: getElement("list-chunks-button"),
   sourceIdInput: getElement("source-id-input"),
   localeSelector: getElement("locale-selector"),
-  currentThemeValue: getElement("current-theme-value"),
+  themeSelector: getElement("theme-selector"),
   debugShell: getElement("debug-shell"),
   configProviderInput: getElement("config-provider-input"),
   configModelInput: getElement("config-model-input"),
@@ -85,7 +85,7 @@ const {
   listChunksButton,
   sourceIdInput,
   localeSelector,
-  currentThemeValue,
+  themeSelector,
   debugShell,
   configProviderInput,
   configModelInput,
@@ -174,8 +174,22 @@ function renderLocaleSelector() {
   localeSelector.value = state.preferences.locale;
 }
 
-function renderThemeValue() {
-  currentThemeValue.value = t(`settings.theme.value.${state.preferences.theme}`);
+function renderThemeSelector() {
+  const options = [
+    ["system", t("settings.appearance.theme.system")],
+    ["light", t("settings.appearance.theme.light")],
+    ["dark", t("settings.appearance.theme.dark")],
+  ];
+
+  themeSelector.innerHTML = "";
+  for (const [value, label] of options) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    themeSelector.appendChild(option);
+  }
+
+  themeSelector.value = state.preferences.theme;
 }
 
 function renderStaticTranslations() {
@@ -191,7 +205,7 @@ function renderStaticTranslations() {
   }
 
   renderLocaleSelector();
-  renderThemeValue();
+  renderThemeSelector();
   renderTimelineSelectorPlaceholder();
   renderDefaultStatusText();
   debugShell.hidden = !state.preferences.showDebugPanel;
@@ -228,6 +242,16 @@ function renderTimelineSelectorPlaceholder() {
 
 function updateTranslator() {
   translateImpl = createTranslator(state.dictionaries, state.preferences.locale);
+}
+
+function resolveTheme(theme) {
+  const normalizedTheme = normalizeTheme(theme);
+
+  if (normalizedTheme !== "system") {
+    return normalizedTheme;
+  }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 // Preferences and Tauri bridge
@@ -275,7 +299,25 @@ async function saveDesktopPreferences() {
 }
 
 function applyDesktopThemePreference() {
-  document.documentElement.setAttribute("data-theme", state.preferences.theme);
+  const resolvedTheme = resolveTheme(state.preferences.theme);
+
+  document.documentElement.dataset.theme = resolvedTheme;
+  document.documentElement.dataset.themePreference = state.preferences.theme;
+}
+
+async function setTheme(theme, options = {}) {
+  const persist = options.persist !== false;
+  const nextTheme = normalizeTheme(theme);
+
+  state.preferences.theme = nextTheme;
+  applyDesktopThemePreference();
+  renderThemeSelector();
+
+  if (persist) {
+    await saveDesktopPreferences();
+    applyDesktopThemePreference();
+    renderThemeSelector();
+  }
 }
 
 // Timeline and config helpers
@@ -455,6 +497,20 @@ function bindShellEvents() {
       await setLocale(localeSelector.value);
     } catch (error) {
       setStatusText(result, "status.error.generic", { error });
+    }
+  });
+
+  themeSelector.addEventListener("change", async () => {
+    try {
+      await setTheme(themeSelector.value);
+    } catch (error) {
+      setStatusText(result, "status.error.generic", { error });
+    }
+  });
+
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (state.preferences.theme === "system") {
+      applyDesktopThemePreference();
     }
   });
 
