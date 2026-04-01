@@ -43,10 +43,11 @@ const ui = {
   tabChat: getElement("tab-chat"),
   tabCanvas: getElement("tab-canvas"),
   settingsButton: getElement("open-settings-button"),
-  railButtons: Array.from(document.querySelectorAll("[data-view-target]")),
+  railButtons: Array.from(document.querySelectorAll(".rail-item[data-view-target]")),
   railSections: Array.from(document.querySelectorAll("[data-rail-view]")),
   inspectorSections: Array.from(document.querySelectorAll("[data-inspector-view]")),
   viewPanels: Array.from(document.querySelectorAll("[data-view]")),
+  debugUnavailable: getElement("debug-unavailable"),
   localeSelector: getElement("locale-selector"),
   themeSelector: getElement("theme-selector"),
   debugShell: getElement("debug-shell"),
@@ -100,6 +101,7 @@ const {
   railSections,
   inspectorSections,
   viewPanels,
+  debugUnavailable,
   localeSelector,
   themeSelector,
   debugShell,
@@ -270,6 +272,10 @@ function renderStaticTranslations() {
     element.setAttribute("placeholder", t(element.dataset.i18nPlaceholder));
   }
 
+  for (const element of document.querySelectorAll("[data-i18n-aria-label]")) {
+    element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel));
+  }
+
   renderLocaleSelector();
   renderThemeSelector();
   renderTimelineSelectorPlaceholder();
@@ -324,9 +330,7 @@ function renderRailSelection(currentView) {
     const targetView = normalizeView(button.dataset.viewTarget);
     const active = targetView === currentView;
     button.dataset.active = String(active);
-    if (button.classList.contains("rail-item")) {
-      button.setAttribute("aria-current", active ? "page" : "false");
-    }
+    button.setAttribute("aria-current", active ? "page" : "false");
   }
 }
 
@@ -339,7 +343,11 @@ function renderShellView() {
   renderSurfaceSections("railView", viewDefinition.rail, railSections);
   renderSurfaceSections("inspectorView", viewDefinition.inspector, inspectorSections);
   renderRailSelection(currentView);
-  debugShell.hidden = !state.preferences.showDebugPanel || currentView !== "settingsDebug";
+
+  const showingDebugView = currentView === "settingsDebug";
+  const debugAvailable = state.preferences.showDebugPanel;
+  debugShell.hidden = !showingDebugView || !debugAvailable;
+  debugUnavailable.hidden = !showingDebugView || debugAvailable;
 }
 
 function transitionToView(viewId) {

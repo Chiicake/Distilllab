@@ -9,7 +9,7 @@
   <body class="desktop-shell-body">
     <div class="app-shell">
       <header class="top-nav shell-chrome surface">
-        <div class="top-nav-primary" role="tablist" aria-label="Primary views">
+        <div class="top-nav-primary" role="tablist" data-i18n-aria-label="shell.primaryViews.aria">
           <button id="tab-chat" class="shell-tab" type="button" data-view-target="chatDraft" data-i18n="nav.chat" role="tab" aria-selected="true">
             Chat
           </button>
@@ -24,7 +24,7 @@
         </div>
       </header>
 
-      <aside class="left-rail shell-chrome surface" aria-label="Primary navigation rail">
+      <aside class="left-rail shell-chrome surface" data-i18n-aria-label="shell.leftRail.aria">
         <section class="brand-block surface-strong">
           <div class="brand-mark" aria-hidden="true">
             <span class="brand-mark-core"></span>
@@ -32,42 +32,42 @@
             <span class="brand-mark-edge brand-mark-edge-b"></span>
           </div>
           <div class="brand-copy">
-            <p class="eyebrow">Distilllab</p>
-            <h1 class="brand-title">Distilllab</h1>
-            <p class="brand-tagline">Distill Work Into Structure</p>
+            <p class="eyebrow" data-i18n="brand.name">Distilllab</p>
+            <h1 class="brand-title" data-i18n="brand.name">Distilllab</h1>
+            <p class="brand-tagline" data-i18n="brand.tagline">Distill Work Into Structure</p>
           </div>
         </section>
 
         <section class="rail-surface" data-rail-view="chat">
           <div class="rail-header">
-            <h2>Sessions</h2>
-            <p>Keep draft and active conversation states reachable without losing the selected session.</p>
+            <h2 data-i18n="chat.rail.title">Sessions</h2>
+            <p data-i18n="chat.rail.description">Keep draft and active conversation states reachable without losing the selected session.</p>
           </div>
-          <nav id="chat-session-rail" class="rail-list" aria-label="Chat sessions">
-            <button class="rail-item" type="button" data-view-target="chatDraft" data-session="draft">Draft Session</button>
-            <button class="rail-item" type="button" data-view-target="chatActive" data-session="active">Active Session</button>
+          <nav id="chat-session-rail" class="rail-list" data-i18n-aria-label="chat.rail.aria">
+            <button class="rail-item" type="button" data-view-target="chatDraft" data-session="draft" data-i18n="chat.session.draft">Draft Session</button>
+            <button class="rail-item" type="button" data-view-target="chatActive" data-session="active" data-i18n="chat.session.active">Active Session</button>
           </nav>
         </section>
 
         <section class="rail-surface" data-rail-view="canvas" hidden>
           <div class="rail-header">
-            <h2>Canvas Scope</h2>
-            <p>Switch between global structure and a focused detail view.</p>
+            <h2 data-i18n="canvas.rail.title">Canvas Scope</h2>
+            <p data-i18n="canvas.rail.description">Switch between global structure and a focused detail view.</p>
           </div>
-          <nav id="canvas-scope-rail" class="rail-list" aria-label="Canvas scopes">
-            <button class="rail-item" type="button" data-view-target="canvasGlobal" data-canvas-scope="global">Global Structure</button>
-            <button class="rail-item" type="button" data-view-target="canvasDetail" data-canvas-scope="detail">Focused Detail</button>
+          <nav id="canvas-scope-rail" class="rail-list" data-i18n-aria-label="canvas.rail.aria">
+            <button class="rail-item" type="button" data-view-target="canvasGlobal" data-canvas-scope="global" data-i18n="canvas.scope.global">Global Structure</button>
+            <button class="rail-item" type="button" data-view-target="canvasDetail" data-canvas-scope="detail" data-i18n="canvas.scope.detail">Focused Detail</button>
           </nav>
         </section>
 
         <section class="rail-surface" data-rail-view="settings" hidden>
           <div class="rail-header">
-            <h2>Settings</h2>
-            <p>General preferences stay separate from the migrated debug workspace.</p>
+            <h2 data-i18n="settings.rail.title">Settings</h2>
+            <p data-i18n="settings.rail.description">General preferences stay separate from the migrated debug workspace.</p>
           </div>
-          <nav id="settings-nav-rail" class="rail-list" aria-label="Settings sections">
-            <button class="rail-item" type="button" data-view-target="settingsGeneral" data-settings-section="general">General</button>
-            <button class="rail-item" type="button" data-view-target="settingsDebug" data-settings-section="debug">Debug</button>
+          <nav id="settings-nav-rail" class="rail-list" data-i18n-aria-label="settings.rail.aria">
+            <button class="rail-item" type="button" data-view-target="settingsGeneral" data-settings-section="general" data-i18n="settings.section.general">General</button>
+            <button class="rail-item" type="button" data-view-target="settingsDebug" data-settings-section="debug" data-i18n="settings.section.debug">Debug</button>
           </nav>
         </section>
       </aside>
@@ -75,49 +75,49 @@
       <main class="center-content" aria-live="polite">
         <section id="chat-draft-view" class="view-panel" data-view="chatDraft">
           <div class="view-copy surface">
-            <p class="eyebrow">Chat Workbench</p>
-            <h2>Draft Session</h2>
-            <p>Use this shell surface for the next composed prompt before an active run is underway.</p>
+            <p class="eyebrow" data-i18n="chat.surface.eyebrow">Chat Workbench</p>
+            <h2 data-i18n="chat.draft.title">Draft Session</h2>
+            <p data-i18n="chat.draft.description">Use this shell surface for the next composed prompt before an active run is underway.</p>
           </div>
           <section class="panel surface-muted">
-            <h3>Draft Composer Placeholder</h3>
-            <p>Later tasks can replace this region with the full timeline and composer without changing shell routing.</p>
+            <h3 data-i18n="chat.draft.card.title">Draft Composer Placeholder</h3>
+            <p data-i18n="chat.draft.card.description">Later tasks can replace this region with the full timeline and composer without changing shell routing.</p>
           </section>
         </section>
 
         <section id="chat-active-view" class="view-panel" data-view="chatActive" hidden>
           <div class="view-copy surface">
-            <p class="eyebrow">Chat Workbench</p>
-            <h2>Active Session</h2>
-            <p>The selected session stays active while the shell switches between chat, canvas, and settings surfaces.</p>
+            <p class="eyebrow" data-i18n="chat.surface.eyebrow">Chat Workbench</p>
+            <h2 data-i18n="chat.active.title">Active Session</h2>
+            <p data-i18n="chat.active.description">The selected session stays active while the shell switches between chat, canvas, and settings surfaces.</p>
           </div>
           <section class="panel surface-muted">
-            <h3>Timeline Placeholder</h3>
-            <p>This reserved center region will host the formal conversation timeline in later tasks.</p>
+            <h3 data-i18n="chat.active.card.title">Timeline Placeholder</h3>
+            <p data-i18n="chat.active.card.description">This reserved center region will host the formal conversation timeline in later tasks.</p>
           </section>
         </section>
 
         <section id="canvas-global-view" class="view-panel" data-view="canvasGlobal" hidden>
           <div class="view-copy surface">
-            <p class="eyebrow">Canvas Space</p>
+            <p class="eyebrow" data-i18n="canvas.surface.eyebrow">Canvas Space</p>
             <h2 data-i18n="canvas.global.title">Canvas Global View</h2>
             <p data-i18n="canvas.global.description">The shell reserves a dedicated object-space surface for global structure and cross-project shape.</p>
           </div>
           <section class="panel surface-muted">
-            <h3>Global Structure Placeholder</h3>
-            <p>Later canvas tasks can fill this viewport without reworking navigation or inspector placement.</p>
+            <h3 data-i18n="canvas.global.card.title">Global Structure Placeholder</h3>
+            <p data-i18n="canvas.global.card.description">Later canvas tasks can fill this viewport without reworking navigation or inspector placement.</p>
           </section>
         </section>
 
         <section id="canvas-detail-view" class="view-panel" data-view="canvasDetail" hidden>
           <div class="view-copy surface">
-            <p class="eyebrow">Canvas Space</p>
+            <p class="eyebrow" data-i18n="canvas.surface.eyebrow">Canvas Space</p>
             <h2 data-i18n="canvas.detail.title">Canvas Detail View</h2>
             <p data-i18n="canvas.detail.description">Focused detail view keeps room for future object inspection and scoped emphasis.</p>
           </div>
           <section class="panel surface-muted">
-            <h3>Detail Focus Placeholder</h3>
-            <p>This region is intentionally lightweight while preserving the real shell behavior for later iterations.</p>
+            <h3 data-i18n="canvas.detail.card.title">Detail Focus Placeholder</h3>
+            <p data-i18n="canvas.detail.card.description">This region is intentionally lightweight while preserving the real shell behavior for later iterations.</p>
           </section>
         </section>
 
@@ -130,16 +130,16 @@
                 <span class="brand-mark-edge brand-mark-edge-b"></span>
               </div>
               <div>
-                <p class="eyebrow">Distilllab</p>
+                <p class="eyebrow" data-i18n="brand.name">Distilllab</p>
                 <h2 data-i18n="settings.title">Settings</h2>
-                <p class="brand-tagline">Distill Work Into Structure</p>
+                <p class="brand-tagline" data-i18n="brand.tagline">Distill Work Into Structure</p>
               </div>
             </div>
             <p data-i18n="settings.description">Appearance and language live in the non-debug settings section and rerender visible labels immediately.</p>
           </section>
 
           <section class="panel">
-            <h3>General</h3>
+            <h3 data-i18n="settings.section.general">General</h3>
             <div class="form-grid">
               <div class="field">
                 <label for="locale-selector" data-i18n="settings.language.label">Language</label>
@@ -170,12 +170,17 @@
                 <span class="brand-mark-edge brand-mark-edge-b"></span>
               </div>
               <div>
-                <p class="eyebrow">Distilllab</p>
+                <p class="eyebrow" data-i18n="brand.name">Distilllab</p>
                 <h2 data-i18n="settings.debug">Debug</h2>
-                <p class="brand-tagline">Distill Work Into Structure</p>
+                <p class="brand-tagline" data-i18n="brand.tagline">Distill Work Into Structure</p>
               </div>
             </div>
             <p data-i18n="debug.description">The current Phase 0 page stays available here while the future shell is still under construction.</p>
+          </section>
+
+          <section id="debug-unavailable" class="panel surface-muted" hidden>
+            <h3 data-i18n="settings.debug.hidden.title">Debug Surface Hidden</h3>
+            <p data-i18n="settings.debug.hidden.description">Debug tools are currently hidden by desktop preferences, so this section stays reserved without showing the legacy controls.</p>
           </section>
 
           <section id="debug-shell" class="debug-stack">
@@ -294,21 +299,21 @@
         </section>
       </main>
 
-      <aside class="right-inspector shell-chrome surface" aria-label="Inspector">
+      <aside class="right-inspector shell-chrome surface" data-i18n-aria-label="inspector.aria">
         <section class="inspector-surface" data-inspector-view="chat">
-          <p class="eyebrow">Inspector</p>
-          <h2>Chat Inspector</h2>
-          <p>Keep room for session context, pinned excerpts, and structured outputs.</p>
+          <p class="eyebrow" data-i18n="inspector.eyebrow">Inspector</p>
+          <h2 data-i18n="inspector.chat.title">Chat Inspector</h2>
+          <p data-i18n="inspector.chat.description">Keep room for session context, pinned excerpts, and structured outputs.</p>
         </section>
         <section class="inspector-surface" data-inspector-view="canvas" hidden>
-          <p class="eyebrow">Inspector</p>
-          <h2>Canvas Inspector</h2>
-          <p>Reserve this panel for object metadata, filters, and detail summaries.</p>
+          <p class="eyebrow" data-i18n="inspector.eyebrow">Inspector</p>
+          <h2 data-i18n="inspector.canvas.title">Canvas Inspector</h2>
+          <p data-i18n="inspector.canvas.description">Reserve this panel for object metadata, filters, and detail summaries.</p>
         </section>
         <section class="inspector-surface" data-inspector-view="settings" hidden>
-          <p class="eyebrow">Inspector</p>
-          <h2>Settings Notes</h2>
-          <p>Preferences persist across shell switches, and Debug remains nested inside Settings.</p>
+          <p class="eyebrow" data-i18n="inspector.eyebrow">Inspector</p>
+          <h2 data-i18n="inspector.settings.title">Settings Notes</h2>
+          <p data-i18n="inspector.settings.description">Preferences persist across shell switches, and Debug remains nested inside Settings.</p>
         </section>
       </aside>
     </div>
