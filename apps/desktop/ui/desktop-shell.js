@@ -4,6 +4,7 @@ import {
   loadLocaleDictionaries,
   normalizeLocale,
 } from "./i18n/translator.js";
+import { persistThemePreference } from "./theme-preference.js";
 
 // Preferences and translator state
 const DEFAULT_PREFERENCES = {
@@ -309,15 +310,20 @@ async function setTheme(theme, options = {}) {
   const persist = options.persist !== false;
   const nextTheme = normalizeTheme(theme);
 
+  if (persist) {
+    await persistThemePreference({
+      preferences: state.preferences,
+      nextTheme,
+      applyTheme: applyDesktopThemePreference,
+      renderThemeSelector,
+      savePreferences: saveDesktopPreferences,
+    });
+    return;
+  }
+
   state.preferences.theme = nextTheme;
   applyDesktopThemePreference();
   renderThemeSelector();
-
-  if (persist) {
-    await saveDesktopPreferences();
-    applyDesktopThemePreference();
-    renderThemeSelector();
-  }
 }
 
 // Timeline and config helpers
