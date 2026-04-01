@@ -8,63 +8,138 @@
   </head>
   <body class="desktop-shell-body">
     <div class="app-shell">
-      <header class="top-nav">
-        <strong data-i18n="shell.hero.title">Distilllab Desktop</strong>
-        <nav class="debug-cluster" aria-label="Desktop sections">
-          <span data-i18n="nav.chat">Chat</span>
-          <span data-i18n="nav.canvas">Canvas</span>
-          <span data-i18n="nav.settings">Settings</span>
-          <span data-i18n="nav.debug">Debug</span>
-        </nav>
+      <header class="top-nav shell-chrome surface">
+        <div class="top-nav-primary" role="tablist" aria-label="Primary views">
+          <button id="tab-chat" class="shell-tab" type="button" data-view-target="chatDraft" data-i18n="nav.chat" role="tab" aria-selected="true">
+            Chat
+          </button>
+          <button id="tab-canvas" class="shell-tab" type="button" data-view-target="canvasGlobal" data-i18n="nav.canvas" role="tab" aria-selected="false">
+            Canvas
+          </button>
+        </div>
+        <div class="top-nav-actions">
+          <button id="open-settings-button" class="secondary-button" type="button" data-view-target="settingsGeneral" data-i18n="nav.settings" aria-haspopup="true">
+            Settings
+          </button>
+        </div>
       </header>
-      <div class="center-content">
-        <main class="settings-page-shell debug-stack">
-          <section class="panel surface-muted debug-stack">
-            <div>
-              <h1 data-i18n="shell.hero.title">Distilllab Desktop</h1>
-              <p data-i18n="shell.hero.description">
-                Phase 0 keeps the existing debug controls intact while adding lightweight shell labels for navigation, draft sessions, canvas previews, and settings.
-              </p>
+
+      <aside class="left-rail shell-chrome surface" aria-label="Primary navigation rail">
+        <section class="brand-block surface-strong">
+          <div class="brand-mark" aria-hidden="true">
+            <span class="brand-mark-core"></span>
+            <span class="brand-mark-edge brand-mark-edge-a"></span>
+            <span class="brand-mark-edge brand-mark-edge-b"></span>
+          </div>
+          <div class="brand-copy">
+            <p class="eyebrow">Distilllab</p>
+            <h1 class="brand-title">Distilllab</h1>
+            <p class="brand-tagline">Distill Work Into Structure</p>
+          </div>
+        </section>
+
+        <section class="rail-surface" data-rail-view="chat">
+          <div class="rail-header">
+            <h2>Sessions</h2>
+            <p>Keep draft and active conversation states reachable without losing the selected session.</p>
+          </div>
+          <nav id="chat-session-rail" class="rail-list" aria-label="Chat sessions">
+            <button class="rail-item" type="button" data-view-target="chatDraft" data-session="draft">Draft Session</button>
+            <button class="rail-item" type="button" data-view-target="chatActive" data-session="active">Active Session</button>
+          </nav>
+        </section>
+
+        <section class="rail-surface" data-rail-view="canvas" hidden>
+          <div class="rail-header">
+            <h2>Canvas Scope</h2>
+            <p>Switch between global structure and a focused detail view.</p>
+          </div>
+          <nav id="canvas-scope-rail" class="rail-list" aria-label="Canvas scopes">
+            <button class="rail-item" type="button" data-view-target="canvasGlobal" data-canvas-scope="global">Global Structure</button>
+            <button class="rail-item" type="button" data-view-target="canvasDetail" data-canvas-scope="detail">Focused Detail</button>
+          </nav>
+        </section>
+
+        <section class="rail-surface" data-rail-view="settings" hidden>
+          <div class="rail-header">
+            <h2>Settings</h2>
+            <p>General preferences stay separate from the migrated debug workspace.</p>
+          </div>
+          <nav id="settings-nav-rail" class="rail-list" aria-label="Settings sections">
+            <button class="rail-item" type="button" data-view-target="settingsGeneral" data-settings-section="general">General</button>
+            <button class="rail-item" type="button" data-view-target="settingsDebug" data-settings-section="debug">Debug</button>
+          </nav>
+        </section>
+      </aside>
+
+      <main class="center-content" aria-live="polite">
+        <section id="chat-draft-view" class="view-panel" data-view="chatDraft">
+          <div class="view-copy surface">
+            <p class="eyebrow">Chat Workbench</p>
+            <h2>Draft Session</h2>
+            <p>Use this shell surface for the next composed prompt before an active run is underway.</p>
+          </div>
+          <section class="panel surface-muted">
+            <h3>Draft Composer Placeholder</h3>
+            <p>Later tasks can replace this region with the full timeline and composer without changing shell routing.</p>
+          </section>
+        </section>
+
+        <section id="chat-active-view" class="view-panel" data-view="chatActive" hidden>
+          <div class="view-copy surface">
+            <p class="eyebrow">Chat Workbench</p>
+            <h2>Active Session</h2>
+            <p>The selected session stays active while the shell switches between chat, canvas, and settings surfaces.</p>
+          </div>
+          <section class="panel surface-muted">
+            <h3>Timeline Placeholder</h3>
+            <p>This reserved center region will host the formal conversation timeline in later tasks.</p>
+          </section>
+        </section>
+
+        <section id="canvas-global-view" class="view-panel" data-view="canvasGlobal" hidden>
+          <div class="view-copy surface">
+            <p class="eyebrow">Canvas Space</p>
+            <h2 data-i18n="canvas.global.title">Canvas Global View</h2>
+            <p data-i18n="canvas.global.description">The shell reserves a dedicated object-space surface for global structure and cross-project shape.</p>
+          </div>
+          <section class="panel surface-muted">
+            <h3>Global Structure Placeholder</h3>
+            <p>Later canvas tasks can fill this viewport without reworking navigation or inspector placement.</p>
+          </section>
+        </section>
+
+        <section id="canvas-detail-view" class="view-panel" data-view="canvasDetail" hidden>
+          <div class="view-copy surface">
+            <p class="eyebrow">Canvas Space</p>
+            <h2 data-i18n="canvas.detail.title">Canvas Detail View</h2>
+            <p data-i18n="canvas.detail.description">Focused detail view keeps room for future object inspection and scoped emphasis.</p>
+          </div>
+          <section class="panel surface-muted">
+            <h3>Detail Focus Placeholder</h3>
+            <p>This region is intentionally lightweight while preserving the real shell behavior for later iterations.</p>
+          </section>
+        </section>
+
+        <section id="settings-general-view" class="view-panel settings-surface" data-view="settingsGeneral" hidden>
+          <section class="settings-hero surface-muted">
+            <div class="brand-inline">
+              <div class="brand-mark brand-mark-small" aria-hidden="true">
+                <span class="brand-mark-core"></span>
+                <span class="brand-mark-edge brand-mark-edge-a"></span>
+                <span class="brand-mark-edge brand-mark-edge-b"></span>
+              </div>
+              <div>
+                <p class="eyebrow">Distilllab</p>
+                <h2 data-i18n="settings.title">Settings</h2>
+                <p class="brand-tagline">Distill Work Into Structure</p>
+              </div>
             </div>
-            <div class="form-grid">
-              <section class="panel surface-strong">
-                <h2 data-i18n="draft.title">New Session</h2>
-                <p data-i18n="draft.description">
-                  Start from a clean draft session before the full desktop shell lands.
-                </p>
-              </section>
-              <section class="panel surface-strong">
-                <h2 data-i18n="run.title">Active Run</h2>
-                <p data-i18n="run.description">
-                  Active run rendering stays lightweight for now while the shell proves both themes across generated output surfaces.
-                </p>
-              </section>
-              <section class="panel surface-strong">
-                <h2 data-i18n="canvas.global.title">Canvas Global View</h2>
-                <p data-i18n="canvas.global.description">
-                  Canvas stays lightweight for now, but the shell already exposes its translated global entry point.
-                </p>
-              </section>
-              <section class="panel surface-strong">
-                <h2 data-i18n="canvas.detail.title">Canvas Detail View</h2>
-                <p data-i18n="canvas.detail.description">
-                  Detail placeholders keep the future canvas inspector visible while theme coverage expands.
-                </p>
-              </section>
-              <section class="panel surface-strong">
-                <h2 data-i18n="settings.card.title">Settings Surface</h2>
-                <p data-i18n="settings.card.description">
-                  Preferences stay in Settings so later tasks can expand this area without moving the debug tools again.
-                </p>
-              </section>
-            </div>
+            <p data-i18n="settings.description">Appearance and language live in the non-debug settings section and rerender visible labels immediately.</p>
           </section>
 
           <section class="panel">
-            <h2 data-i18n="settings.title">Settings</h2>
-            <p data-i18n="settings.description">
-              Appearance and language live in the non-debug settings section and rerender visible labels immediately.
-            </p>
+            <h3>General</h3>
             <div class="form-grid">
               <div class="field">
                 <label for="locale-selector" data-i18n="settings.language.label">Language</label>
@@ -80,21 +155,30 @@
                   <option value="light">Light</option>
                   <option value="dark">Dark</option>
                 </select>
-                <p data-i18n="settings.appearance.theme.description">
-                  Theme changes apply immediately and stay saved in desktop UI preferences.
-                </p>
+                <p data-i18n="settings.appearance.theme.description">Theme changes apply immediately and stay saved in desktop UI preferences.</p>
               </div>
             </div>
           </section>
+        </section>
+
+        <section id="settings-debug-view" class="view-panel settings-surface" data-view="settingsDebug" hidden>
+          <section class="settings-hero surface-muted">
+            <div class="brand-inline">
+              <div class="brand-mark brand-mark-small" aria-hidden="true">
+                <span class="brand-mark-core"></span>
+                <span class="brand-mark-edge brand-mark-edge-a"></span>
+                <span class="brand-mark-edge brand-mark-edge-b"></span>
+              </div>
+              <div>
+                <p class="eyebrow">Distilllab</p>
+                <h2 data-i18n="settings.debug">Debug</h2>
+                <p class="brand-tagline">Distill Work Into Structure</p>
+              </div>
+            </div>
+            <p data-i18n="debug.description">The current Phase 0 page stays available here while the future shell is still under construction.</p>
+          </section>
 
           <section id="debug-shell" class="debug-stack">
-            <section class="panel">
-              <h2 data-i18n="settings.debug">Debug</h2>
-              <p data-i18n="debug.description">
-                The current Phase 0 page stays available here while the future shell is still under construction.
-              </p>
-            </section>
-
             <section class="panel">
               <div class="debug-cluster">
                 <button id="create-run-button" type="button" data-i18n="debug.actions.createRun">Create Demo Run</button>
@@ -119,10 +203,8 @@
             </section>
 
             <section class="panel">
-              <h2 data-i18n="debug.panel.config.title">LLM Config Bar</h2>
-              <p data-i18n="debug.panel.config.description">
-                All session and debug LLM calls read from the current provider and model configured here.
-              </p>
+              <h3 data-i18n="debug.panel.config.title">LLM Config Bar</h3>
+              <p data-i18n="debug.panel.config.description">All session and debug LLM calls read from the current provider and model configured here.</p>
               <div class="form-grid">
                 <div class="field">
                   <label for="config-provider-input" data-i18n="debug.config.provider">Current Provider</label>
@@ -166,15 +248,13 @@
             </section>
 
             <section class="panel">
-              <h2 data-i18n="debug.panel.configOutput">Config Output</h2>
+              <h3 data-i18n="debug.panel.configOutput">Config Output</h3>
               <pre id="config-result">No config loaded yet.</pre>
             </section>
 
             <section class="panel">
-              <h2 data-i18n="debug.panel.timeline.title">Session Timeline</h2>
-              <p data-i18n="debug.panel.timeline.description">
-                Use the formal session flow below to send messages and inspect the current timeline.
-              </p>
+              <h3 data-i18n="debug.panel.timeline.title">Session Timeline</h3>
+              <p data-i18n="debug.panel.timeline.description">Use the formal session flow below to send messages and inspect the current timeline.</p>
               <div class="form-grid">
                 <div class="field field-full">
                   <label for="timeline-session-selector" data-i18n="debug.timeline.existingSessions">Existing Sessions</label>
@@ -202,17 +282,35 @@
             </section>
 
             <section class="panel">
-              <h2 data-i18n="debug.panel.timelineOutput">Timeline Output</h2>
+              <h3 data-i18n="debug.panel.timelineOutput">Timeline Output</h3>
               <pre id="timeline-result">No timeline loaded yet.</pre>
             </section>
 
             <section class="panel">
-              <h2 data-i18n="debug.panel.output">Output</h2>
+              <h3 data-i18n="debug.panel.output">Output</h3>
               <pre id="result">No result yet.</pre>
             </section>
           </section>
-        </main>
-      </div>
+        </section>
+      </main>
+
+      <aside class="right-inspector shell-chrome surface" aria-label="Inspector">
+        <section class="inspector-surface" data-inspector-view="chat">
+          <p class="eyebrow">Inspector</p>
+          <h2>Chat Inspector</h2>
+          <p>Keep room for session context, pinned excerpts, and structured outputs.</p>
+        </section>
+        <section class="inspector-surface" data-inspector-view="canvas" hidden>
+          <p class="eyebrow">Inspector</p>
+          <h2>Canvas Inspector</h2>
+          <p>Reserve this panel for object metadata, filters, and detail summaries.</p>
+        </section>
+        <section class="inspector-surface" data-inspector-view="settings" hidden>
+          <p class="eyebrow">Inspector</p>
+          <h2>Settings Notes</h2>
+          <p>Preferences persist across shell switches, and Debug remains nested inside Settings.</p>
+        </section>
+      </aside>
     </div>
     <script type="module" src="./desktop-shell.js"></script>
   </body>

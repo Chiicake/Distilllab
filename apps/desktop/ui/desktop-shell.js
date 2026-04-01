@@ -6,24 +6,50 @@ import {
 } from "./i18n/translator.js";
 import { persistThemePreference } from "./theme-preference.js";
 
-// Preferences and translator state
 const DEFAULT_PREFERENCES = {
   theme: "system",
   locale: DEFAULT_LOCALE,
   showDebugPanel: true,
 };
 
+const DEFAULT_VIEW_STATE = {
+  currentView: "chatDraft",
+  selectedSession: "draft",
+  selectedCanvasScope: "global",
+  selectedSettingsSection: "general",
+};
+
+const VIEW_DEFINITIONS = {
+  chatDraft: { family: "chat", topTab: "chat", rail: "chat", inspector: "chat", session: "draft" },
+  chatActive: { family: "chat", topTab: "chat", rail: "chat", inspector: "chat", session: "active" },
+  canvasGlobal: { family: "canvas", topTab: "canvas", rail: "canvas", inspector: "canvas", canvasScope: "global" },
+  canvasDetail: { family: "canvas", topTab: "canvas", rail: "canvas", inspector: "canvas", canvasScope: "detail" },
+  settingsGeneral: { family: "settings", topTab: null, rail: "settings", inspector: "settings", settingsSection: "general" },
+  settingsDebug: { family: "settings", topTab: null, rail: "settings", inspector: "settings", settingsSection: "debug" },
+};
+
 const state = {
   dictionaries: {},
   preferences: { ...DEFAULT_PREFERENCES },
+  view: { ...DEFAULT_VIEW_STATE },
 };
 
 let translateImpl = function t(key) {
   throw new Error(`Missing translator for ${key}`);
 };
 
-// DOM bindings
 const ui = {
+  root: document.documentElement,
+  tabChat: getElement("tab-chat"),
+  tabCanvas: getElement("tab-canvas"),
+  settingsButton: getElement("open-settings-button"),
+  railButtons: Array.from(document.querySelectorAll("[data-view-target]")),
+  railSections: Array.from(document.querySelectorAll("[data-rail-view]")),
+  inspectorSections: Array.from(document.querySelectorAll("[data-inspector-view]")),
+  viewPanels: Array.from(document.querySelectorAll("[data-view]")),
+  localeSelector: getElement("locale-selector"),
+  themeSelector: getElement("theme-selector"),
+  debugShell: getElement("debug-shell"),
   runButton: getElement("create-run-button"),
   sessionButton: getElement("create-session-button"),
   sourceButton: getElement("create-source-button"),
@@ -39,9 +65,6 @@ const ui = {
   listAssetsButton: getElement("list-assets-button"),
   listChunksButton: getElement("list-chunks-button"),
   sourceIdInput: getElement("source-id-input"),
-  localeSelector: getElement("locale-selector"),
-  themeSelector: getElement("theme-selector"),
-  debugShell: getElement("debug-shell"),
   configProviderInput: getElement("config-provider-input"),
   configModelInput: getElement("config-model-input"),
   configProviderNameInput: getElement("config-provider-name-input"),
@@ -70,6 +93,16 @@ const ui = {
 };
 
 const {
+  tabChat,
+  tabCanvas,
+  settingsButton,
+  railButtons,
+  railSections,
+  inspectorSections,
+  viewPanels,
+  localeSelector,
+  themeSelector,
+  debugShell,
   runButton,
   sessionButton,
   sourceButton,
@@ -85,9 +118,6 @@ const {
   listAssetsButton,
   listChunksButton,
   sourceIdInput,
-  localeSelector,
-  themeSelector,
-  debugShell,
   configProviderInput,
   configModelInput,
   configProviderNameInput,
@@ -115,13 +145,12 @@ const {
   result,
 } = ui;
 
+configResult.dataset.defaultState = "true";
+timelineResult.dataset.defaultState = "true";
+result.dataset.defaultState = "true";
+
 function t(key, replacements) {
   return translateImpl(key, replacements);
-}
-
-// Shared utilities
-function normalizeTheme(theme) {
-  return ["system", "light", "dark"].includes(theme) ? theme : DEFAULT_PREFERENCES.theme;
 }
 
 function getElement(id) {
@@ -134,11 +163,18 @@ function getElement(id) {
   return element;
 }
 
-configResult.dataset.defaultState = "true";
-timelineResult.dataset.defaultState = "true";
-result.dataset.defaultState = "true";
+function normalizeTheme(theme) {
+  return ["system", "light", "dark"].includes(theme) ? theme : DEFAULT_PREFERENCES.theme;
+}
 
-// Render helpers
+function normalizeView(viewId) {
+  return VIEW_DEFINITIONS[viewId] ? viewId : DEFAULT_VIEW_STATE.currentView;
+}
+
+function getViewDefinition(viewId) {
+  return VIEW_DEFINITIONS[normalizeView(viewId)];
+}
+
 function setText(target, message) {
   target.textContent = message;
 }
@@ -193,25 +229,6 @@ function renderThemeSelector() {
   themeSelector.value = state.preferences.theme;
 }
 
-function renderStaticTranslations() {
-  document.documentElement.lang = state.preferences.locale;
-  document.title = t("shell.hero.title");
-
-  for (const element of document.querySelectorAll("[data-i18n]")) {
-    setText(element, t(element.dataset.i18n));
-  }
-
-  for (const element of document.querySelectorAll("[data-i18n-placeholder]")) {
-    element.setAttribute("placeholder", t(element.dataset.i18nPlaceholder));
-  }
-
-  renderLocaleSelector();
-  renderThemeSelector();
-  renderTimelineSelectorPlaceholder();
-  renderDefaultStatusText();
-  debugShell.hidden = !state.preferences.showDebugPanel;
-}
-
 function renderDefaultStatusText() {
   if (configResult.dataset.defaultState !== "false") {
     setDefaultText(configResult, "status.noConfig");
@@ -241,6 +258,25 @@ function renderTimelineSelectorPlaceholder() {
   timelineSessionSelector.insertBefore(placeholder, timelineSessionSelector.firstChild);
 }
 
+function renderStaticTranslations() {
+  document.documentElement.lang = state.preferences.locale;
+  document.title = "Distilllab";
+
+  for (const element of document.querySelectorAll("[data-i18n]")) {
+    setText(element, t(element.dataset.i18n));
+  }
+
+  for (const element of document.querySelectorAll("[data-i18n-placeholder]")) {
+    element.setAttribute("placeholder", t(element.dataset.i18nPlaceholder));
+  }
+
+  renderLocaleSelector();
+  renderThemeSelector();
+  renderTimelineSelectorPlaceholder();
+  renderDefaultStatusText();
+  renderShellView();
+}
+
 function updateTranslator() {
   translateImpl = createTranslator(state.dictionaries, state.preferences.locale);
 }
@@ -255,7 +291,78 @@ function resolveTheme(theme) {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-// Preferences and Tauri bridge
+function renderTopTabs(viewDefinition) {
+  const topTabs = [
+    [tabChat, "chat"],
+    [tabCanvas, "canvas"],
+  ];
+
+  for (const [button, tabId] of topTabs) {
+    const active = viewDefinition.topTab === tabId;
+    button.dataset.active = String(active);
+    button.setAttribute("aria-selected", String(active));
+  }
+
+  settingsButton.dataset.active = String(viewDefinition.family === "settings");
+  settingsButton.setAttribute("aria-expanded", String(viewDefinition.family === "settings"));
+}
+
+function renderViewPanels(currentView) {
+  for (const panel of viewPanels) {
+    panel.hidden = panel.dataset.view !== currentView;
+  }
+}
+
+function renderSurfaceSections(attributeName, activeValue, sections) {
+  for (const section of sections) {
+    section.hidden = section.dataset[attributeName] !== activeValue;
+  }
+}
+
+function renderRailSelection(currentView) {
+  for (const button of railButtons) {
+    const targetView = normalizeView(button.dataset.viewTarget);
+    const active = targetView === currentView;
+    button.dataset.active = String(active);
+    if (button.classList.contains("rail-item")) {
+      button.setAttribute("aria-current", active ? "page" : "false");
+    }
+  }
+}
+
+function renderShellView() {
+  const currentView = normalizeView(state.view.currentView);
+  const viewDefinition = getViewDefinition(currentView);
+
+  renderTopTabs(viewDefinition);
+  renderViewPanels(currentView);
+  renderSurfaceSections("railView", viewDefinition.rail, railSections);
+  renderSurfaceSections("inspectorView", viewDefinition.inspector, inspectorSections);
+  renderRailSelection(currentView);
+  debugShell.hidden = !state.preferences.showDebugPanel || currentView !== "settingsDebug";
+}
+
+function transitionToView(viewId) {
+  const currentView = normalizeView(viewId);
+  const definition = getViewDefinition(currentView);
+
+  state.view.currentView = currentView;
+
+  if (definition.session) {
+    state.view.selectedSession = definition.session;
+  }
+
+  if (definition.canvasScope) {
+    state.view.selectedCanvasScope = definition.canvasScope;
+  }
+
+  if (definition.settingsSection) {
+    state.view.selectedSettingsSection = definition.settingsSection;
+  }
+
+  renderShellView();
+}
+
 async function invokeTauri(commandName, args) {
   const invoke = window.__TAURI_INTERNALS__?.invoke;
 
@@ -326,7 +433,6 @@ async function setTheme(theme, options = {}) {
   renderThemeSelector();
 }
 
-// Timeline and config helpers
 async function setLocale(locale, options = {}) {
   const persist = options.persist !== false;
   const nextLocale = normalizeLocale(locale);
@@ -393,6 +499,7 @@ async function switchToSession(sessionId) {
   }
 
   timelineSessionIdInput.value = sessionId;
+  transitionToView("chatActive");
   const selectedOption = timelineSessionSelector.selectedOptions?.[0];
   if (selectedOption && selectedOption.value) {
     setStatusText(result, "status.switchedToSession", {
@@ -496,8 +603,33 @@ async function loadConfigSummary() {
   }
 }
 
-// Event wiring
+function bindShellViewEvents() {
+  tabChat.addEventListener("click", () => {
+    transitionToView(state.view.selectedSession === "active" ? "chatActive" : "chatDraft");
+  });
+
+  tabCanvas.addEventListener("click", () => {
+    transitionToView(state.view.selectedCanvasScope === "detail" ? "canvasDetail" : "canvasGlobal");
+  });
+
+  settingsButton.addEventListener("click", () => {
+    transitionToView(state.view.selectedSettingsSection === "debug" ? "settingsDebug" : "settingsGeneral");
+  });
+
+  for (const button of railButtons) {
+    if (!button.classList.contains("rail-item")) {
+      continue;
+    }
+
+    button.addEventListener("click", () => {
+      transitionToView(button.dataset.viewTarget);
+    });
+  }
+}
+
 function bindShellEvents() {
+  bindShellViewEvents();
+
   localeSelector.addEventListener("change", async () => {
     try {
       await setLocale(localeSelector.value);
@@ -681,9 +813,11 @@ function bindShellEvents() {
 
       const sessionId = match[1];
       timelineSessionIdInput.value = sessionId;
+      state.view.selectedSession = "active";
       setStatusText(timelineResult, "status.usingSession", { sessionId });
       await refreshSessionSelector();
       timelineSessionSelector.value = sessionId;
+      transitionToView("chatActive");
       await refreshTimeline();
     } catch (error) {
       setStatusText(timelineResult, "status.error.generic", { error });
@@ -714,6 +848,7 @@ function bindShellEvents() {
       return;
     }
 
+    state.view.selectedSession = "active";
     setStatusText(timelineResult, "status.sendingSessionMessage");
     setStatusText(result, "status.previewingSessionIntake");
 
@@ -738,6 +873,7 @@ function bindShellEvents() {
       await refreshSessionSelector();
       timelineSessionSelector.value = sessionId;
       timelineMessageInput.value = "";
+      transitionToView("chatActive");
     } catch (error) {
       setStatusText(timelineResult, "status.error.generic", { error });
       setStatusText(result, "status.error.generic", { error });
@@ -819,7 +955,6 @@ function bindShellEvents() {
   });
 }
 
-// Bootstrap
 async function bootstrap() {
   state.dictionaries = await loadLocaleDictionaries();
   await loadDesktopPreferences();
@@ -831,9 +966,57 @@ async function bootstrap() {
   await refreshSessionSelector();
 }
 
-if (typeof window !== "undefined" && typeof document !== "undefined") {
+if (
+  typeof window !== "undefined"
+  && typeof document !== "undefined"
+  && window.__DISTILLLAB_SKIP_DESKTOP_BOOTSTRAP__ !== true
+) {
   bootstrap().catch((error) => {
     console.error("Failed to bootstrap desktop shell.", error);
     result.textContent = String(error);
   });
+}
+
+export function createShellViewState(initial = {}) {
+  const viewState = {
+    ...DEFAULT_VIEW_STATE,
+    ...initial,
+  };
+
+  return {
+    get currentView() {
+      return normalizeView(viewState.currentView);
+    },
+    get selectedSession() {
+      return viewState.selectedSession;
+    },
+    get selectedCanvasScope() {
+      return viewState.selectedCanvasScope;
+    },
+    get selectedSettingsSection() {
+      return viewState.selectedSettingsSection;
+    },
+    transition(nextView) {
+      const normalizedView = normalizeView(nextView);
+      const definition = getViewDefinition(normalizedView);
+
+      viewState.currentView = normalizedView;
+      if (definition.session) {
+        viewState.selectedSession = definition.session;
+      }
+      if (definition.canvasScope) {
+        viewState.selectedCanvasScope = definition.canvasScope;
+      }
+      if (definition.settingsSection) {
+        viewState.selectedSettingsSection = definition.settingsSection;
+      }
+
+      return {
+        currentView: viewState.currentView,
+        selectedSession: viewState.selectedSession,
+        selectedCanvasScope: viewState.selectedCanvasScope,
+        selectedSettingsSection: viewState.selectedSettingsSection,
+      };
+    },
+  };
 }
