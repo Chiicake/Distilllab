@@ -8,6 +8,7 @@ import {
   deriveChatMockStateFromView,
   deriveDraftPromptText,
   extractCreatedSessionId,
+  getNextLocalePreferences,
   isDebugPanelVisible,
   parseTimelineEntries,
   reconcileSelectedSessionId,
@@ -201,4 +202,24 @@ test("debug panel visibility follows preference in non-development contexts", ()
 
 test("debug panel visibility stays enabled in development contexts", () => {
   assert.equal(isDebugPanelVisible({ showDebugPanel: false }, true), true);
+});
+
+test("next locale preferences apply normalized locale while preserving other settings", () => {
+  assert.deepEqual(
+    getNextLocalePreferences(
+      { theme: "dark", locale: "en", showDebugPanel: false },
+      "zh-CN",
+    ),
+    { theme: "dark", locale: "zh-CN", showDebugPanel: false },
+  );
+});
+
+test("next locale preferences fall back to default locale for invalid input", () => {
+  assert.deepEqual(
+    getNextLocalePreferences(
+      { theme: "system", locale: "zh-CN", showDebugPanel: true },
+      "fr",
+    ),
+    { theme: "system", locale: "en", showDebugPanel: true },
+  );
 });

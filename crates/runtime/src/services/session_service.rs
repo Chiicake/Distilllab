@@ -443,6 +443,31 @@ pub fn create_demo_session(runtime: &AppRuntime) -> Result<Session, RuntimeError
     Ok(session)
 }
 
+pub fn create_session(runtime: &AppRuntime) -> Result<Session, RuntimeError> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    let now = Utc::now().to_string();
+    let session = Session {
+        id: format!("session-{}", Uuid::new_v4()),
+        title: "Untitled Session".to_string(),
+        status: SessionStatus::Active,
+        current_intent: "idle".to_string(),
+        current_object_type: "none".to_string(),
+        current_object_id: "none".to_string(),
+        summary: "Session created".to_string(),
+        started_at: now.clone(),
+        updated_at: now.clone(),
+        last_user_message_at: now.clone(),
+        last_run_at: now.clone(),
+        last_compacted_at: now,
+        metadata_json: "{}".to_string(),
+    };
+
+    insert_session(&conn, &session)?;
+    Ok(session)
+}
+
 pub fn list_sessions(runtime: &AppRuntime) -> Result<Vec<Session>, RuntimeError> {
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
@@ -465,7 +490,7 @@ pub fn list_session_messages(
 #[cfg(test)]
 mod tests {
     use super::{
-        LlmSessionDebugRequest, SessionMessageRequest, create_demo_session,
+        LlmSessionDebugRequest, SessionMessageRequest, create_demo_session, create_session,
         decide_demo_session_message, decide_llm_session_message,
         decide_llm_session_message_with_config, preview_session_intake,
         preview_session_intake_with_config, send_session_message,
@@ -523,6 +548,19 @@ mod tests {
 
         assert!(title.contains("Session selector") || title.contains("Title lifecycle"));
         assert!(!title.contains("Short placeholder"));
+    }
+
+    #[test]
+    fn create_session_uses_normal_non_demo_defaults() {
+        let runtime = AppRuntime::new(format!("test-create-session-{}.db", Uuid::new_v4()));
+
+        let session = create_session(&runtime).expect("runtime should create a normal session");
+
+        assert_eq!(session.status.as_str(), "active");
+        assert_eq!(session.title, "Untitled Session");
+        assert_eq!(session.summary, "Session created");
+        assert_ne!(session.title, "Demo Session");
+        assert_ne!(session.summary, "Demo session created");
     }
 
     #[test]

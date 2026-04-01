@@ -2,6 +2,7 @@ use agent::{LlmProviderConfig, SessionActionType, SessionAgentDecision};
 use runtime::{
     AppConfig, AppRuntime, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
     ProviderOptions, SessionIntakePreview, SessionMessageRequest, default_app_config_path,
+    create_session,
     delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
     resolve_current_provider_model, save_app_config_to_path, set_current_provider_model,
     upsert_provider_entry,
@@ -440,6 +441,17 @@ fn create_demo_source() -> Result<String, String> {
 fn create_demo_session() -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
     let session = runtime::create_demo_session(&runtime).map_err(|e| e.to_string())?;
+    Ok(format!(
+        "created session: {} [{}]",
+        session.id,
+        session.status.as_str()
+    ))
+}
+
+#[tauri::command]
+fn create_session_command() -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let session = create_session(&runtime).map_err(|e| e.to_string())?;
     Ok(format!(
         "created session: {} [{}]",
         session.id,
@@ -924,6 +936,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             create_demo_run,
             create_demo_session,
+            create_session_command,
             create_demo_source,
             list_runs,
             list_sessions,

@@ -791,6 +791,13 @@ async function saveDesktopPreferences() {
   };
 }
 
+function getNextLocalePreferences(preferences, locale) {
+  return {
+    ...preferences,
+    locale: normalizeLocale(locale),
+  };
+}
+
 function applyDesktopThemePreference() {
   const resolvedTheme = resolveTheme(state.preferences.theme);
 
@@ -820,16 +827,26 @@ async function setTheme(theme, options = {}) {
 
 async function setLocale(locale, options = {}) {
   const persist = options.persist !== false;
-  const nextLocale = normalizeLocale(locale);
+  const previousPreferences = { ...state.preferences };
+  const nextPreferences = getNextLocalePreferences(state.preferences, locale);
 
-  state.preferences.locale = nextLocale;
+  state.preferences = nextPreferences;
   updateTranslator();
   renderStaticTranslations();
 
-  if (persist) {
+  if (!persist) {
+    return;
+  }
+
+  try {
     await saveDesktopPreferences();
     updateTranslator();
     renderStaticTranslations();
+  } catch (error) {
+    state.preferences = previousPreferences;
+    updateTranslator();
+    renderStaticTranslations();
+    throw error;
   }
 }
 
@@ -994,7 +1011,7 @@ async function sendDraftShellMessage() {
   setStatusText(timelineResult, "status.creatingSession");
 
   try {
-    const createResponse = await invokeTauri("create_demo_session");
+    const createResponse = await invokeTauri("create_session_command");
     const sessionId = extractCreatedSessionId(createResponse);
 
     if (!sessionId) {
@@ -1603,6 +1620,7 @@ export {
   deriveChatStateFromView,
   deriveChatMockStateFromView,
   extractCreatedSessionId,
+  getNextLocalePreferences,
   isDebugPanelVisible,
   parseTimelineEntries,
   reconcileSelectedSessionId,
