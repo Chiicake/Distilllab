@@ -8,634 +8,196 @@
   </head>
   <body class="desktop-shell-body">
     <div class="app-shell">
+      <header class="top-nav">
+        <strong data-i18n="shell.hero.title">Distilllab Desktop</strong>
+        <nav class="debug-cluster" aria-label="Desktop sections">
+          <span data-i18n="nav.chat">Chat</span>
+          <span data-i18n="nav.canvas">Canvas</span>
+          <span data-i18n="nav.settings">Settings</span>
+          <span data-i18n="nav.debug">Debug</span>
+        </nav>
+      </header>
       <div class="center-content">
-        <main class="settings-page-shell debug-panel-container">
-      <h1>Distilllab</h1>
-      <p>Tauri shell initialized. This is the temporary Phase 0 desktop page.</p>
-      <p>Next we will replace this with the <code>Home / Runtime Console</code>.</p>
-      <button id="create-run-button">Create Demo Run</button>
-      <button id="create-session-button">Create Demo Session</button>
-      <button id="create-source-button">Create Demo Source</button>
-      <button id="chunk-source-button">Chunk Demo Source</button>
-      <button id="extract-work-items-button">Extract Demo Work Items</button>
-      <button id="group-project-button">Group Demo Project</button>
-      <button id="build-assets-button">Build Demo Assets</button>
-      <button id="list-runs-button">List Runs</button>
-      <button id="list-sessions-button">List Sessions</button>
-      <button id="list-sources-button">List Sources</button>
-      <button id="list-work-items-button">List Work Items</button>
-      <button id="list-projects-button">List Projects</button>
-      <button id="list-assets-button">List Assets</button>
-      <p>
-        <label for="source-id-input">Source ID for chunk lookup:</label>
-        <input id="source-id-input" type="text" placeholder="source-..." />
-        <button id="list-chunks-button">List Chunks</button>
-      </p>
-      <div class="panel">
-        <h2>LLM Config Bar</h2>
-        <p>All session and debug LLM calls read from the current provider and model configured here.</p>
-        <div class="form-grid">
-          <div class="field">
-            <label for="config-provider-input">Current Provider</label>
-            <select id="config-provider-input"></select>
-          </div>
-          <div class="field">
-            <label for="config-model-input">Current Model</label>
-            <select id="config-model-input"></select>
-          </div>
-          <div class="field">
-            <label for="config-provider-name-input">Provider Name</label>
-            <input id="config-provider-name-input" type="text" placeholder="Ice" />
-          </div>
-          <div class="field">
-            <label for="config-provider-npm-input">Provider NPM</label>
-            <input id="config-provider-npm-input" type="text" value="@ai-sdk/openai-compatible" />
-          </div>
-          <div class="field field-full">
-            <label for="config-base-url-input">Base URL</label>
-            <input id="config-base-url-input" type="text" placeholder="https://ice.v.ua/v1" />
-          </div>
-          <div class="field field-full">
-            <label for="config-api-key-input">API Key</label>
-            <input id="config-api-key-input" type="password" placeholder="{file:secrets/ice.key} or secret value" />
-          </div>
-          <div class="field field-full">
-            <label for="config-provider-json-input">Advanced Provider JSON</label>
-            <textarea id="config-provider-json-input" placeholder='Optional raw provider JSON, compatible with opencode provider entries'></textarea>
-          </div>
-          <div class="field field-full">
-            <label for="config-import-path-input">OpenCode Config Path</label>
-            <input id="config-import-path-input" type="text" placeholder="optional, defaults to ~/.config/opencode/opencode.json" />
-          </div>
-        </div>
-        <button id="config-load-button">Load Config</button>
-        <button id="config-new-button">New Provider</button>
-        <button id="config-save-button">Save Current Provider</button>
-        <button id="config-delete-button">Delete Provider</button>
-        <button id="config-import-button">Import From OpenCode</button>
-        <button id="config-test-button">Test Current Provider</button>
-      </div>
-      <div class="panel">
-        <h2>Config Output</h2>
-        <pre id="config-result">No config loaded yet.</pre>
-      </div>
-      <div class="panel">
-        <h2>Session Timeline</h2>
-        <p>Use the formal session flow below to send messages and inspect the current timeline.</p>
-        <div class="form-grid">
-          <div class="field field-full">
-            <label for="timeline-session-selector">Existing Sessions</label>
-            <select id="timeline-session-selector">
-              <option value="">Select an existing session...</option>
-            </select>
-          </div>
-          <div class="field field-full">
-            <label for="timeline-session-id-input">Session ID</label>
-            <input id="timeline-session-id-input" type="text" placeholder="session-..." />
-          </div>
-          <div class="field field-full">
-            <label for="timeline-message-input">Session Message</label>
-            <textarea id="timeline-message-input" placeholder="Send a real session message..."></textarea>
-          </div>
-          <div class="field field-full">
-            <label for="timeline-attachments-input">Attachment Paths</label>
-            <textarea id="timeline-attachments-input" placeholder="Optional: one file path per line"></textarea>
-          </div>
-        </div>
-        <button id="timeline-create-session-button">Create and Use New Session</button>
-        <button id="timeline-refresh-sessions-button">Refresh Sessions</button>
-        <button id="timeline-send-button">Send Session Message</button>
-        <button id="timeline-refresh-button">Refresh Timeline</button>
-      </div>
-      <div class="panel">
-        <h2>Timeline Output</h2>
-        <pre id="timeline-result">No timeline loaded yet.</pre>
-      </div>
-      <div class="panel">
-        <h2>Output</h2>
-        <pre id="result">No result yet.</pre>
-      </div>
+        <main class="settings-page-shell debug-stack">
+          <section class="panel surface-muted debug-stack">
+            <div>
+              <h1 data-i18n="shell.hero.title">Distilllab Desktop</h1>
+              <p data-i18n="shell.hero.description">
+                Phase 0 keeps the existing debug controls intact while adding lightweight shell labels for navigation, draft sessions, canvas previews, and settings.
+              </p>
+            </div>
+            <div class="form-grid">
+              <section class="panel surface-strong">
+                <h2 data-i18n="draft.title">New Session</h2>
+                <p data-i18n="draft.description">
+                  Start from a clean draft session before the full desktop shell lands.
+                </p>
+              </section>
+              <section class="panel surface-strong">
+                <h2 data-i18n="canvas.title">Canvas View</h2>
+                <p data-i18n="canvas.description">
+                  Canvas stays lightweight for now, but the shell already exposes its translated entry point.
+                </p>
+              </section>
+              <section class="panel surface-strong">
+                <h2 data-i18n="settings.card.title">Settings Surface</h2>
+                <p data-i18n="settings.card.description">
+                  Preferences stay in Settings so later tasks can expand this area without moving the debug tools again.
+                </p>
+              </section>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2 data-i18n="settings.title">Settings</h2>
+            <p data-i18n="settings.description">
+              Language lives in the non-debug settings section and rerenders visible labels immediately.
+            </p>
+            <div class="form-grid">
+              <div class="field">
+                <label for="locale-selector" data-i18n="settings.language.label">Language</label>
+                <select id="locale-selector">
+                  <option value="en">English</option>
+                  <option value="zh-CN">Simplified Chinese</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="current-theme-value" data-i18n="settings.theme.label">Theme</label>
+                <input id="current-theme-value" type="text" readonly />
+                <p data-i18n="settings.theme.current">
+                  Current theme preference stays managed by saved desktop settings.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section id="debug-shell" class="debug-stack">
+            <section class="panel">
+              <h2 data-i18n="settings.debug">Debug</h2>
+              <p data-i18n="debug.description">
+                The current Phase 0 page stays available here while the future shell is still under construction.
+              </p>
+            </section>
+
+            <section class="panel">
+              <div class="debug-cluster">
+                <button id="create-run-button" type="button" data-i18n="debug.actions.createRun">Create Demo Run</button>
+                <button id="create-session-button" type="button" data-i18n="debug.actions.createSession">Create Demo Session</button>
+                <button id="create-source-button" type="button" data-i18n="debug.actions.createSource">Create Demo Source</button>
+                <button id="chunk-source-button" type="button" data-i18n="debug.actions.chunkSource">Chunk Demo Source</button>
+                <button id="extract-work-items-button" type="button" data-i18n="debug.actions.extractWorkItems">Extract Demo Work Items</button>
+                <button id="group-project-button" type="button" data-i18n="debug.actions.groupProject">Group Demo Project</button>
+                <button id="build-assets-button" type="button" data-i18n="debug.actions.buildAssets">Build Demo Assets</button>
+                <button id="list-runs-button" type="button" data-i18n="debug.actions.listRuns">List Runs</button>
+                <button id="list-sessions-button" type="button" data-i18n="debug.actions.listSessions">List Sessions</button>
+                <button id="list-sources-button" type="button" data-i18n="debug.actions.listSources">List Sources</button>
+                <button id="list-work-items-button" type="button" data-i18n="debug.actions.listWorkItems">List Work Items</button>
+                <button id="list-projects-button" type="button" data-i18n="debug.actions.listProjects">List Projects</button>
+                <button id="list-assets-button" type="button" data-i18n="debug.actions.listAssets">List Assets</button>
+              </div>
+              <p>
+                <label for="source-id-input" data-i18n="debug.lookup.sourceId">Source ID for chunk lookup:</label>
+                <input id="source-id-input" type="text" placeholder="source-..." data-i18n-placeholder="debug.placeholder.sourceId" />
+                <button id="list-chunks-button" type="button" data-i18n="debug.actions.listChunks">List Chunks</button>
+              </p>
+            </section>
+
+            <section class="panel">
+              <h2 data-i18n="debug.panel.config.title">LLM Config Bar</h2>
+              <p data-i18n="debug.panel.config.description">
+                All session and debug LLM calls read from the current provider and model configured here.
+              </p>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="config-provider-input" data-i18n="debug.config.provider">Current Provider</label>
+                  <select id="config-provider-input"></select>
+                </div>
+                <div class="field">
+                  <label for="config-model-input" data-i18n="debug.config.model">Current Model</label>
+                  <select id="config-model-input"></select>
+                </div>
+                <div class="field">
+                  <label for="config-provider-name-input" data-i18n="debug.config.providerName">Provider Name</label>
+                  <input id="config-provider-name-input" type="text" placeholder="Ice" data-i18n-placeholder="debug.placeholder.providerName" />
+                </div>
+                <div class="field">
+                  <label for="config-provider-npm-input" data-i18n="debug.config.providerNpm">Provider NPM</label>
+                  <input id="config-provider-npm-input" type="text" value="@ai-sdk/openai-compatible" />
+                </div>
+                <div class="field field-full">
+                  <label for="config-base-url-input" data-i18n="debug.config.baseUrl">Base URL</label>
+                  <input id="config-base-url-input" type="text" placeholder="https://ice.v.ua/v1" data-i18n-placeholder="debug.placeholder.baseUrl" />
+                </div>
+                <div class="field field-full">
+                  <label for="config-api-key-input" data-i18n="debug.config.apiKey">API Key</label>
+                  <input id="config-api-key-input" type="password" placeholder="{file:secrets/ice.key} or secret value" data-i18n-placeholder="debug.placeholder.apiKey" />
+                </div>
+                <div class="field field-full">
+                  <label for="config-provider-json-input" data-i18n="debug.config.providerJson">Advanced Provider JSON</label>
+                  <textarea id="config-provider-json-input" data-i18n-placeholder="debug.placeholder.providerJson"></textarea>
+                </div>
+                <div class="field field-full">
+                  <label for="config-import-path-input" data-i18n="debug.config.importPath">OpenCode Config Path</label>
+                  <input id="config-import-path-input" type="text" placeholder="optional, defaults to ~/.config/opencode/opencode.json" data-i18n-placeholder="debug.placeholder.importPath" />
+                </div>
+              </div>
+              <button id="config-load-button" type="button" data-i18n="debug.actions.loadConfig">Load Config</button>
+              <button id="config-new-button" type="button" data-i18n="debug.actions.newProvider">New Provider</button>
+              <button id="config-save-button" type="button" data-i18n="debug.actions.saveProvider">Save Current Provider</button>
+              <button id="config-delete-button" type="button" data-i18n="debug.actions.deleteProvider">Delete Provider</button>
+              <button id="config-import-button" type="button" data-i18n="debug.actions.importProviders">Import From OpenCode</button>
+              <button id="config-test-button" type="button" data-i18n="debug.actions.testProvider">Test Current Provider</button>
+            </section>
+
+            <section class="panel">
+              <h2 data-i18n="debug.panel.configOutput">Config Output</h2>
+              <pre id="config-result">No config loaded yet.</pre>
+            </section>
+
+            <section class="panel">
+              <h2 data-i18n="debug.panel.timeline.title">Session Timeline</h2>
+              <p data-i18n="debug.panel.timeline.description">
+                Use the formal session flow below to send messages and inspect the current timeline.
+              </p>
+              <div class="form-grid">
+                <div class="field field-full">
+                  <label for="timeline-session-selector" data-i18n="debug.timeline.existingSessions">Existing Sessions</label>
+                  <select id="timeline-session-selector">
+                    <option value="" data-i18n="debug.timeline.placeholder.selectSession">Select an existing session...</option>
+                  </select>
+                </div>
+                <div class="field field-full">
+                  <label for="timeline-session-id-input" data-i18n="debug.timeline.sessionId">Session ID</label>
+                  <input id="timeline-session-id-input" type="text" placeholder="session-..." data-i18n-placeholder="debug.placeholder.sessionId" />
+                </div>
+                <div class="field field-full">
+                  <label for="timeline-message-input" data-i18n="debug.timeline.message">Session Message</label>
+                  <textarea id="timeline-message-input" data-i18n-placeholder="debug.placeholder.message"></textarea>
+                </div>
+                <div class="field field-full">
+                  <label for="timeline-attachments-input" data-i18n="debug.timeline.attachments">Attachment Paths</label>
+                  <textarea id="timeline-attachments-input" data-i18n-placeholder="debug.placeholder.attachments"></textarea>
+                </div>
+              </div>
+              <button id="timeline-create-session-button" type="button" data-i18n="debug.actions.createAndUseSession">Create and Use New Session</button>
+              <button id="timeline-refresh-sessions-button" type="button" data-i18n="debug.actions.refreshSessions">Refresh Sessions</button>
+              <button id="timeline-send-button" type="button" data-i18n="debug.actions.sendMessage">Send Session Message</button>
+              <button id="timeline-refresh-button" type="button" data-i18n="debug.actions.refreshTimeline">Refresh Timeline</button>
+            </section>
+
+            <section class="panel">
+              <h2 data-i18n="debug.panel.timelineOutput">Timeline Output</h2>
+              <pre id="timeline-result">No timeline loaded yet.</pre>
+            </section>
+
+            <section class="panel">
+              <h2 data-i18n="debug.panel.output">Output</h2>
+              <pre id="result">No result yet.</pre>
+            </section>
+          </section>
         </main>
       </div>
     </div>
-    <script>
-      const runButton = document.getElementById("create-run-button");
-      const sessionButton = document.getElementById("create-session-button");
-      const sourceButton = document.getElementById("create-source-button");
-      const chunkSourceButton = document.getElementById("chunk-source-button");
-      const extractWorkItemsButton = document.getElementById("extract-work-items-button");
-      const groupProjectButton = document.getElementById("group-project-button");
-      const buildAssetsButton = document.getElementById("build-assets-button");
-      const listRunsButton = document.getElementById("list-runs-button");
-      const listSessionsButton = document.getElementById("list-sessions-button");
-      const listSourcesButton = document.getElementById("list-sources-button");
-      const listWorkItemsButton = document.getElementById("list-work-items-button");
-      const listProjectsButton = document.getElementById("list-projects-button");
-      const listAssetsButton = document.getElementById("list-assets-button");
-      const listChunksButton = document.getElementById("list-chunks-button");
-      const sourceIdInput = document.getElementById("source-id-input");
-      const configProviderInput = document.getElementById("config-provider-input");
-      const configModelInput = document.getElementById("config-model-input");
-      const configProviderNameInput = document.getElementById("config-provider-name-input");
-      const configProviderNpmInput = document.getElementById("config-provider-npm-input");
-      const configBaseUrlInput = document.getElementById("config-base-url-input");
-      const configApiKeyInput = document.getElementById("config-api-key-input");
-      const configProviderJsonInput = document.getElementById("config-provider-json-input");
-      const configImportPathInput = document.getElementById("config-import-path-input");
-      const configLoadButton = document.getElementById("config-load-button");
-      const configNewButton = document.getElementById("config-new-button");
-      const configSaveButton = document.getElementById("config-save-button");
-      const configDeleteButton = document.getElementById("config-delete-button");
-      const configImportButton = document.getElementById("config-import-button");
-      const configTestButton = document.getElementById("config-test-button");
-      const configResult = document.getElementById("config-result");
-      const timelineSessionIdInput = document.getElementById("timeline-session-id-input");
-      const timelineSessionSelector = document.getElementById("timeline-session-selector");
-      const timelineMessageInput = document.getElementById("timeline-message-input");
-      const timelineAttachmentsInput = document.getElementById("timeline-attachments-input");
-      const timelineCreateSessionButton = document.getElementById("timeline-create-session-button");
-      const timelineRefreshSessionsButton = document.getElementById("timeline-refresh-sessions-button");
-      const timelineSendButton = document.getElementById("timeline-send-button");
-      const timelineRefreshButton = document.getElementById("timeline-refresh-button");
-      const timelineResult = document.getElementById("timeline-result");
-      const result = document.getElementById("result");
-
-      async function applyDesktopThemePreference() {
-        try {
-          const preferencesText = await invokeTauri("load_desktop_ui_preferences_command");
-          const preferences = JSON.parse(preferencesText);
-          const theme = preferences?.theme === "light" || preferences?.theme === "dark"
-            ? preferences.theme
-            : "system";
-          document.documentElement.setAttribute("data-theme", theme);
-        } catch (error) {
-          document.documentElement.setAttribute("data-theme", "system");
-          console.warn("Failed to load desktop theme preference.", error);
-        }
-      }
-
-      async function invokeTauri(commandName, args) {
-        const invoke = window.__TAURI_INTERNALS__?.invoke;
-
-        if (!invoke) {
-          throw new Error("Tauri bridge is not available in the current page context.");
-        }
-
-        return await invoke(commandName, args);
-      }
-
-      async function refreshTimeline() {
-        const sessionId = timelineSessionIdInput.value.trim();
-
-        if (!sessionId) {
-          timelineResult.textContent = "Error: please create or enter a session id first.";
-          return;
-        }
-
-        timelineResult.textContent = "Loading timeline...";
-
-        try {
-          const response = await invokeTauri("list_session_messages_command", { sessionId });
-          timelineResult.textContent = response;
-        } catch (error) {
-          timelineResult.textContent = `Error: ${error}`;
-        }
-      }
-
-      async function refreshSessionSelector() {
-        try {
-          const response = await invokeTauri("list_session_selector_options");
-          const sessions = JSON.parse(response);
-          const currentValue = timelineSessionSelector.value || timelineSessionIdInput.value.trim();
-
-          timelineSessionSelector.innerHTML = "";
-          const placeholder = document.createElement("option");
-          placeholder.value = "";
-          placeholder.textContent = "Select an existing session...";
-          timelineSessionSelector.appendChild(placeholder);
-
-          for (const session of sessions) {
-            const option = document.createElement("option");
-            option.value = session.sessionId;
-            option.textContent = session.label;
-            timelineSessionSelector.appendChild(option);
-          }
-
-          if (currentValue && sessions.some((session) => session.sessionId === currentValue)) {
-            timelineSessionSelector.value = currentValue;
-          }
-        } catch (error) {
-          result.textContent = `Error: ${error}`;
-        }
-      }
-
-      async function switchToSession(sessionId) {
-        if (!sessionId) {
-          timelineSessionIdInput.value = "";
-          timelineResult.textContent = "No active session selected.";
-          result.textContent = "No active session selected.";
-          return;
-        }
-
-        timelineSessionIdInput.value = sessionId;
-        const selectedOption = timelineSessionSelector.selectedOptions?.[0];
-        if (selectedOption && selectedOption.value) {
-          result.textContent = `Switched to session: ${selectedOption.textContent}`;
-        } else {
-          result.textContent = `Switched to session: ${sessionId}`;
-        }
-        await refreshTimeline();
-      }
-
-      function rebuildProviderOptions(config, selectedProvider) {
-        configProviderInput.innerHTML = "";
-
-        const providerIds = Object.keys(config?.provider ?? {});
-        for (const providerId of providerIds) {
-          const option = document.createElement("option");
-          option.value = providerId;
-          option.textContent = providerId;
-          configProviderInput.appendChild(option);
-        }
-
-        if (selectedProvider) {
-          configProviderInput.value = selectedProvider;
-        }
-      }
-
-      function rebuildModelOptions(config, selectedProvider, selectedModel) {
-        configModelInput.innerHTML = "";
-
-        const models = config?.provider?.[selectedProvider]?.models ?? {};
-        for (const modelId of Object.keys(models)) {
-          const option = document.createElement("option");
-          option.value = modelId;
-          option.textContent = modelId;
-          configModelInput.appendChild(option);
-        }
-
-        if (selectedModel && models[selectedModel]) {
-          configModelInput.value = selectedModel;
-        } else if (configModelInput.options.length > 0) {
-          configModelInput.selectedIndex = 0;
-        }
-      }
-
-      function syncConfigFormFromJson(configJson) {
-        const config = JSON.parse(configJson);
-        const currentProvider = config?.distilllab?.currentProvider ?? "";
-        const currentModel = config?.distilllab?.currentModel ?? "";
-        const providerEntry = config?.provider?.[currentProvider] ?? null;
-
-        rebuildProviderOptions(config, currentProvider);
-        rebuildModelOptions(config, currentProvider, currentModel);
-        configProviderNameInput.value = providerEntry?.name ?? "";
-        configProviderNpmInput.value = providerEntry?.npm ?? "@ai-sdk/openai-compatible";
-        configBaseUrlInput.value = providerEntry?.options?.baseURL ?? "";
-        configApiKeyInput.value = providerEntry?.options?.apiKey ?? "";
-        configProviderJsonInput.value = providerEntry ? JSON.stringify(providerEntry, null, 2) : "";
-      }
-
-      async function refreshProviderEditorFromCurrentSelection() {
-        try {
-          const rawJson = await invokeTauri("load_llm_config_json_command");
-          const config = JSON.parse(rawJson);
-          const currentProvider = configProviderInput.value.trim();
-          const currentModel = configModelInput.value.trim();
-          const providerEntry = config?.provider?.[currentProvider] ?? null;
-
-          rebuildModelOptions(config, currentProvider, currentModel);
-          configProviderNameInput.value = providerEntry?.name ?? "";
-          configProviderNpmInput.value = providerEntry?.npm ?? "@ai-sdk/openai-compatible";
-          configBaseUrlInput.value = providerEntry?.options?.baseURL ?? "";
-          configApiKeyInput.value = providerEntry?.options?.apiKey ?? "";
-          configProviderJsonInput.value = providerEntry ? JSON.stringify(providerEntry, null, 2) : "";
-        } catch (error) {
-          configResult.textContent = `Error: ${error}`;
-        }
-      }
-
-      async function invokeCommand(commandName, loadingMessage) {
-        result.textContent = loadingMessage;
-
-        try {
-          const response = await invokeTauri(commandName);
-          result.textContent = response;
-        } catch (error) {
-          result.textContent = `Error: ${error}`;
-        }
-      }
-
-      configLoadButton.addEventListener("click", async () => {
-        configResult.textContent = "Loading config...";
-
-        try {
-          const summary = await invokeTauri("load_llm_config_command");
-          const rawJson = await invokeTauri("load_llm_config_json_command");
-          configResult.textContent = summary;
-          syncConfigFormFromJson(rawJson);
-        } catch (error) {
-          configResult.textContent = `Error: ${error}`;
-        }
-      });
-
-      configProviderInput.addEventListener("change", async () => {
-        const providerId = configProviderInput.value.trim();
-
-        try {
-          const rawJson = await invokeTauri("load_llm_config_json_command");
-          const config = JSON.parse(rawJson);
-          rebuildModelOptions(config, providerId, null);
-
-          const modelId = configModelInput.value.trim();
-          const response = await invokeTauri("set_current_provider_model_command", {
-            providerId,
-            modelId,
-          });
-          configResult.textContent = response;
-          await refreshProviderEditorFromCurrentSelection();
-        } catch (error) {
-          configResult.textContent = `Error: ${error}`;
-        }
-      });
-
-      configModelInput.addEventListener("change", async () => {
-        const providerId = configProviderInput.value.trim();
-        const modelId = configModelInput.value.trim();
-
-        try {
-          const response = await invokeTauri("set_current_provider_model_command", {
-            providerId,
-            modelId,
-          });
-          configResult.textContent = response;
-          await refreshProviderEditorFromCurrentSelection();
-        } catch (error) {
-          configResult.textContent = `Error: ${error}`;
-        }
-      });
-
-      configSaveButton.addEventListener("click", async () => {
-        const currentProvider = configProviderInput.value.trim();
-        const currentModel = configModelInput.value.trim();
-
-        if (!currentProvider || !currentModel) {
-          configResult.textContent = "Error: current provider and current model are required.";
-          return;
-        }
-
-        configResult.textContent = "Saving config...";
-
-        try {
-          const response = await invokeTauri("save_llm_config_command", {
-            form: {
-              currentProvider,
-              currentModel,
-              providerName: configProviderNameInput.value.trim(),
-              providerNpm: configProviderNpmInput.value.trim(),
-              baseUrl: configBaseUrlInput.value.trim(),
-              apiKey: configApiKeyInput.value,
-              rawProviderJson: configProviderJsonInput.value,
-            },
-          });
-          configResult.textContent = response;
-        } catch (error) {
-          configResult.textContent = `Error: ${error}`;
-        }
-      });
-
-      configNewButton.addEventListener("click", async () => {
-        const providerId = window.prompt("New provider id:", "new-provider");
-        if (!providerId || !providerId.trim()) {
-          return;
-        }
-
-        configResult.textContent = "Creating provider...";
-
-        try {
-          const response = await invokeTauri("create_provider_command", {
-            providerId: providerId.trim(),
-          });
-          configResult.textContent = response;
-
-          const rawJson = await invokeTauri("load_llm_config_json_command");
-          syncConfigFormFromJson(rawJson);
-        } catch (error) {
-          configResult.textContent = `Error: ${error}`;
-        }
-      });
-
-      configDeleteButton.addEventListener("click", async () => {
-        const providerId = configProviderInput.value.trim();
-        if (!providerId) {
-          configResult.textContent = "Error: no current provider selected.";
-          return;
-        }
-
-        const confirmed = window.confirm(`Delete provider ${providerId}?`);
-        if (!confirmed) {
-          return;
-        }
-
-        configResult.textContent = "Deleting provider...";
-
-        try {
-          const response = await invokeTauri("delete_provider_command", {
-            providerId,
-          });
-          configResult.textContent = response;
-
-          const rawJson = await invokeTauri("load_llm_config_json_command");
-          syncConfigFormFromJson(rawJson);
-        } catch (error) {
-          configResult.textContent = `Error: ${error}`;
-        }
-      });
-
-      configImportButton.addEventListener("click", async () => {
-        configResult.textContent = "Importing providers from OpenCode...";
-
-        try {
-          const sourcePath = configImportPathInput.value.trim();
-          const response = await invokeTauri("import_opencode_providers_command", {
-            form: {
-              sourcePath,
-            },
-          });
-          configResult.textContent = response;
-
-          const rawJson = await invokeTauri("load_llm_config_json_command");
-          syncConfigFormFromJson(rawJson);
-        } catch (error) {
-          configResult.textContent = `Error: ${error}`;
-        }
-      });
-
-      configTestButton.addEventListener("click", async () => {
-        configResult.textContent = "Testing current provider...";
-
-        try {
-          const response = await invokeTauri("test_current_provider_command");
-          configResult.textContent = response;
-        } catch (error) {
-          configResult.textContent = `Error: ${error}`;
-        }
-      });
-
-      timelineCreateSessionButton.addEventListener("click", async () => {
-        timelineResult.textContent = "Creating session...";
-
-        try {
-          const response = await invokeTauri("create_demo_session");
-          const match = response.match(/created session: (session-[^\s]+)/);
-
-          if (!match) {
-            timelineResult.textContent = `Created session, but could not parse id: ${response}`;
-            return;
-          }
-
-          const sessionId = match[1];
-          timelineSessionIdInput.value = sessionId;
-          timelineResult.textContent = `Using session ${sessionId}`;
-          await refreshSessionSelector();
-          timelineSessionSelector.value = sessionId;
-          await refreshTimeline();
-        } catch (error) {
-          timelineResult.textContent = `Error: ${error}`;
-        }
-      });
-
-      timelineRefreshSessionsButton.addEventListener("click", async () => {
-        result.textContent = "Loading sessions...";
-        await refreshSessionSelector();
-        result.textContent = "Sessions refreshed.";
-      });
-
-      timelineSessionSelector.addEventListener("change", async () => {
-        const sessionId = timelineSessionSelector.value.trim();
-        await switchToSession(sessionId);
-      });
-
-      timelineSendButton.addEventListener("click", async () => {
-        const sessionId = timelineSessionIdInput.value.trim();
-        const userMessage = timelineMessageInput.value.trim();
-        const attachmentPaths = timelineAttachmentsInput.value
-          .split("\n")
-          .map((value) => value.trim())
-          .filter(Boolean);
-
-        if (!sessionId || !userMessage) {
-          timelineResult.textContent = "Error: session id and session message are required.";
-          return;
-        }
-
-        timelineResult.textContent = "Sending session message...";
-        result.textContent = "Previewing session intake...";
-
-        try {
-          const preview = await invokeTauri("preview_session_intake_command", {
-            form: {
-              sessionId,
-              userMessage,
-              attachmentPaths,
-            },
-          });
-          result.textContent = preview;
-
-          const response = await invokeTauri("send_session_message_command", {
-            form: {
-              sessionId,
-              userMessage,
-              attachmentPaths,
-            },
-          });
-          timelineResult.textContent = response;
-          await refreshSessionSelector();
-          timelineSessionSelector.value = sessionId;
-          timelineMessageInput.value = "";
-        } catch (error) {
-          timelineResult.textContent = `Error: ${error}`;
-          result.textContent = `Error: ${error}`;
-        }
-      });
-
-      timelineRefreshButton.addEventListener("click", async () => {
-        await refreshTimeline();
-      });
-
-      runButton.addEventListener("click", async () => {
-        await invokeCommand("create_demo_run", "Creating demo run...");
-      });
-
-      sessionButton.addEventListener("click", async () => {
-        await invokeCommand("create_demo_session", "Creating demo session...");
-      });
-
-      sourceButton.addEventListener("click", async () => {
-        await invokeCommand("create_demo_source", "Creating demo source...");
-      });
-
-      chunkSourceButton.addEventListener("click", async () => {
-        await invokeCommand("chunk_demo_source", "Chunking demo source...");
-      });
-
-      extractWorkItemsButton.addEventListener("click", async () => {
-        await invokeCommand("extract_demo_work_items", "Extracting demo work items...");
-      });
-
-      groupProjectButton.addEventListener("click", async () => {
-        await invokeCommand("group_demo_project", "Grouping demo project...");
-      });
-
-      buildAssetsButton.addEventListener("click", async () => {
-        await invokeCommand("build_demo_assets", "Building demo assets...");
-      });
-
-      listRunsButton.addEventListener("click", async () => {
-        await invokeCommand("list_runs", "Loading runs...");
-      });
-
-      listSessionsButton.addEventListener("click", async () => {
-        await invokeCommand("list_sessions", "Loading sessions...");
-      });
-
-      listSourcesButton.addEventListener("click", async () => {
-        await invokeCommand("list_sources", "Loading sources...");
-      });
-
-      listWorkItemsButton.addEventListener("click", async () => {
-        await invokeCommand("list_work_items", "Loading work items...");
-      });
-
-      listProjectsButton.addEventListener("click", async () => {
-        await invokeCommand("list_projects", "Loading projects...");
-      });
-
-      listAssetsButton.addEventListener("click", async () => {
-        await invokeCommand("list_assets", "Loading assets...");
-      });
-
-      listChunksButton.addEventListener("click", async () => {
-        const sourceId = sourceIdInput.value.trim();
-
-        if (!sourceId) {
-          result.textContent = "Error: please enter a source id first.";
-          return;
-        }
-
-        result.textContent = "Loading chunks...";
-
-        try {
-          const response = await invokeTauri("list_chunks_for_source", { sourceId });
-          result.textContent = response;
-        } catch (error) {
-          result.textContent = `Error: ${error}`;
-        }
-      });
-
-      applyDesktopThemePreference();
-      configLoadButton.click();
-      refreshSessionSelector();
-    </script>
+    <script type="module" src="./desktop-shell.js"></script>
   </body>
 </html>
