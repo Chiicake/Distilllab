@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  createMockChatSurfaceState,
   createShellViewState,
   deriveChatMockStateFromView,
+  resolveChatTransitionView,
 } from "./desktop-shell.js";
 
 test("draft and active views derive expected chat mock state", () => {
@@ -13,10 +13,10 @@ test("draft and active views derive expected chat mock state", () => {
   assert.equal(deriveChatMockStateFromView("canvasGlobal"), "draft");
 });
 
-test("mock chat surface state normalizes unsupported modes", () => {
-  assert.deepEqual(createMockChatSurfaceState(), { mode: "draft" });
-  assert.deepEqual(createMockChatSurfaceState({ mode: "active" }), { mode: "active" });
-  assert.deepEqual(createMockChatSurfaceState({ mode: "other" }), { mode: "draft" });
+test("chat transition helper maps requested modes to chat views", () => {
+  assert.equal(resolveChatTransitionView("active"), "chatActive");
+  assert.equal(resolveChatTransitionView("draft"), "chatDraft");
+  assert.equal(resolveChatTransitionView("other"), "chatDraft");
 });
 
 test("shell view state tracks selected chat session through transitions", () => {

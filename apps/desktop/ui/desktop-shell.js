@@ -32,7 +32,6 @@ const state = {
   dictionaries: {},
   preferences: { ...DEFAULT_PREFERENCES },
   view: { ...DEFAULT_VIEW_STATE },
-  chatSurface: createMockChatSurfaceState(),
 };
 
 let translateImpl = function t(key) {
@@ -243,18 +242,12 @@ function normalizeView(viewId) {
   return VIEW_DEFINITIONS[viewId] ? viewId : DEFAULT_VIEW_STATE.currentView;
 }
 
-function normalizeChatMockState(chatState) {
-  return chatState === "active" ? "active" : "draft";
-}
-
-function createMockChatSurfaceState(initial = {}) {
-  return {
-    mode: normalizeChatMockState(initial.mode),
-  };
-}
-
 function deriveChatMockStateFromView(viewId) {
   return getViewDefinition(viewId).session === "active" ? "active" : "draft";
+}
+
+function resolveChatTransitionView(targetMode = "active") {
+  return targetMode === "active" ? "chatActive" : "chatDraft";
 }
 
 function getViewDefinition(viewId) {
@@ -453,7 +446,6 @@ function transitionToView(viewId) {
 
   if (definition.session) {
     state.view.selectedSession = definition.session;
-    state.chatSurface.mode = deriveChatMockStateFromView(currentView);
   }
 
   if (definition.canvasScope) {
@@ -468,10 +460,9 @@ function transitionToView(viewId) {
 }
 
 function transitionChatMockSurface(targetMode = "active") {
-  const normalizedMode = normalizeChatMockState(targetMode);
-  state.chatSurface.mode = normalizedMode;
-  transitionToView(normalizedMode === "active" ? "chatActive" : "chatDraft");
-  return state.chatSurface.mode;
+  const nextView = resolveChatTransitionView(targetMode);
+  transitionToView(nextView);
+  return nextView;
 }
 
 async function invokeTauri(commandName, args) {
@@ -1139,7 +1130,7 @@ export function createShellViewState(initial = {}) {
 }
 
 export {
-  createMockChatSurfaceState,
   deriveChatMockStateFromView,
+  resolveChatTransitionView,
   transitionChatMockSurface,
 };
