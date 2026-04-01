@@ -1,14 +1,15 @@
+import {
+  createTranslator,
+  DEFAULT_LOCALE,
+  loadLocaleDictionaries,
+  normalizeLocale,
+} from "./i18n/translator.js";
+
+// Preferences and translator state
 const DEFAULT_PREFERENCES = {
   theme: "system",
-  locale: "en",
+  locale: DEFAULT_LOCALE,
   showDebugPanel: true,
-};
-
-const SUPPORTED_LOCALES = ["en", "zh-CN"];
-
-const LOCALE_FILES = {
-  en: new URL("./i18n/en.json", import.meta.url),
-  "zh-CN": new URL("./i18n/zh-CN.json", import.meta.url),
 };
 
 const state = {
@@ -20,57 +21,106 @@ let translateImpl = function t(key) {
   throw new Error(`Missing translator for ${key}`);
 };
 
-export async function loadLocaleDictionaries(fetchJson = fetchLocaleJson) {
-  const dictionaries = {};
+// DOM bindings
+const ui = {
+  runButton: getElement("create-run-button"),
+  sessionButton: getElement("create-session-button"),
+  sourceButton: getElement("create-source-button"),
+  chunkSourceButton: getElement("chunk-source-button"),
+  extractWorkItemsButton: getElement("extract-work-items-button"),
+  groupProjectButton: getElement("group-project-button"),
+  buildAssetsButton: getElement("build-assets-button"),
+  listRunsButton: getElement("list-runs-button"),
+  listSessionsButton: getElement("list-sessions-button"),
+  listSourcesButton: getElement("list-sources-button"),
+  listWorkItemsButton: getElement("list-work-items-button"),
+  listProjectsButton: getElement("list-projects-button"),
+  listAssetsButton: getElement("list-assets-button"),
+  listChunksButton: getElement("list-chunks-button"),
+  sourceIdInput: getElement("source-id-input"),
+  localeSelector: getElement("locale-selector"),
+  currentThemeValue: getElement("current-theme-value"),
+  debugShell: getElement("debug-shell"),
+  configProviderInput: getElement("config-provider-input"),
+  configModelInput: getElement("config-model-input"),
+  configProviderNameInput: getElement("config-provider-name-input"),
+  configProviderNpmInput: getElement("config-provider-npm-input"),
+  configBaseUrlInput: getElement("config-base-url-input"),
+  configApiKeyInput: getElement("config-api-key-input"),
+  configProviderJsonInput: getElement("config-provider-json-input"),
+  configImportPathInput: getElement("config-import-path-input"),
+  configLoadButton: getElement("config-load-button"),
+  configNewButton: getElement("config-new-button"),
+  configSaveButton: getElement("config-save-button"),
+  configDeleteButton: getElement("config-delete-button"),
+  configImportButton: getElement("config-import-button"),
+  configTestButton: getElement("config-test-button"),
+  configResult: getElement("config-result"),
+  timelineSessionIdInput: getElement("timeline-session-id-input"),
+  timelineSessionSelector: getElement("timeline-session-selector"),
+  timelineMessageInput: getElement("timeline-message-input"),
+  timelineAttachmentsInput: getElement("timeline-attachments-input"),
+  timelineCreateSessionButton: getElement("timeline-create-session-button"),
+  timelineRefreshSessionsButton: getElement("timeline-refresh-sessions-button"),
+  timelineSendButton: getElement("timeline-send-button"),
+  timelineRefreshButton: getElement("timeline-refresh-button"),
+  timelineResult: getElement("timeline-result"),
+  result: getElement("result"),
+};
 
-  for (const locale of SUPPORTED_LOCALES) {
-    dictionaries[locale] = await fetchJson(locale);
-  }
-
-  return dictionaries;
-}
-
-export function createTranslator(dictionaries, locale) {
-  const normalizedLocale = normalizeLocale(locale);
-  const english = dictionaries.en ?? {};
-  const selected = dictionaries[normalizedLocale] ?? english;
-
-  return function t(key, replacements = {}) {
-    const template = selected[key] ?? english[key] ?? key;
-    return formatMessage(template, replacements);
-  };
-}
+const {
+  runButton,
+  sessionButton,
+  sourceButton,
+  chunkSourceButton,
+  extractWorkItemsButton,
+  groupProjectButton,
+  buildAssetsButton,
+  listRunsButton,
+  listSessionsButton,
+  listSourcesButton,
+  listWorkItemsButton,
+  listProjectsButton,
+  listAssetsButton,
+  listChunksButton,
+  sourceIdInput,
+  localeSelector,
+  currentThemeValue,
+  debugShell,
+  configProviderInput,
+  configModelInput,
+  configProviderNameInput,
+  configProviderNpmInput,
+  configBaseUrlInput,
+  configApiKeyInput,
+  configProviderJsonInput,
+  configImportPathInput,
+  configLoadButton,
+  configNewButton,
+  configSaveButton,
+  configDeleteButton,
+  configImportButton,
+  configTestButton,
+  configResult,
+  timelineSessionIdInput,
+  timelineSessionSelector,
+  timelineMessageInput,
+  timelineAttachmentsInput,
+  timelineCreateSessionButton,
+  timelineRefreshSessionsButton,
+  timelineSendButton,
+  timelineRefreshButton,
+  timelineResult,
+  result,
+} = ui;
 
 function t(key, replacements) {
   return translateImpl(key, replacements);
 }
 
-function normalizeLocale(locale) {
-  return SUPPORTED_LOCALES.includes(locale) ? locale : DEFAULT_PREFERENCES.locale;
-}
-
+// Shared utilities
 function normalizeTheme(theme) {
   return ["system", "light", "dark"].includes(theme) ? theme : DEFAULT_PREFERENCES.theme;
-}
-
-function formatMessage(template, replacements) {
-  return String(template).replace(/\{(\w+)\}/g, (match, key) => {
-    if (Object.prototype.hasOwnProperty.call(replacements, key)) {
-      return String(replacements[key]);
-    }
-
-    return match;
-  });
-}
-
-async function fetchLocaleJson(locale) {
-  const response = await fetch(LOCALE_FILES[locale]);
-
-  if (!response.ok) {
-    throw new Error(`Failed to load locale ${locale}: ${response.status}`);
-  }
-
-  return await response.json();
 }
 
 function getElement(id) {
@@ -83,54 +133,11 @@ function getElement(id) {
   return element;
 }
 
-const runButton = getElement("create-run-button");
-const sessionButton = getElement("create-session-button");
-const sourceButton = getElement("create-source-button");
-const chunkSourceButton = getElement("chunk-source-button");
-const extractWorkItemsButton = getElement("extract-work-items-button");
-const groupProjectButton = getElement("group-project-button");
-const buildAssetsButton = getElement("build-assets-button");
-const listRunsButton = getElement("list-runs-button");
-const listSessionsButton = getElement("list-sessions-button");
-const listSourcesButton = getElement("list-sources-button");
-const listWorkItemsButton = getElement("list-work-items-button");
-const listProjectsButton = getElement("list-projects-button");
-const listAssetsButton = getElement("list-assets-button");
-const listChunksButton = getElement("list-chunks-button");
-const sourceIdInput = getElement("source-id-input");
-const localeSelector = getElement("locale-selector");
-const currentThemeValue = getElement("current-theme-value");
-const debugShell = getElement("debug-shell");
-const configProviderInput = getElement("config-provider-input");
-const configModelInput = getElement("config-model-input");
-const configProviderNameInput = getElement("config-provider-name-input");
-const configProviderNpmInput = getElement("config-provider-npm-input");
-const configBaseUrlInput = getElement("config-base-url-input");
-const configApiKeyInput = getElement("config-api-key-input");
-const configProviderJsonInput = getElement("config-provider-json-input");
-const configImportPathInput = getElement("config-import-path-input");
-const configLoadButton = getElement("config-load-button");
-const configNewButton = getElement("config-new-button");
-const configSaveButton = getElement("config-save-button");
-const configDeleteButton = getElement("config-delete-button");
-const configImportButton = getElement("config-import-button");
-const configTestButton = getElement("config-test-button");
-const configResult = getElement("config-result");
-const timelineSessionIdInput = getElement("timeline-session-id-input");
-const timelineSessionSelector = getElement("timeline-session-selector");
-const timelineMessageInput = getElement("timeline-message-input");
-const timelineAttachmentsInput = getElement("timeline-attachments-input");
-const timelineCreateSessionButton = getElement("timeline-create-session-button");
-const timelineRefreshSessionsButton = getElement("timeline-refresh-sessions-button");
-const timelineSendButton = getElement("timeline-send-button");
-const timelineRefreshButton = getElement("timeline-refresh-button");
-const timelineResult = getElement("timeline-result");
-const result = getElement("result");
-
 configResult.dataset.defaultState = "true";
 timelineResult.dataset.defaultState = "true";
 result.dataset.defaultState = "true";
 
+// Render helpers
 function setText(target, message) {
   target.textContent = message;
 }
@@ -223,6 +230,7 @@ function updateTranslator() {
   translateImpl = createTranslator(state.dictionaries, state.preferences.locale);
 }
 
+// Preferences and Tauri bridge
 async function invokeTauri(commandName, args) {
   const invoke = window.__TAURI_INTERNALS__?.invoke;
 
@@ -270,6 +278,7 @@ function applyDesktopThemePreference() {
   document.documentElement.setAttribute("data-theme", state.preferences.theme);
 }
 
+// Timeline and config helpers
 async function setLocale(locale, options = {}) {
   const persist = options.persist !== false;
   const nextLocale = normalizeLocale(locale);
@@ -439,7 +448,8 @@ async function loadConfigSummary() {
   }
 }
 
-function bindEvents() {
+// Event wiring
+function bindShellEvents() {
   localeSelector.addEventListener("change", async () => {
     try {
       await setLocale(localeSelector.value);
@@ -747,28 +757,17 @@ function bindEvents() {
   });
 }
 
+// Bootstrap
 async function bootstrap() {
   state.dictionaries = await loadLocaleDictionaries();
   await loadDesktopPreferences();
   updateTranslator();
   applyDesktopThemePreference();
   renderStaticTranslations();
-  bindEvents();
+  bindShellEvents();
   await loadConfigSummary();
   await refreshSessionSelector();
 }
-
-window.__desktopShellTestApi = {
-  createTranslator,
-  loadLocaleDictionaries,
-  getLocale() {
-    return state.preferences.locale;
-  },
-  async setLocale(locale) {
-    await setLocale(locale);
-  },
-  t,
-};
 
 if (typeof window !== "undefined" && typeof document !== "undefined") {
   bootstrap().catch((error) => {
