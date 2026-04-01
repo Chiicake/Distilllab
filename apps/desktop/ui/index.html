@@ -792,27 +792,57 @@
         <section class="inspector-surface" data-inspector-view="canvas" hidden>
           <p class="eyebrow" data-i18n="inspector.eyebrow">Inspector</p>
           <h2 data-i18n="inspector.canvas.title">Canvas Inspector</h2>
-          <p data-i18n="inspector.canvas.description">Reserve this panel for object metadata, filters, and detail summaries.</p>
-          <div class="inspector-chat-stack">
+          <p data-i18n="inspector.canvas.description">Keep the current canvas model readable without implying that every canvas state already has a selected object.</p>
+          <div class="inspector-chat-stack" data-canvas-inspector-state="global">
             <section class="inspector-card surface-muted">
-              <p class="inspector-card-label" data-i18n="inspector.canvas.stateLabel">Visible Model</p>
-              <p data-i18n="inspector.canvas.stateBody">The prototype keeps Recent Active Set explicit so the center cluster reads as a view model, not just decoration.</p>
+              <p class="inspector-card-label" data-i18n="inspector.canvas.global.modelLabel">Visible Model</p>
+              <p data-i18n="inspector.canvas.global.modelBody">The global canvas describes the object world and its active working set without implying a selected object.</p>
             </section>
             <section class="inspector-card surface-muted">
-              <p class="inspector-card-label" data-i18n="inspector.canvas.statusLabel">Status</p>
+              <p class="inspector-card-label" data-i18n="inspector.canvas.global.scopeLabel">Scope</p>
               <dl class="inspector-meta-list inspector-meta-list-single">
                 <div>
-                  <dt data-i18n="inspector.canvas.statusPrimaryLabel">Focused object</dt>
-                  <dd data-i18n="inspector.canvas.statusPrimaryValue">Analysis / AN-402-DELTA</dd>
+                  <dt data-i18n="inspector.canvas.global.scopePrimaryLabel">Center model</dt>
+                  <dd data-i18n="inspector.canvas.global.scopePrimaryValue">Recent Active Set across Project Delta</dd>
                 </div>
                 <div>
-                  <dt data-i18n="inspector.canvas.statusSecondaryLabel">Current state</dt>
-                  <dd data-i18n="inspector.canvas.statusSecondaryValue">Running with linked reporting and review context</dd>
+                  <dt data-i18n="inspector.canvas.global.scopeSecondaryLabel">Visible hierarchy</dt>
+                  <dd data-i18n="inspector.canvas.global.scopeSecondaryValue">Project anchor, work items, linked assets, and peripheral context</dd>
                 </div>
               </dl>
             </section>
             <section class="inspector-card surface-muted">
-              <p class="inspector-card-label" data-i18n="inspector.canvas.relatedLabel">Related Objects</p>
+              <p class="inspector-card-label" data-i18n="inspector.canvas.global.contentsLabel">Contents</p>
+              <div class="inspector-chip-wrap">
+                <span class="inspector-chip">Project Delta</span>
+                <span class="inspector-chip">Analysis</span>
+                <span class="inspector-chip">Reporting</span>
+                <span class="inspector-chip">Review</span>
+                <span class="inspector-chip">summary_report.pdf</span>
+                <span class="inspector-chip">Project Beta</span>
+              </div>
+            </section>
+          </div>
+          <div class="inspector-chat-stack" data-canvas-inspector-state="detail" hidden>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.detail.stateLabel">Visible Model</p>
+              <p data-i18n="inspector.canvas.detail.stateBody">The detail canvas centers one object while preserving its local neighborhood and nearby relation cues.</p>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.detail.statusLabel">Status</p>
+              <dl class="inspector-meta-list inspector-meta-list-single">
+                <div>
+                  <dt data-i18n="inspector.canvas.detail.statusPrimaryLabel">Focused object</dt>
+                  <dd data-i18n="inspector.canvas.detail.statusPrimaryValue">Analysis / AN-402-DELTA</dd>
+                </div>
+                <div>
+                  <dt data-i18n="inspector.canvas.detail.statusSecondaryLabel">Current state</dt>
+                  <dd data-i18n="inspector.canvas.detail.statusSecondaryValue">Running with linked reporting and review context</dd>
+                </div>
+              </dl>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.detail.relatedLabel">Related Objects</p>
               <div class="inspector-chip-wrap">
                 <span class="inspector-chip">Project Delta</span>
                 <span class="inspector-chip">Reporting</span>

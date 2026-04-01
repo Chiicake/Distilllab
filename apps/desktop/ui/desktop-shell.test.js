@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   createShellViewState,
+  deriveCanvasInspectorStateFromView,
   deriveChatMockStateFromView,
   resolveChatTransitionView,
 } from "./desktop-shell.js";
@@ -11,6 +12,12 @@ test("draft and active views derive expected chat mock state", () => {
   assert.equal(deriveChatMockStateFromView("chatDraft"), "draft");
   assert.equal(deriveChatMockStateFromView("chatActive"), "active");
   assert.equal(deriveChatMockStateFromView("canvasGlobal"), "draft");
+});
+
+test("canvas views derive expected inspector state", () => {
+  assert.equal(deriveCanvasInspectorStateFromView("canvasGlobal"), "global");
+  assert.equal(deriveCanvasInspectorStateFromView("canvasDetail"), "detail");
+  assert.equal(deriveCanvasInspectorStateFromView("chatDraft"), "global");
 });
 
 test("chat transition helper maps requested modes to chat views", () => {

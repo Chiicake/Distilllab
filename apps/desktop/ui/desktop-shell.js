@@ -246,6 +246,10 @@ function deriveChatMockStateFromView(viewId) {
   return getViewDefinition(viewId).session === "active" ? "active" : "draft";
 }
 
+function deriveCanvasInspectorStateFromView(viewId) {
+  return getViewDefinition(viewId).canvasScope === "detail" ? "detail" : "global";
+}
+
 function resolveChatTransitionView(targetMode = "active") {
   return targetMode === "active" ? "chatActive" : "chatDraft";
 }
@@ -408,6 +412,12 @@ function renderChatInspectorState(chatState) {
   }
 }
 
+function renderCanvasInspectorState(canvasState) {
+  for (const section of document.querySelectorAll("[data-canvas-inspector-state]")) {
+    section.hidden = section.dataset.canvasInspectorState !== canvasState;
+  }
+}
+
 function renderRailSelection(currentView) {
   for (const button of railButtons) {
     const targetView = normalizeView(button.dataset.viewTarget);
@@ -427,6 +437,7 @@ function renderShellView() {
   const currentView = normalizeView(state.view.currentView);
   const viewDefinition = getViewDefinition(currentView);
   const chatState = deriveChatMockStateFromView(currentView);
+  const canvasInspectorState = deriveCanvasInspectorStateFromView(currentView);
 
   renderTopTabs(viewDefinition);
   renderViewPanels(currentView);
@@ -436,6 +447,10 @@ function renderShellView() {
 
   if (viewDefinition.family === "chat") {
     renderChatInspectorState(chatState);
+  }
+
+  if (viewDefinition.family === "canvas") {
+    renderCanvasInspectorState(canvasInspectorState);
   }
 
   const showingDebugView = currentView === "settingsDebug";
@@ -1136,6 +1151,7 @@ export function createShellViewState(initial = {}) {
 }
 
 export {
+  deriveCanvasInspectorStateFromView,
   deriveChatMockStateFromView,
   resolveChatTransitionView,
   transitionChatMockSurface,
