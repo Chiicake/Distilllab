@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   createShellViewState,
   deriveCanvasInspectorStateFromView,
+  deriveChatStateFromView,
   deriveChatMockStateFromView,
   isDebugPanelVisible,
   resolveChatTransitionView,
@@ -13,6 +14,13 @@ test("draft and active views derive expected chat mock state", () => {
   assert.equal(deriveChatMockStateFromView("chatDraft"), "draft");
   assert.equal(deriveChatMockStateFromView("chatActive"), "active");
   assert.equal(deriveChatMockStateFromView("canvasGlobal"), "draft");
+});
+
+test("chat state stays draft until a real session id exists", () => {
+  assert.equal(deriveChatStateFromView("chatDraft", ""), "draft");
+  assert.equal(deriveChatStateFromView("chatActive", ""), "draft");
+  assert.equal(deriveChatStateFromView("chatActive", "session-123"), "active");
+  assert.equal(deriveChatStateFromView("settingsGeneral", "session-123"), "draft");
 });
 
 test("canvas views derive expected inspector state", () => {
@@ -27,15 +35,21 @@ test("chat transition helper maps requested modes to chat views", () => {
   assert.equal(resolveChatTransitionView("other"), "chatDraft");
 });
 
-test("shell view state tracks selected chat session through transitions", () => {
-  const shell = createShellViewState();
+test("shell view state preserves a real selected chat session through transitions", () => {
+  const shell = createShellViewState({
+    currentView: "chatActive",
+    selectedSession: "active",
+    selectedSessionId: "session-123",
+  });
 
-  assert.equal(shell.currentView, "chatDraft");
-  assert.equal(shell.selectedSession, "draft");
+  assert.equal(shell.currentView, "chatActive");
+  assert.equal(shell.selectedSession, "active");
+  assert.equal(shell.selectedSessionId, "session-123");
 
   let snapshot = shell.transition("chatActive");
   assert.equal(snapshot.currentView, "chatActive");
   assert.equal(snapshot.selectedSession, "active");
+  assert.equal(snapshot.selectedSessionId, "session-123");
 
   snapshot = shell.transition("settingsGeneral");
   assert.equal(snapshot.currentView, "settingsGeneral");
@@ -43,7 +57,21 @@ test("shell view state tracks selected chat session through transitions", () => 
 
   snapshot = shell.transition("chatDraft");
   assert.equal(snapshot.currentView, "chatDraft");
+  assert.equal(snapshot.selectedSession, "active");
+});
+
+test("shell view state keeps chat draft default when no real session id is selected", () => {
+  const shell = createShellViewState({
+    currentView: "chatActive",
+    selectedSession: "active",
+    selectedSessionId: "",
+  });
+
+  const snapshot = shell.transition("chatActive");
+
+  assert.equal(snapshot.currentView, "chatActive");
   assert.equal(snapshot.selectedSession, "draft");
+  assert.equal(snapshot.selectedSessionId, "");
 });
 
 test("shell view state tracks selected canvas scope through transitions", () => {

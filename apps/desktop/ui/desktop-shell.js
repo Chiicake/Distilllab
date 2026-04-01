@@ -15,6 +15,7 @@ const DEFAULT_PREFERENCES = {
 const DEFAULT_VIEW_STATE = {
   currentView: "chatDraft",
   selectedSession: "draft",
+  selectedSessionId: "",
   selectedCanvasScope: "global",
   selectedSettingsSection: "general",
 };
@@ -73,6 +74,12 @@ function createUiStub() {
     debugVisibilityToggle: null,
     debugVisibilityDevelopmentNote: null,
     debugShell: null,
+    chatSessionRail: null,
+    chatDraftRailButton: null,
+    chatActiveSessionTitle: null,
+    chatActiveSessionMeta: null,
+    chatActiveTimeline: null,
+    chatActiveComposer: null,
     runButton: null,
     sessionButton: null,
     sourceButton: null,
@@ -134,6 +141,12 @@ const ui = HAS_DOCUMENT
       debugVisibilityToggle: getElement("debug-visibility-toggle"),
       debugVisibilityDevelopmentNote: getElement("debug-visibility-development-note"),
       debugShell: getElement("debug-shell"),
+      chatSessionRail: getElement("chat-session-rail"),
+      chatDraftRailButton: getElement("chat-draft-rail-button"),
+      chatActiveSessionTitle: getElement("chat-active-session-title"),
+      chatActiveSessionMeta: getElement("chat-active-session-meta"),
+      chatActiveTimeline: getElement("chat-active-timeline"),
+      chatActiveComposer: getElement("chat-active-composer"),
       runButton: getElement("create-run-button"),
       sessionButton: getElement("create-session-button"),
       sourceButton: getElement("create-source-button"),
@@ -193,6 +206,12 @@ const {
   debugVisibilityToggle,
   debugVisibilityDevelopmentNote,
   debugShell,
+  chatSessionRail,
+  chatDraftRailButton,
+  chatActiveSessionTitle,
+  chatActiveSessionMeta,
+  chatActiveTimeline,
+  chatActiveComposer,
   runButton,
   sessionButton,
   sourceButton,
@@ -265,6 +284,10 @@ function normalizeView(viewId) {
 
 function deriveChatMockStateFromView(viewId) {
   return getViewDefinition(viewId).session === "active" ? "active" : "draft";
+}
+
+function deriveChatStateFromView(viewId, selectedSessionId = state.view.selectedSessionId) {
+  return getViewDefinition(viewId).family === "chat" && selectedSessionId ? "active" : "draft";
 }
 
 function deriveCanvasInspectorStateFromView(viewId) {
@@ -450,9 +473,15 @@ function renderCanvasInspectorState(canvasState) {
 }
 
 function renderRailSelection(currentView) {
-  for (const button of railButtons) {
+  for (const button of ui.railButtons) {
     const targetView = normalizeView(button.dataset.viewTarget);
-    const active = targetView === currentView;
+    const isSessionButton = Boolean(button.dataset.sessionId);
+    const isDraftButton = button === chatDraftRailButton;
+    const active = isSessionButton
+      ? currentView === "chatActive" && button.dataset.sessionId === state.view.selectedSessionId
+      : isDraftButton
+        ? currentView === "chatDraft" && !state.view.selectedSessionId
+        : targetView === currentView;
     button.dataset.active = String(active);
     button.setAttribute("aria-current", active ? "page" : "false");
   }
@@ -467,7 +496,7 @@ function renderRailSelection(currentView) {
 function renderShellView() {
   const currentView = normalizeView(state.view.currentView);
   const viewDefinition = getViewDefinition(currentView);
-  const chatState = deriveChatMockStateFromView(currentView);
+  const chatState = deriveChatStateFromView(currentView);
   const canvasInspectorState = deriveCanvasInspectorStateFromView(currentView);
 
   renderTopTabs(viewDefinition);
@@ -497,7 +526,7 @@ function transitionToView(viewId) {
   state.view.currentView = currentView;
 
   if (definition.session) {
-    state.view.selectedSession = definition.session;
+    state.view.selectedSession = state.view.selectedSessionId ? "active" : "draft";
   }
 
   if (definition.canvasScope) {
@@ -512,9 +541,146 @@ function transitionToView(viewId) {
 }
 
 function transitionChatMockSurface(targetMode = "active") {
+  if (targetMode === "active" && !state.view.selectedSessionId) {
+    return transitionToView("chatDraft");
+  }
+
   const nextView = resolveChatTransitionView(targetMode);
   transitionToView(nextView);
   return nextView;
+}
+
+function getSessionRailIcon(session) {
+  const title = session?.title?.trim();
+  return (title?.charAt(0) || "S").toUpperCase();
+}
+
+function createSessionRailButton(session) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "rail-item";
+  button.dataset.viewTarget = "chatActive";
+  button.dataset.session = "active";
+  button.dataset.sessionId = session.sessionId;
+
+  const icon = document.createElement("span");
+  icon.className = "rail-item-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = getSessionRailIcon(session);
+
+  const copy = document.createElement("span");
+  copy.className = "rail-item-copy";
+
+  const title = document.createElement("span");
+  title.className = "rail-item-title";
+  title.textContent = session.title;
+
+  const description = document.createElement("span");
+  description.className = "rail-item-description";
+  description.textContent = session.sessionId;
+
+  const meta = document.createElement("span");
+  meta.className = "rail-item-meta";
+  meta.textContent = session.status;
+
+  copy.append(title, description, meta);
+  button.append(icon, copy);
+  return button;
+}
+
+function renderChatSessionRail(sessions) {
+  chatSessionRail.innerHTML = "";
+
+  for (const session of sessions) {
+    chatSessionRail.appendChild(createSessionRailButton(session));
+  }
+
+  ui.railButtons = Array.from(document.querySelectorAll(".rail-item[data-view-target]"));
+}
+
+function parseTimelineEntries(timelineText) {
+  const normalized = timelineText.trim();
+
+  if (!normalized || normalized === "no session messages found") {
+    return [];
+  }
+
+  return normalized.split(/\n\n+/).map((block) => {
+    const [header = "", ...bodyLines] = block.split("\n");
+    return {
+      header: header.trim(),
+      body: bodyLines.map((line) => line.replace(/^  /, "")).join("\n").trim(),
+    };
+  }).filter((entry) => entry.header);
+}
+
+function createTimelineEntryElement(entry) {
+  const article = document.createElement("article");
+  const isUser = entry.header === "[User]";
+  const isAssistant = entry.header === "[Assistant]";
+
+  article.className = isUser
+    ? "timeline-event timeline-event-user surface-muted"
+    : isAssistant
+      ? "timeline-event timeline-event-assistant surface"
+      : "run-block surface-muted";
+
+  const role = document.createElement("p");
+  role.className = "timeline-role";
+  role.textContent = entry.header.replace(/^\[(.*)\]$/, "$1");
+
+  const message = document.createElement("p");
+  message.className = "timeline-message";
+  message.textContent = entry.body || entry.header;
+
+  article.append(role, message);
+  return article;
+}
+
+function renderActiveTimeline(timelineText) {
+  const entries = parseTimelineEntries(timelineText);
+  chatActiveTimeline.innerHTML = "";
+
+  if (entries.length === 0) {
+    const empty = document.createElement("article");
+    empty.className = "timeline-event surface-muted";
+
+    const role = document.createElement("p");
+    role.className = "timeline-role";
+    role.textContent = "Timeline";
+
+    const message = document.createElement("p");
+    message.className = "timeline-message";
+    message.textContent = "No timeline loaded yet.";
+
+    empty.append(role, message);
+    chatActiveTimeline.appendChild(empty);
+    return;
+  }
+
+  for (const entry of entries) {
+    chatActiveTimeline.appendChild(createTimelineEntryElement(entry));
+  }
+}
+
+function renderActiveSessionBanner(session) {
+  if (!session) {
+    chatActiveSessionTitle.textContent = "No session selected";
+    chatActiveSessionMeta.textContent = "Select a session from the rail to inspect its timeline.";
+    return;
+  }
+
+  chatActiveSessionTitle.textContent = session.title;
+  chatActiveSessionMeta.textContent = `${session.status} - ${session.sessionId}`;
+}
+
+function applyDraftSelection() {
+  state.view.selectedSession = "draft";
+  state.view.selectedSessionId = "";
+  timelineSessionIdInput.value = "";
+  timelineSessionSelector.value = "";
+  renderActiveSessionBanner(null);
+  renderActiveTimeline("");
 }
 
 async function invokeTauri(commandName, args) {
@@ -632,6 +798,7 @@ async function refreshTimeline() {
 
   if (!sessionId) {
     setStatusText(timelineResult, "status.error.enterSessionId");
+    renderActiveTimeline("");
     return;
   }
 
@@ -640,8 +807,10 @@ async function refreshTimeline() {
   try {
     const response = await invokeTauri("list_session_messages_command", { sessionId });
     setRawText(timelineResult, response);
+    renderActiveTimeline(response);
   } catch (error) {
     setStatusText(timelineResult, "status.error.generic", { error });
+    renderActiveTimeline("");
   }
 }
 
@@ -649,7 +818,7 @@ async function refreshSessionSelector() {
   try {
     const response = await invokeTauri("list_session_selector_options");
     const sessions = JSON.parse(response);
-    const currentValue = timelineSessionSelector.value || timelineSessionIdInput.value.trim();
+    const currentValue = state.view.selectedSessionId || timelineSessionSelector.value || timelineSessionIdInput.value.trim();
 
     timelineSessionSelector.innerHTML = "";
     renderTimelineSelectorPlaceholder();
@@ -661,8 +830,14 @@ async function refreshSessionSelector() {
       timelineSessionSelector.appendChild(option);
     }
 
+    renderChatSessionRail(sessions);
+
     if (currentValue && sessions.some((session) => session.sessionId === currentValue)) {
       timelineSessionSelector.value = currentValue;
+      const selectedSession = sessions.find((session) => session.sessionId === currentValue) ?? null;
+      renderActiveSessionBanner(selectedSession);
+    } else if (!currentValue) {
+      renderActiveSessionBanner(null);
     }
   } catch (error) {
     setStatusText(result, "status.error.generic", { error });
@@ -671,12 +846,15 @@ async function refreshSessionSelector() {
 
 async function switchToSession(sessionId) {
   if (!sessionId) {
-    timelineSessionIdInput.value = "";
+    applyDraftSelection();
+    transitionToView("chatDraft");
     setStatusText(timelineResult, "status.noActiveSession");
     setStatusText(result, "status.noActiveSession");
     return;
   }
 
+  state.view.selectedSession = "active";
+  state.view.selectedSessionId = sessionId;
   timelineSessionIdInput.value = sessionId;
   transitionToView("chatActive");
   const selectedOption = timelineSessionSelector.selectedOptions?.[0];
@@ -795,12 +973,24 @@ function bindShellViewEvents() {
     transitionToView(state.view.selectedSettingsSection === "debug" ? "settingsDebug" : "settingsGeneral");
   });
 
-  for (const button of railButtons) {
+  for (const button of ui.railButtons) {
     if (!button.classList.contains("rail-item")) {
       continue;
     }
 
     button.addEventListener("click", () => {
+      const sessionId = button.dataset.sessionId?.trim();
+      if (sessionId) {
+        timelineSessionSelector.value = sessionId;
+        switchToSession(sessionId);
+        return;
+      }
+
+      if (button === chatDraftRailButton) {
+        void switchToSession("");
+        return;
+      }
+
       transitionToView(button.dataset.viewTarget);
     });
   }
@@ -810,6 +1000,24 @@ function bindShellViewEvents() {
       transitionChatMockSurface(button.dataset.chatTransition);
     });
   }
+
+  chatSessionRail.addEventListener("click", (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest("button[data-session-id]")
+      : null;
+
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const sessionId = button.dataset.sessionId?.trim() ?? "";
+    if (!sessionId) {
+      return;
+    }
+
+    timelineSessionSelector.value = sessionId;
+    void switchToSession(sessionId);
+  });
 }
 
 function bindShellEvents() {
@@ -1007,6 +1215,7 @@ function bindShellEvents() {
       const sessionId = match[1];
       timelineSessionIdInput.value = sessionId;
       state.view.selectedSession = "active";
+      state.view.selectedSessionId = sessionId;
       setStatusText(timelineResult, "status.usingSession", { sessionId });
       await refreshSessionSelector();
       timelineSessionSelector.value = sessionId;
@@ -1042,6 +1251,7 @@ function bindShellEvents() {
     }
 
     state.view.selectedSession = "active";
+    state.view.selectedSessionId = sessionId;
     setStatusText(timelineResult, "status.sendingSessionMessage");
     setStatusText(result, "status.previewingSessionIntake");
 
@@ -1183,6 +1393,9 @@ export function createShellViewState(initial = {}) {
     get selectedSession() {
       return viewState.selectedSession;
     },
+    get selectedSessionId() {
+      return viewState.selectedSessionId;
+    },
     get selectedCanvasScope() {
       return viewState.selectedCanvasScope;
     },
@@ -1195,7 +1408,7 @@ export function createShellViewState(initial = {}) {
 
       viewState.currentView = normalizedView;
       if (definition.session) {
-        viewState.selectedSession = definition.session;
+        viewState.selectedSession = viewState.selectedSessionId ? "active" : "draft";
       }
       if (definition.canvasScope) {
         viewState.selectedCanvasScope = definition.canvasScope;
@@ -1207,6 +1420,7 @@ export function createShellViewState(initial = {}) {
       return {
         currentView: viewState.currentView,
         selectedSession: viewState.selectedSession,
+        selectedSessionId: viewState.selectedSessionId,
         selectedCanvasScope: viewState.selectedCanvasScope,
         selectedSettingsSection: viewState.selectedSettingsSection,
       };
@@ -1216,6 +1430,7 @@ export function createShellViewState(initial = {}) {
 
 export {
   deriveCanvasInspectorStateFromView,
+  deriveChatStateFromView,
   deriveChatMockStateFromView,
   isDebugPanelVisible,
   resolveChatTransitionView,

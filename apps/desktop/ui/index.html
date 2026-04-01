@@ -47,7 +47,7 @@
           <div class="chat-rail-stack">
             <section class="chat-rail-group">
               <p class="rail-group-label" data-i18n="chat.rail.currentLabel">Current</p>
-              <button class="rail-item rail-item-card" type="button" data-view-target="chatDraft" data-session="draft">
+              <button id="chat-draft-rail-button" class="rail-item rail-item-card" type="button" data-view-target="chatDraft" data-session="draft">
                 <span class="rail-item-icon" aria-hidden="true">D</span>
                 <span class="rail-item-copy">
                   <span class="rail-item-title" data-i18n="chat.session.draft">Draft Session</span>
@@ -60,27 +60,6 @@
             <section class="chat-rail-group">
               <p class="rail-group-label" data-i18n="chat.rail.recentLabel">Recent Sessions</p>
               <nav id="chat-session-rail" class="rail-list" data-i18n-aria-label="chat.rail.aria">
-                <button class="rail-item" type="button" data-view-target="chatActive" data-session="active">
-                  <span class="rail-item-icon" aria-hidden="true">A</span>
-                  <span class="rail-item-copy">
-                    <span class="rail-item-title" data-i18n="chat.session.active">Active Session</span>
-                    <span class="rail-item-description" data-i18n="chat.session.activeDescription">Project Delta analysis with one in-progress evidence run.</span>
-                  </span>
-                </button>
-                <button class="rail-item rail-item-muted" type="button">
-                  <span class="rail-item-icon" aria-hidden="true">F</span>
-                  <span class="rail-item-copy">
-                    <span class="rail-item-title" data-i18n="chat.session.recentA">Data Filtering Logic</span>
-                    <span class="rail-item-description" data-i18n="chat.session.recentADescription">Schema cleanup and validation notes.</span>
-                  </span>
-                </button>
-                <button class="rail-item rail-item-muted" type="button">
-                  <span class="rail-item-icon" aria-hidden="true">W</span>
-                  <span class="rail-item-copy">
-                    <span class="rail-item-title" data-i18n="chat.session.recentB">Workflow Schema v2</span>
-                    <span class="rail-item-description" data-i18n="chat.session.recentBDescription">Earlier exploration for object relations and naming.</span>
-                  </span>
-                </button>
               </nav>
             </section>
           </div>
@@ -188,58 +167,12 @@
             <section class="chat-session-banner surface-muted">
               <div>
                 <p class="eyebrow" data-i18n="chat.active.bannerLabel">Selected session</p>
-                <h3 data-i18n="chat.active.bannerTitle">Project Delta Analysis</h3>
+                <h3 id="chat-active-session-title" data-i18n="chat.active.bannerTitle">Project Delta Analysis</h3>
               </div>
-              <p data-i18n="chat.active.bannerMeta">One user turn, one assistant response, and one in-progress evidence distillation run.</p>
+              <p id="chat-active-session-meta" data-i18n="chat.active.bannerMeta">One user turn, one assistant response, and one in-progress evidence distillation run.</p>
             </section>
 
-            <section class="chat-timeline" aria-label="Chat timeline">
-              <article class="timeline-event timeline-event-user surface-muted">
-                <p class="timeline-role" data-i18n="chat.active.userLabel">You</p>
-                <p class="timeline-message" data-i18n="chat.active.userMessage">Analyze the latest results for Project Delta.</p>
-              </article>
-
-              <article class="timeline-event timeline-event-assistant surface">
-                <p class="timeline-role" data-i18n="chat.active.assistantLabel">Agent / Analyst</p>
-                <p class="timeline-message" data-i18n="chat.active.assistantMessage">Starting the analysis now. I am gathering evidence, updating active work items, and checking which assets should stay linked to this run.</p>
-              </article>
-
-              <article class="run-block surface-muted">
-                <div class="run-block-header">
-                  <div>
-                    <p class="eyebrow" data-i18n="chat.active.runLabel">Run block</p>
-                    <h3 data-i18n="chat.active.runTitle">Evidence Distillation Run</h3>
-                  </div>
-                  <div class="run-status">
-                    <span class="run-status-text" data-i18n="chat.active.runStatus">In progress</span>
-                    <span class="run-status-bar" aria-hidden="true"><span class="run-status-bar-fill"></span></span>
-                  </div>
-                </div>
-
-                <div class="run-summary-card surface">
-                  <p class="run-summary-label" data-i18n="chat.active.progressLabel">Partial progress</p>
-                  <p data-i18n="chat.active.progressBody">One work item updated, two related assets linked, and the current object graph is synchronized with the latest evidence.</p>
-                </div>
-
-                <div class="tool-card-stack">
-                  <article class="tool-card tool-card-success surface">
-                    <div class="tool-card-header">
-                      <h4>fetch_logs</h4>
-                      <span class="tool-card-status" data-i18n="chat.active.toolSuccess">Success</span>
-                    </div>
-                    <p data-i18n="chat.active.toolSuccessBody">Retrieved 1,240 evidence rows from the Delta analysis set. No continuity gaps were found in the imported run history.</p>
-                  </article>
-
-                  <article class="tool-card tool-card-working surface">
-                    <div class="tool-card-header">
-                      <h4>derive_workitem_state</h4>
-                      <span class="tool-card-status" data-i18n="chat.active.toolWorking">Working</span>
-                    </div>
-                    <p data-i18n="chat.active.toolWorkingBody">Deriving the next stable work-item state from the latest anomalies and linked evidence.</p>
-                    <span class="tool-progress" aria-hidden="true"><span class="tool-progress-fill"></span></span>
-                  </article>
-                </div>
-              </article>
+            <section id="chat-active-timeline" class="chat-timeline" aria-label="Chat timeline">
             </section>
 
             <section class="chat-composer surface">
