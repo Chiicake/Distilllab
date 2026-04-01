@@ -123,6 +123,7 @@ function createUiStub() {
     timelineRefreshButton: null,
     timelineResult: null,
     result: null,
+    canvasOpenRelatedChatButton: null,
   };
 }
 
@@ -193,6 +194,7 @@ const ui = HAS_DOCUMENT
       timelineRefreshButton: getElement("timeline-refresh-button"),
       timelineResult: getElement("timeline-result"),
       result: getElement("result"),
+      canvasOpenRelatedChatButton: getElement("canvas-open-related-chat-button"),
     }
   : createUiStub();
 
@@ -261,6 +263,7 @@ const {
   timelineRefreshButton,
   timelineResult,
   result,
+  canvasOpenRelatedChatButton,
 } = ui;
 
 if (configResult && timelineResult && result) {
@@ -305,6 +308,22 @@ function deriveCanvasInspectorStateFromView(viewId) {
 
 function resolveChatTransitionView(targetMode = "active") {
   return targetMode === "active" ? "chatActive" : "chatDraft";
+}
+
+function createCanvasDetailChatTarget(selectedSessionId = state.view.selectedSessionId) {
+  if (selectedSessionId) {
+    return {
+      viewId: "chatActive",
+      selectedSession: "active",
+      selectedSessionId,
+    };
+  }
+
+  return {
+    viewId: "chatDraft",
+    selectedSession: "draft",
+    selectedSessionId: "",
+  };
 }
 
 function getViewDefinition(viewId) {
@@ -1449,7 +1468,7 @@ function bindShellEvents() {
     setStatusText(timelineResult, "status.creatingSession");
 
     try {
-      const response = await invokeTauri("create_demo_session");
+      const response = await invokeTauri("create_session_command");
       const match = response.match(/created session: (session-[^\s]+)/);
 
       if (!match) {
@@ -1519,6 +1538,24 @@ function bindShellEvents() {
 
   sessionButton.addEventListener("click", async () => {
     await invokeCommand("create_demo_session", "status.creatingDemoSession");
+  });
+
+  canvasOpenRelatedChatButton.addEventListener("click", () => {
+    const target = createCanvasDetailChatTarget(state.view.selectedSessionId);
+    state.view.selectedSession = target.selectedSession;
+    state.view.selectedSessionId = target.selectedSessionId;
+
+    if (target.selectedSessionId) {
+      timelineSessionIdInput.value = target.selectedSessionId;
+      if (timelineSessionSelector.querySelector(`option[value="${target.selectedSessionId}"]`)) {
+        timelineSessionSelector.value = target.selectedSessionId;
+      }
+    } else {
+      timelineSessionIdInput.value = "";
+      timelineSessionSelector.value = "";
+    }
+
+    transitionToView(target.viewId);
   });
 
   sourceButton.addEventListener("click", async () => {
@@ -1655,6 +1692,7 @@ export function createShellViewState(initial = {}) {
 }
 
 export {
+  createCanvasDetailChatTarget,
   deriveDraftPromptText,
   deriveCanvasInspectorStateFromView,
   deriveChatStateFromView,

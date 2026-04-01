@@ -2,7 +2,8 @@ use agent::{LlmProviderConfig, SessionActionType, SessionAgentDecision};
 use runtime::{
     AppConfig, AppRuntime, DesktopUiConfig, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
     ProviderOptions, SessionIntakePreview, SessionMessageRequest, default_app_config_path,
-    create_session, create_session_and_send_first_message_with_config,
+    create_session,
+    delete_failed_first_send_session,
     delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
     resolve_current_provider_model, save_app_config_to_path, set_current_provider_model,
     upsert_provider_entry,
@@ -735,16 +736,27 @@ async fn create_session_and_send_first_message_command(
         .parent()
         .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?;
 
+    let session = create_session(&runtime).map_err(|e| e.to_string())?;
+    let session_id = session.id.clone();
+
     let attachments = form
         .attachment_paths
         .iter()
-        .map(|path| store_attachment_copy(storage_root, "draft", path).map_err(|e| e.to_string()))
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(|path| store_attachment_copy(storage_root, &session_id, path).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>();
 
-    let session = create_session_and_send_first_message_with_config(
+    let attachments = match attachments {
+        Ok(attachments) => attachments,
+        Err(error) => {
+            delete_failed_first_send_session(&runtime, &session_id).map_err(|e| e.to_string())?;
+            return Err(error);
+        }
+    };
+
+    let send_result = runtime::send_session_message_with_config(
         &runtime,
         SessionMessageRequest {
-            session_id: String::new(),
+            session_id: session_id.clone(),
             user_message: form.user_message,
             attachments,
             provider_kind: resolved.provider_type.replace('-', "_"),
@@ -753,13 +765,17 @@ async fn create_session_and_send_first_message_command(
             api_key: resolved.api_key,
         },
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await;
 
-    let messages = runtime::list_session_messages(&runtime, &session.id).map_err(|e| e.to_string())?;
+    if let Err(error) = send_result {
+        delete_failed_first_send_session(&runtime, &session_id).map_err(|e| e.to_string())?;
+        return Err(error.to_string());
+    }
+
+    let messages = runtime::list_session_messages(&runtime, &session_id).map_err(|e| e.to_string())?;
 
     Ok(FirstSendCommandResponse {
-        session_id: session.id,
+        session_id,
         timeline_text: format_session_messages_text(&messages),
     })
 }

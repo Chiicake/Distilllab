@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createCanvasDetailChatTarget,
   createShellViewState,
   deriveCanvasInspectorStateFromView,
   deriveChatStateFromView,
@@ -39,6 +40,20 @@ test("chat transition helper maps requested modes to chat views", () => {
   assert.equal(resolveChatTransitionView("active"), "chatActive");
   assert.equal(resolveChatTransitionView("draft"), "chatDraft");
   assert.equal(resolveChatTransitionView("other"), "chatDraft");
+});
+
+test("canvas detail chat target opens active chat when a session exists", () => {
+  assert.deepEqual(
+    createCanvasDetailChatTarget("session-123"),
+    { viewId: "chatActive", selectedSession: "active", selectedSessionId: "session-123" },
+  );
+});
+
+test("canvas detail chat target falls back to draft when no session exists", () => {
+  assert.deepEqual(
+    createCanvasDetailChatTarget(""),
+    { viewId: "chatDraft", selectedSession: "draft", selectedSessionId: "" },
+  );
 });
 
 test("timeline parser keeps blank lines inside a message body", () => {

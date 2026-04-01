@@ -503,6 +503,10 @@ fn cleanup_failed_first_send(runtime: &AppRuntime, session_id: &str) -> Result<(
     Ok(())
 }
 
+pub fn delete_failed_first_send_session(runtime: &AppRuntime, session_id: &str) -> Result<(), RuntimeError> {
+    cleanup_failed_first_send(runtime, session_id)
+}
+
 pub fn list_sessions(runtime: &AppRuntime) -> Result<Vec<Session>, RuntimeError> {
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
