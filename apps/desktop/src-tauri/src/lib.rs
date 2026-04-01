@@ -3,7 +3,8 @@ use runtime::{
     AppConfig, AppRuntime, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
     ProviderOptions, SessionIntakePreview, SessionMessageRequest, default_app_config_path,
     delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
-    resolve_current_provider_model, set_current_provider_model, upsert_provider_entry,
+    resolve_current_provider_model, save_app_config_to_path, set_current_provider_model,
+    upsert_provider_entry,
 };
 use runtime::flows::attachment_storage::store_attachment_copy;
 use schema::{SessionIntake, SessionMessage, SessionMessageRole};
@@ -41,6 +42,97 @@ struct SessionSelectorOption {
     title: String,
     status: String,
     label: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopUiPreferences {
+    theme: String,
+    locale: String,
+    show_debug_panel: bool,
+}
+
+impl Default for DesktopUiPreferences {
+    fn default() -> Self {
+        Self {
+            theme: "system".to_string(),
+            locale: "en".to_string(),
+            show_debug_panel: true,
+        }
+    }
+}
+
+fn is_valid_desktop_theme(value: &str) -> bool {
+    matches!(value, "system" | "light" | "dark")
+}
+
+fn is_valid_desktop_locale(value: &str) -> bool {
+    matches!(value, "en" | "zh-CN")
+}
+
+fn validate_desktop_ui_preferences(preferences: &DesktopUiPreferences) -> Result<(), String> {
+    if !is_valid_desktop_theme(&preferences.theme) {
+        return Err("theme must be one of: system, light, dark".to_string());
+    }
+
+    if !is_valid_desktop_locale(&preferences.locale) {
+        return Err("locale must be one of: en, zh-CN".to_string());
+    }
+
+    Ok(())
+}
+
+fn desktop_ui_preferences_from_value(value: Option<&serde_json::Value>) -> DesktopUiPreferences {
+    let defaults = DesktopUiPreferences::default();
+
+    let theme = value
+        .and_then(|v| v.get("theme"))
+        .and_then(|v| v.as_str())
+        .filter(|value| is_valid_desktop_theme(value))
+        .unwrap_or(defaults.theme.as_str())
+        .to_string();
+    let locale = value
+        .and_then(|v| v.get("locale"))
+        .and_then(|v| v.as_str())
+        .filter(|value| is_valid_desktop_locale(value))
+        .unwrap_or(defaults.locale.as_str())
+        .to_string();
+    let show_debug_panel = value
+        .and_then(|v| v.get("showDebugPanel"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(defaults.show_debug_panel);
+
+    DesktopUiPreferences {
+        theme,
+        locale,
+        show_debug_panel,
+    }
+}
+
+fn load_app_config_value() -> Result<(std::path::PathBuf, serde_json::Value), String> {
+    let (config_path, config) = load_or_create_app_config()?;
+
+    if config_path.exists() {
+        let content = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+        let value = serde_json::from_str::<serde_json::Value>(&content).map_err(|e| e.to_string())?;
+        Ok((config_path, value))
+    } else {
+        serde_json::to_value(config)
+            .map(|value| (config_path, value))
+            .map_err(|e| e.to_string())
+    }
+}
+
+fn extract_desktop_ui_preferences(value: &serde_json::Value) -> DesktopUiPreferences {
+    desktop_ui_preferences_from_value(value.get("distilllab").and_then(|v| v.get("desktopUi")))
+}
+
+fn save_app_config_value(config_path: &std::path::Path, value: &serde_json::Value) -> Result<(), String> {
+    let config: AppConfig = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+    save_app_config_to_path(&config, config_path).map_err(|e| e.to_string())?;
+
+    let content = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+    std::fs::write(config_path, content).map_err(|e| e.to_string())
 }
 
 fn format_action_type(action_type: &SessionActionType) -> &'static str {
@@ -659,6 +751,36 @@ fn load_llm_config_json_command() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn load_desktop_ui_preferences_command() -> Result<String, String> {
+    let (_, value) = load_app_config_value()?;
+    let preferences = extract_desktop_ui_preferences(&value);
+    serde_json::to_string_pretty(&preferences).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_desktop_ui_preferences_command(preferences: DesktopUiPreferences) -> Result<String, String> {
+    validate_desktop_ui_preferences(&preferences)?;
+
+    let (config_path, mut value) = load_app_config_value()?;
+    let preferences_value = serde_json::to_value(&preferences).map_err(|e| e.to_string())?;
+
+    let root = value
+        .as_object_mut()
+        .ok_or_else(|| "app config must be a JSON object".to_string())?;
+    let distilllab = root
+        .entry("distilllab".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    let distilllab_object = distilllab
+        .as_object_mut()
+        .ok_or_else(|| "distilllab config must be a JSON object".to_string())?;
+    distilllab_object.insert("desktopUi".to_string(), preferences_value);
+
+    save_app_config_value(&config_path, &value)?;
+
+    load_desktop_ui_preferences_command()
+}
+
+#[tauri::command]
 fn save_llm_config_command(form: ConfigBarForm) -> Result<String, String> {
     let (config_path, _) = load_or_create_app_config()?;
     let provider_key = form.current_provider.trim();
@@ -789,6 +911,8 @@ pub fn run() {
             list_session_messages_command,
             load_llm_config_command,
             load_llm_config_json_command,
+            load_desktop_ui_preferences_command,
+            save_desktop_ui_preferences_command,
             save_llm_config_command,
             import_opencode_providers_command,
             create_provider_command,
@@ -805,7 +929,7 @@ mod tests {
     use super::{
         format_app_config_text, format_intake_preview_text, format_llm_debug_comparison_text,
         format_provider_test_text, format_session_agent_decision_text, format_session_messages_text,
-        format_session_selector_label,
+        format_session_selector_label, load_desktop_ui_preferences_command,
     };
     use agent::{
         RunCreationRequest, SessionActionType, SessionAgentDecision, SessionIntent,
@@ -982,6 +1106,18 @@ mod tests {
         assert!(text.contains("model: gpt-5.4"));
         assert!(text.contains("status: ok"));
         assert!(text.contains("message: connected successfully"));
+    }
+
+    #[test]
+    fn load_desktop_ui_preferences_command_returns_defaults_when_missing() {
+        let text = load_desktop_ui_preferences_command().expect("preferences should load");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(value.get("theme").and_then(|v| v.as_str()), Some("system"));
+        assert_eq!(value.get("locale").and_then(|v| v.as_str()), Some("en"));
+        assert_eq!(
+            value.get("showDebugPanel").and_then(|v| v.as_bool()),
+            Some(true)
+        );
     }
 
     #[test]
