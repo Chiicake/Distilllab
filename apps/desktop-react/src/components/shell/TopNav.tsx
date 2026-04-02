@@ -1,6 +1,18 @@
 import brandIconDp1 from '../../assets/brand-icon-dp1.svg';
+import type { Screen } from '../../app-state/screen-state';
 
-export default function TopNav() {
+type TopNavProps = {
+  currentScreen: Screen;
+  onOpenChat: () => void;
+  onOpenCanvas: () => void;
+  onOpenSettings: () => void;
+};
+
+export default function TopNav({ currentScreen, onOpenChat, onOpenCanvas, onOpenSettings }: TopNavProps) {
+  const isChatActive = currentScreen.kind === 'chat-draft' || currentScreen.kind === 'chat-active';
+  const isCanvasActive = currentScreen.kind === 'canvas';
+  const isSettingsActive = currentScreen.kind === 'settings';
+
   return (
     <header className="bg-[#0e0e0e] text-[#bac3ff] font-['Manrope'] tracking-wider uppercase text-sm font-bold docked w-full top-0 h-16 no-border tonal-shift bg-[#191a1a] flat no shadows flex justify-between items-center px-6 w-full max-w-full z-50">
       <div className="flex items-center gap-8">
@@ -10,13 +22,23 @@ export default function TopNav() {
         </div>
         <nav className="hidden md:flex gap-6 items-center lowercase tracking-normal">
           <button
-            className="text-[#bac3ff] border-b-2 border-[#bac3ff] pb-1 hover:text-[#f3faff] transition-colors scale-95 duration-200"
+            className={
+              isChatActive
+                ? 'text-[#bac3ff] border-b-2 border-[#bac3ff] pb-1 hover:text-[#f3faff] transition-colors scale-95 duration-200'
+                : 'text-[#acabaa] opacity-60 hover:text-[#f3faff] transition-colors scale-95 duration-200'
+            }
+            onClick={onOpenChat}
             type="button"
           >
             Chat
           </button>
           <button
-            className="text-[#acabaa] opacity-60 hover:text-[#f3faff] transition-colors scale-95 duration-200"
+            className={
+              isCanvasActive
+                ? 'text-[#bac3ff] border-b-2 border-[#bac3ff] pb-1 hover:text-[#f3faff] transition-colors scale-95 duration-200'
+                : 'text-[#acabaa] opacity-60 hover:text-[#f3faff] transition-colors scale-95 duration-200'
+            }
+            onClick={onOpenCanvas}
             type="button"
           >
             Canvas
@@ -29,7 +51,16 @@ export default function TopNav() {
             notifications
           </span>
         </button>
-        <button aria-label="Settings" className="text-[#acabaa] opacity-60 hover:text-[#f3faff] transition-colors">
+        <button
+          aria-label="Settings"
+          className={
+            isSettingsActive
+              ? 'text-[#bac3ff] hover:text-[#f3faff] transition-colors'
+              : 'text-[#acabaa] opacity-60 hover:text-[#f3faff] transition-colors'
+          }
+          onClick={onOpenSettings}
+          type="button"
+        >
           <span className="material-symbols-outlined" data-icon="settings">
             settings
           </span>
