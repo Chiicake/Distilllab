@@ -1,0 +1,812 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Distilllab</title>
+    <link rel="stylesheet" href="./desktop-shell.css" />
+  </head>
+  <body class="desktop-shell-body">
+    <div class="app-shell">
+      <header class="top-nav shell-chrome surface">
+        <div class="top-nav-primary" role="tablist" data-i18n-aria-label="shell.primaryViews.aria">
+          <button id="tab-chat" class="shell-tab" type="button" data-view-target="chatDraft" data-i18n="nav.chat" role="tab" aria-selected="true">
+            Chat
+          </button>
+          <button id="tab-canvas" class="shell-tab" type="button" data-view-target="canvasGlobal" data-i18n="nav.canvas" role="tab" aria-selected="false">
+            Canvas
+          </button>
+        </div>
+        <div class="top-nav-actions">
+          <button id="open-settings-button" class="secondary-button" type="button" data-view-target="settingsGeneral" data-i18n="nav.settings" aria-haspopup="true">
+            Settings
+          </button>
+        </div>
+      </header>
+
+      <aside class="left-rail shell-chrome surface" data-i18n-aria-label="shell.leftRail.aria">
+        <section class="brand-block surface-strong">
+          <div class="brand-mark" aria-hidden="true">
+            <span class="brand-mark-core"></span>
+            <span class="brand-mark-edge brand-mark-edge-a"></span>
+            <span class="brand-mark-edge brand-mark-edge-b"></span>
+          </div>
+          <div class="brand-copy">
+            <p class="eyebrow" data-i18n="brand.name">Distilllab</p>
+            <h1 class="brand-title" data-i18n="brand.name">Distilllab</h1>
+            <p class="brand-tagline" data-i18n="brand.tagline">Distill Work Into Structure</p>
+          </div>
+        </section>
+
+        <section class="rail-surface" data-rail-view="chat">
+          <div class="rail-header">
+            <h2 data-i18n="chat.rail.title">Sessions</h2>
+            <p data-i18n="chat.rail.description">Keep draft and active conversation states reachable without losing the selected session.</p>
+          </div>
+
+          <div class="chat-rail-stack">
+            <section class="chat-rail-group">
+              <p class="rail-group-label" data-i18n="chat.rail.currentLabel">Current</p>
+              <button id="chat-draft-rail-button" class="rail-item rail-item-card" type="button" data-view-target="chatDraft" data-session="draft">
+                <span class="rail-item-icon" aria-hidden="true">D</span>
+                <span class="rail-item-copy">
+                  <span class="rail-item-title" data-i18n="chat.session.draft">Draft Session</span>
+                  <span class="rail-item-description" data-i18n="chat.session.draftDescription">Pre-persistence workspace. The first send creates the real session.</span>
+                  <span class="rail-item-meta" data-i18n="chat.session.draftMeta">Draft only</span>
+                </span>
+              </button>
+            </section>
+
+            <section class="chat-rail-group">
+              <p class="rail-group-label" data-i18n="chat.rail.recentLabel">Recent Sessions</p>
+              <nav id="chat-session-rail" class="rail-list" data-i18n-aria-label="chat.rail.aria">
+              </nav>
+            </section>
+          </div>
+        </section>
+
+        <section class="rail-surface" data-rail-view="canvas" hidden>
+          <div class="rail-header">
+            <h2 data-i18n="canvas.rail.title">Canvas Scope</h2>
+            <p data-i18n="canvas.rail.description">Switch between global structure and a focused detail view.</p>
+          </div>
+          <nav id="canvas-scope-rail" class="rail-list" data-i18n-aria-label="canvas.rail.aria">
+            <button class="rail-item rail-item-card" type="button" data-view-target="canvasGlobal" data-canvas-scope="global">
+              <span class="rail-item-icon" aria-hidden="true">RA</span>
+              <span class="rail-item-copy">
+                <span class="rail-item-title" data-i18n="canvas.scope.global">Global Structure</span>
+                <span class="rail-item-description" data-i18n="canvas.scope.globalDescription">Recent Active Set stays explicit while projects, work items, and assets remain visible around it.</span>
+                <span class="rail-item-meta" data-i18n="canvas.scope.globalMeta">Default object-space view</span>
+              </span>
+            </button>
+            <button class="rail-item" type="button" data-view-target="canvasDetail" data-canvas-scope="detail">
+              <span class="rail-item-icon" aria-hidden="true">FD</span>
+              <span class="rail-item-copy">
+                <span class="rail-item-title" data-i18n="canvas.scope.detail">Focused Detail</span>
+                <span class="rail-item-description" data-i18n="canvas.scope.detailDescription">Center one object, show nearby context, and keep inspection details alongside it.</span>
+                <span class="rail-item-meta" data-i18n="canvas.scope.detailMeta">Object neighborhood view</span>
+              </span>
+            </button>
+          </nav>
+        </section>
+
+        <section class="rail-surface" data-rail-view="settings" hidden>
+          <div class="rail-header">
+            <h2 data-i18n="settings.rail.title">Settings</h2>
+            <p data-i18n="settings.rail.description">General preferences stay separate from the migrated debug workspace.</p>
+          </div>
+          <nav id="settings-nav-rail" class="rail-list" data-i18n-aria-label="settings.rail.aria">
+            <button class="rail-item" type="button" data-view-target="settingsGeneral" data-settings-section="general" data-i18n="settings.section.general">General</button>
+            <button class="rail-item" type="button" data-view-target="settingsDebug" data-settings-section="debug" data-i18n="settings.section.debug">Debug</button>
+          </nav>
+        </section>
+      </aside>
+
+      <main class="center-content" aria-live="polite">
+        <section id="chat-draft-view" class="view-panel chat-view" data-view="chatDraft" data-chat-state="draft">
+          <section class="chat-stage surface">
+            <div class="chat-stage-header">
+              <div class="view-copy chat-view-copy surface">
+                <p class="eyebrow" data-i18n="chat.surface.eyebrow">Chat Workbench</p>
+                <h2 data-i18n="chat.draft.title">Draft Session</h2>
+                <p data-i18n="chat.draft.description">Use this shell surface for the next composed prompt before an active run is underway.</p>
+              </div>
+              <span class="chat-state-pill draft-pill" data-i18n="chat.draft.statePill">Ready to distill</span>
+            </div>
+
+            <section class="chat-empty-state surface-muted">
+              <div class="chat-empty-icon" aria-hidden="true">+</div>
+              <h3 data-i18n="chat.draft.emptyTitle">New Session</h3>
+              <p data-i18n="chat.draft.emptyDescription">Start with a task, transcript, or working question. The first message creates the session and opens a real run surface.</p>
+              <div class="chat-prompt-grid">
+                <button class="chat-prompt-card" type="button" data-chat-transition="active">
+                  <span class="chat-prompt-title" data-i18n="chat.draft.promptA.title">Distill a session</span>
+                  <span class="chat-prompt-description" data-i18n="chat.draft.promptA.description">Turn a coding or research exchange into structured work items and assets.</span>
+                </button>
+                <button class="chat-prompt-card" type="button" data-chat-transition="active">
+                  <span class="chat-prompt-title" data-i18n="chat.draft.promptB.title">Extract work items</span>
+                  <span class="chat-prompt-description" data-i18n="chat.draft.promptB.description">Break a messy discussion into explicit tasks, constraints, and open threads.</span>
+                </button>
+                <button class="chat-prompt-card" type="button" data-chat-transition="active">
+                  <span class="chat-prompt-title" data-i18n="chat.draft.promptC.title">Shape a project</span>
+                  <span class="chat-prompt-description" data-i18n="chat.draft.promptC.description">Create a project frame and connect the next message to an evolving work graph.</span>
+                </button>
+                <button class="chat-prompt-card" type="button" data-chat-transition="active">
+                  <span class="chat-prompt-title" data-i18n="chat.draft.promptD.title">Create assets</span>
+                  <span class="chat-prompt-description" data-i18n="chat.draft.promptD.description">Promote useful notes and outputs into reusable assets after the first run.</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="chat-composer surface">
+              <label class="chat-composer-label" for="chat-draft-composer" data-i18n="chat.draft.composerLabel">Draft composer</label>
+              <textarea id="chat-draft-composer" class="chat-composer-input" rows="4" data-i18n-placeholder="chat.draft.composerPlaceholder" placeholder="Describe the work you want to distill into structure..."></textarea>
+              <div class="chat-composer-footer">
+                <div class="chat-composer-tools">
+                  <span class="chat-composer-tool" data-i18n="chat.draft.tool.attach">Attach</span>
+                  <span class="chat-composer-tool" data-i18n="chat.draft.tool.context">Context</span>
+                </div>
+                <button id="chat-draft-send-button" class="chat-send-button" type="button" data-chat-transition="active" data-i18n="chat.draft.send">Send</button>
+              </div>
+              <p class="chat-composer-hint" data-i18n="chat.draft.hint">The first send transitions from draft semantics into an active session shell.</p>
+            </section>
+          </section>
+        </section>
+
+        <section id="chat-active-view" class="view-panel chat-view" data-view="chatActive" data-chat-state="active" hidden>
+          <section class="chat-stage surface">
+            <div class="chat-stage-header">
+              <div class="view-copy chat-view-copy surface">
+                <p class="eyebrow" data-i18n="chat.surface.eyebrow">Chat Workbench</p>
+                <h2 data-i18n="chat.active.title">Active Session</h2>
+                <p data-i18n="chat.active.description">The selected session stays active while the shell switches between chat, canvas, and settings surfaces.</p>
+              </div>
+              <span class="chat-state-pill active-pill" data-i18n="chat.active.statePill">Active run</span>
+            </div>
+
+            <section class="chat-session-banner surface-muted">
+              <div>
+                <p class="eyebrow" data-i18n="chat.active.bannerLabel">Selected session</p>
+                <h3 id="chat-active-session-title" data-i18n="chat.active.bannerTitle">Project Delta Analysis</h3>
+              </div>
+              <p id="chat-active-session-meta" data-i18n="chat.active.bannerMeta">One user turn, one assistant response, and one in-progress evidence distillation run.</p>
+            </section>
+
+            <section id="chat-active-timeline" class="chat-timeline" data-i18n-aria-label="chat.active.timelineAria">
+            </section>
+
+            <section class="chat-composer surface">
+              <label class="chat-composer-label" for="chat-active-composer" data-i18n="chat.active.composerLabel">Follow-up composer</label>
+              <textarea id="chat-active-composer" class="chat-composer-input" rows="3" data-i18n-placeholder="chat.active.composerPlaceholder" placeholder="Type a command or follow-up question..."></textarea>
+              <div class="chat-composer-footer">
+                <div class="chat-composer-tools">
+                  <span class="chat-composer-tool" data-i18n="chat.active.tool.attach">Attach</span>
+                  <span class="chat-composer-tool" data-i18n="chat.active.tool.library">Library</span>
+                </div>
+                <button id="chat-active-send-button" class="chat-send-button" type="button" data-i18n="chat.active.send">Send</button>
+              </div>
+            </section>
+          </section>
+        </section>
+
+        <section id="canvas-global-view" class="view-panel canvas-view" data-view="canvasGlobal" hidden>
+          <section class="canvas-shell surface">
+            <header class="canvas-toolbar surface-muted">
+              <div class="canvas-toolbar-copy">
+                <p class="eyebrow" data-i18n="canvas.surface.eyebrow">Canvas Space</p>
+                <h2 data-i18n="canvas.global.title">Canvas Global View</h2>
+                <p data-i18n="canvas.global.description">The shell reserves a dedicated object-space surface for global structure and cross-project shape.</p>
+              </div>
+              <div class="canvas-toolbar-switch" role="group" data-i18n-aria-label="canvas.toolbar.switchAria">
+                <button class="canvas-toggle" type="button" data-view-target="canvasGlobal" data-active-when-view="canvasGlobal" data-i18n="canvas.toggle.global">Global</button>
+                <button class="canvas-toggle" type="button" data-view-target="canvasDetail" data-active-when-view="canvasDetail" data-i18n="canvas.toggle.detail">Detail</button>
+              </div>
+            </header>
+
+            <div class="canvas-workspace canvas-workspace-global">
+              <aside class="canvas-side-panel canvas-global-sidebar surface-muted">
+                <div class="canvas-side-header">
+                  <p class="eyebrow" data-i18n="canvas.sidebar.eyebrow">Canvas Views</p>
+                  <h3 data-i18n="canvas.sidebar.title">Recent Active Set</h3>
+                  <p data-i18n="canvas.sidebar.description">Keep the current object model explicit instead of implying it only by placement.</p>
+                </div>
+
+                <div class="canvas-collection-card surface-strong">
+                  <div>
+                    <p class="canvas-collection-label" data-i18n="canvas.sidebar.recentActiveLabel">Recent Active Set</p>
+                    <h4 data-i18n="canvas.sidebar.recentActiveTitle">Current Workspace Focus</h4>
+                  </div>
+                  <p data-i18n="canvas.sidebar.recentActiveBody">Analysis, reporting, and linked assets are centered here. Older objects stay visible as surrounding context.</p>
+                </div>
+
+                <nav class="canvas-mode-list" data-i18n-aria-label="canvas.sidebar.modeListAria">
+                  <button class="canvas-mode-row" type="button" data-view-target="canvasGlobal" data-active-when-view="canvasGlobal">
+                    <span class="canvas-mode-icon" aria-hidden="true">RA</span>
+                    <span>
+                      <strong data-i18n="canvas.sidebar.modeRecent">Recent Active</strong>
+                      <small data-i18n="canvas.sidebar.modeRecentBody">Center the working set and preserve peripheral context.</small>
+                    </span>
+                  </button>
+                  <button class="canvas-mode-row" type="button">
+                    <span class="canvas-mode-icon" aria-hidden="true">AO</span>
+                    <span>
+                      <strong data-i18n="canvas.sidebar.modeAll">All Objects</strong>
+                      <small data-i18n="canvas.sidebar.modeAllBody">Project inventory remains visible in the outline below.</small>
+                    </span>
+                  </button>
+                  <button class="canvas-mode-row" type="button">
+                    <span class="canvas-mode-icon" aria-hidden="true">FL</span>
+                    <span>
+                      <strong data-i18n="canvas.sidebar.modeFilters">Filters</strong>
+                      <small data-i18n="canvas.sidebar.modeFiltersBody">Static filter chips preview future graph slicing.</small>
+                    </span>
+                  </button>
+                  <button class="canvas-mode-row" type="button">
+                    <span class="canvas-mode-icon" aria-hidden="true">SR</span>
+                    <span>
+                      <strong data-i18n="canvas.sidebar.modeSearch">Search</strong>
+                      <small data-i18n="canvas.sidebar.modeSearchBody">Jump to object anchors and local clusters.</small>
+                    </span>
+                  </button>
+                  <button class="canvas-mode-row" type="button">
+                    <span class="canvas-mode-icon" aria-hidden="true">OL</span>
+                    <span>
+                      <strong data-i18n="canvas.sidebar.modeOutline">Outline</strong>
+                      <small data-i18n="canvas.sidebar.modeOutlineBody">Projects, work items, and assets stay readable as hierarchy.</small>
+                    </span>
+                  </button>
+                </nav>
+
+                <div class="canvas-filter-chip-row">
+                  <span class="canvas-filter-chip" data-i18n="canvas.sidebar.filterProject">Project Delta</span>
+                  <span class="canvas-filter-chip" data-i18n="canvas.sidebar.filterRunning">Running</span>
+                  <span class="canvas-filter-chip" data-i18n="canvas.sidebar.filterAssets">Assets Linked</span>
+                </div>
+
+                <div class="canvas-search-card surface">
+                  <label for="canvas-global-search" data-i18n="canvas.sidebar.searchLabel">Search</label>
+                  <input id="canvas-global-search" type="text" data-i18n-placeholder="canvas.sidebar.searchPlaceholder" placeholder="Find object anchors, assets, or work items" />
+                </div>
+
+                <section class="canvas-outline surface">
+                  <p class="canvas-outline-label" data-i18n="canvas.sidebar.outlineLabel">Outline</p>
+                  <div class="canvas-outline-tree">
+                    <div class="canvas-outline-group">
+                      <p class="canvas-outline-heading" data-i18n="canvas.sidebar.projectGroup">Project</p>
+                      <button class="canvas-outline-item canvas-outline-item-strong" type="button" data-i18n="canvas.sample.projectDelta">Project Delta</button>
+                    </div>
+                    <div class="canvas-outline-group">
+                      <p class="canvas-outline-heading" data-i18n="canvas.sidebar.workItemGroup">Work Items</p>
+                      <button class="canvas-outline-item canvas-outline-item-branch" type="button" data-i18n="canvas.sample.analysis">Analysis</button>
+                      <button class="canvas-outline-item" type="button" data-i18n="canvas.sample.reporting">Reporting</button>
+                      <button class="canvas-outline-item" type="button" data-i18n="canvas.sample.review">Review</button>
+                    </div>
+                    <div class="canvas-outline-group">
+                      <p class="canvas-outline-heading" data-i18n="canvas.sidebar.assetGroup">Assets</p>
+                      <button class="canvas-outline-item canvas-outline-item-leaf" type="button">summary_report.pdf</button>
+                      <button class="canvas-outline-item canvas-outline-item-leaf" type="button">log_files.zip</button>
+                      <button class="canvas-outline-item canvas-outline-item-leaf" type="button">metrics_sheet.xls</button>
+                    </div>
+                  </div>
+                </section>
+              </aside>
+
+              <section class="canvas-viewport surface">
+                <header class="canvas-viewport-header">
+                  <div class="canvas-view-labels">
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.scopeLabel">Scope</strong><span data-i18n="canvas.header.scopeValue">Current Workspace</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.viewLabel">View</strong><span data-i18n="canvas.header.viewValue">Recent Active</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.layoutLabel">Layout</strong><span data-i18n="canvas.header.layoutValue">Hybrid</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.focusLabel">Focus</strong><span data-i18n="canvas.header.focusValue">Analysis Cluster</span></span>
+                  </div>
+                  <div class="canvas-zoom-pill">
+                    <span data-i18n="canvas.header.zoomLabel">Zoom</span>
+                    <strong>100%</strong>
+                  </div>
+                </header>
+
+                <div class="canvas-grid-stage">
+                  <div class="canvas-active-note surface-strong">
+                    <p class="canvas-active-note-label" data-i18n="canvas.global.recentSetLabel">Recent Active Set</p>
+                    <p data-i18n="canvas.global.recentSetBody">The center grouping is intentional: this is the working set, not just whatever happens to be in the middle.</p>
+                  </div>
+
+                  <div class="canvas-object project-anchor surface-strong">
+                    <span class="canvas-object-type" data-i18n="canvas.global.projectAnchor">Project Anchor</span>
+                    <h3 data-i18n="canvas.sample.projectDelta">Project Delta</h3>
+                    <p data-i18n="canvas.global.projectBody">Workspace anchor for linked analysis, reporting, and review work.</p>
+                    <div class="canvas-object-tags">
+                      <span>v2.4.0</span>
+                      <span data-i18n="canvas.global.activeTag">Active</span>
+                    </div>
+                  </div>
+
+                  <div class="canvas-object workitem-analysis surface">
+                    <div class="canvas-object-heading">
+                      <span class="canvas-object-rail"></span>
+                      <h3 data-i18n="canvas.sample.analysis">Analysis</h3>
+                      <span class="canvas-status-chip" data-i18n="canvas.global.analysisStatus">Running</span>
+                    </div>
+                    <p data-i18n="canvas.global.analysisBody">Baseline metric derivation from historical repository data and current run outputs.</p>
+                    <div class="canvas-progress-meta">
+                      <span data-i18n="canvas.global.analysisFocus">Current Focus</span>
+                      <strong>84%</strong>
+                    </div>
+                    <span class="canvas-progress-bar"><span class="canvas-progress-bar-fill"></span></span>
+                  </div>
+
+                  <div class="canvas-object workitem-reporting surface-muted">
+                    <div class="canvas-object-heading">
+                      <span class="canvas-object-rail canvas-object-rail-secondary"></span>
+                      <h3 data-i18n="canvas.sample.reporting">Reporting</h3>
+                    </div>
+                    <p data-i18n="canvas.global.reportingBody">Draft generation of executive summaries and technical logs.</p>
+                    <div class="canvas-object-footnote" data-i18n="canvas.global.reportingStatus">Status: Complete</div>
+                  </div>
+
+                  <div class="canvas-object workitem-review surface-muted">
+                    <div class="canvas-object-heading">
+                      <span class="canvas-object-rail canvas-object-rail-alert"></span>
+                      <h3 data-i18n="canvas.sample.review">Review</h3>
+                    </div>
+                    <p data-i18n="canvas.global.reviewBody">Stakeholder gate verification for phase-gate transition.</p>
+                    <div class="canvas-object-footnote" data-i18n="canvas.global.reviewStatus">Status: Pending Input</div>
+                  </div>
+
+                  <div class="canvas-asset-cluster asset-cluster-left">
+                    <div class="canvas-asset-pill surface-muted">log_files.zip</div>
+                    <div class="canvas-asset-pill surface-muted">raw_data_v1.csv</div>
+                  </div>
+                  <div class="canvas-asset-cluster asset-cluster-right">
+                    <div class="canvas-asset-pill canvas-asset-pill-strong surface">summary_report.pdf</div>
+                  </div>
+                  <div class="canvas-asset-cluster asset-cluster-bottom">
+                    <div class="canvas-asset-pill surface-muted">metrics_sheet.xls</div>
+                  </div>
+
+                  <div class="canvas-peripheral-object surface-muted">
+                    <span class="canvas-object-type" data-i18n="canvas.global.peripheralLabel">Peripheral Project</span>
+                    <h3 data-i18n="canvas.sample.projectBeta">Project Beta</h3>
+                    <p data-i18n="canvas.global.peripheralBody">Legacy migration archives remain visible but de-emphasized outside the active set.</p>
+                  </div>
+
+                  <svg class="canvas-connection-layer" viewBox="0 0 1000 700" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M 500 332 L 310 190"></path>
+                    <path d="M 500 332 L 706 214"></path>
+                    <path d="M 500 332 L 500 540"></path>
+                    <path d="M 310 190 L 150 138"></path>
+                    <path d="M 310 190 L 160 208"></path>
+                    <path d="M 706 214 L 856 168"></path>
+                    <path d="M 500 540 L 706 622"></path>
+                  </svg>
+
+                  <div class="canvas-minimap surface-muted" aria-hidden="true">
+                    <span class="canvas-minimap-node canvas-minimap-node-center"></span>
+                    <span class="canvas-minimap-node canvas-minimap-node-a"></span>
+                    <span class="canvas-minimap-node canvas-minimap-node-b"></span>
+                    <span class="canvas-minimap-node canvas-minimap-node-c"></span>
+                    <span class="canvas-minimap-frame"></span>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <section id="canvas-detail-view" class="view-panel canvas-view" data-view="canvasDetail" hidden>
+          <section class="canvas-shell surface">
+            <header class="canvas-toolbar surface-muted">
+              <div class="canvas-toolbar-copy">
+                <p class="eyebrow" data-i18n="canvas.surface.eyebrow">Canvas Space</p>
+                <h2 data-i18n="canvas.detail.title">Canvas Detail View</h2>
+                <p data-i18n="canvas.detail.description">Focused detail view keeps room for future object inspection and scoped emphasis.</p>
+              </div>
+              <div class="canvas-toolbar-switch" role="group" data-i18n-aria-label="canvas.toolbar.switchAria">
+                <button class="canvas-toggle" type="button" data-view-target="canvasGlobal" data-active-when-view="canvasGlobal" data-i18n="canvas.toggle.global">Global</button>
+                <button class="canvas-toggle" type="button" data-view-target="canvasDetail" data-active-when-view="canvasDetail" data-i18n="canvas.toggle.detail">Detail</button>
+              </div>
+            </header>
+
+            <div class="canvas-workspace canvas-workspace-detail">
+              <section class="canvas-viewport surface">
+                <header class="canvas-viewport-header">
+                  <div class="canvas-view-labels">
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.scopeLabel">Scope</strong><span data-i18n="canvas.detail.scopeValue">Object Neighborhood</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.viewLabel">View</strong><span data-i18n="canvas.detail.viewValue">Focused Detail</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.layoutLabel">Layout</strong><span data-i18n="canvas.detail.layoutValue">Centered Card</span></span>
+                    <span class="canvas-view-pill"><strong data-i18n="canvas.header.focusLabel">Focus</strong><span data-i18n="canvas.detail.focusValue">Analysis / AN-402-DELTA</span></span>
+                  </div>
+                  <button class="canvas-return-link" type="button" data-view-target="canvasGlobal" data-i18n="canvas.detail.backToGlobal">Return to global map</button>
+                </header>
+
+                <div class="canvas-detail-stage">
+                  <div class="canvas-detail-node canvas-detail-node-top surface-muted">
+                    <span data-i18n="canvas.detail.neighborTopType">Neighbor</span>
+                    <strong data-i18n="canvas.sample.review">Review</strong>
+                  </div>
+                  <div class="canvas-detail-node canvas-detail-node-right surface-muted">
+                    <span data-i18n="canvas.detail.neighborRightType">Asset</span>
+                    <strong>summary_report.pdf</strong>
+                  </div>
+                  <div class="canvas-detail-node canvas-detail-node-bottom surface-muted">
+                    <span data-i18n="canvas.detail.neighborBottomType">Project</span>
+                    <strong data-i18n="canvas.sample.projectDelta">Project Delta</strong>
+                  </div>
+
+                  <div class="canvas-detail-card surface-strong">
+                    <div class="canvas-detail-card-glow" aria-hidden="true"></div>
+                    <div class="canvas-detail-card-header">
+                      <div>
+                        <p class="canvas-detail-card-kicker" data-i18n="canvas.detail.cardKicker">WorkItem / AN-402-DELTA</p>
+                        <h3 data-i18n="canvas.sample.analysis">Analysis</h3>
+                      </div>
+                      <span class="canvas-status-chip" data-i18n="canvas.detail.statusChip">In Progress</span>
+                    </div>
+                    <p class="canvas-detail-card-body" data-i18n="canvas.detail.focusBody">Analyzing the latest Delta results, correlating telemetry with baseline patterns, and identifying structural drift in the current sprint.</p>
+
+                    <section class="canvas-local-context surface-muted">
+                      <div class="canvas-local-context-header">
+                        <p class="canvas-outline-label" data-i18n="canvas.detail.localNeighborhoodLabel">Local Neighborhood</p>
+                        <span data-i18n="canvas.detail.localNeighborhoodMeta">Recent Active Focus</span>
+                      </div>
+                      <div class="canvas-local-bars" aria-hidden="true">
+                        <span style="height: 40%"></span>
+                        <span style="height: 65%"></span>
+                        <span style="height: 50%"></span>
+                        <span style="height: 90%"></span>
+                        <span style="height: 75%"></span>
+                        <span style="height: 85%"></span>
+                        <span style="height: 45%"></span>
+                      </div>
+                      <div class="canvas-local-axis">
+                        <span data-i18n="canvas.detail.localAxisLeft">T-12h</span>
+                        <span data-i18n="canvas.detail.localAxisCenter">Live Stream</span>
+                        <span data-i18n="canvas.detail.localAxisRight">Current Phase</span>
+                      </div>
+                    </section>
+
+                    <div class="canvas-detail-actions">
+                      <button id="canvas-open-related-chat-button" class="canvas-action-primary" type="button" data-i18n="canvas.detail.openChat">Open related chat</button>
+                      <button class="canvas-action-secondary" type="button" data-view-target="canvasGlobal" data-i18n="canvas.detail.viewMap">View global map</button>
+                    </div>
+                  </div>
+
+                  <svg class="canvas-detail-links" viewBox="0 0 1000 700" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M 290 160 L 500 318"></path>
+                    <path d="M 760 198 L 564 336"></path>
+                    <path d="M 340 554 L 472 438"></path>
+                  </svg>
+                </div>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <section id="settings-general-view" class="view-panel settings-surface" data-view="settingsGeneral" hidden>
+          <section class="settings-hero surface-muted">
+            <div class="brand-inline">
+              <div class="brand-mark brand-mark-small" aria-hidden="true">
+                <span class="brand-mark-core"></span>
+                <span class="brand-mark-edge brand-mark-edge-a"></span>
+                <span class="brand-mark-edge brand-mark-edge-b"></span>
+              </div>
+              <div>
+                <p class="eyebrow" data-i18n="brand.name">Distilllab</p>
+                <h2 data-i18n="settings.title">Settings</h2>
+                <p class="brand-tagline" data-i18n="brand.tagline">Distill Work Into Structure</p>
+              </div>
+            </div>
+            <p data-i18n="settings.description">Appearance and language live in the non-debug settings section and rerender visible labels immediately.</p>
+          </section>
+
+          <section class="panel">
+            <h3 data-i18n="settings.section.general">General</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label for="locale-selector" data-i18n="settings.language.label">Language</label>
+                <select id="locale-selector">
+                  <option value="en">English</option>
+                  <option value="zh-CN">Simplified Chinese</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="theme-selector" data-i18n="settings.appearance.theme">Theme</label>
+                <select id="theme-selector">
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+                <p data-i18n="settings.appearance.theme.description">Theme changes apply immediately and stay saved in desktop UI preferences.</p>
+              </div>
+              <div class="field field-full">
+                <label class="toggle-field" for="debug-visibility-toggle">
+                  <span>
+                    <span class="toggle-field-title" data-i18n="settings.debug.visibility.label">Show debug panel</span>
+                    <span class="toggle-field-description" data-i18n="settings.debug.visibility.description">Keep the migrated Phase 0 debug workspace available in Settings > Debug.</span>
+                  </span>
+                  <input id="debug-visibility-toggle" type="checkbox" />
+                </label>
+                <p id="debug-visibility-development-note" class="settings-inline-note" data-i18n="settings.debug.visibility.developmentNote" hidden>
+                  Development builds keep Settings > Debug reachable even when this preference is turned off.
+                </p>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section id="settings-debug-view" class="view-panel settings-surface" data-view="settingsDebug" hidden>
+          <section class="settings-hero surface-muted">
+            <div class="brand-inline">
+              <div class="brand-mark brand-mark-small" aria-hidden="true">
+                <span class="brand-mark-core"></span>
+                <span class="brand-mark-edge brand-mark-edge-a"></span>
+                <span class="brand-mark-edge brand-mark-edge-b"></span>
+              </div>
+              <div>
+                <p class="eyebrow" data-i18n="brand.name">Distilllab</p>
+                <h2 data-i18n="settings.debug">Debug</h2>
+                <p class="brand-tagline" data-i18n="brand.tagline">Distill Work Into Structure</p>
+              </div>
+            </div>
+            <p data-i18n="debug.description">The current Phase 0 page stays available here while the future shell is still under construction.</p>
+          </section>
+
+          <section id="debug-unavailable" class="panel surface-muted" hidden>
+            <h3 data-i18n="settings.debug.hidden.title">Debug Surface Hidden</h3>
+            <p data-i18n="settings.debug.hidden.description">Debug tools are currently hidden by desktop preferences, so this section stays reserved without showing the legacy controls.</p>
+          </section>
+
+          <section id="debug-shell" class="debug-stack">
+            <section id="settings-debug-panel" class="debug-panel-shell">
+              <section class="panel">
+                <div class="debug-cluster">
+                  <button id="create-run-button" type="button" data-i18n="debug.actions.createRun">Create Demo Run</button>
+                  <button id="create-session-button" type="button" data-i18n="debug.actions.createSession">Create Demo Session</button>
+                  <button id="create-source-button" type="button" data-i18n="debug.actions.createSource">Create Demo Source</button>
+                  <button id="chunk-source-button" type="button" data-i18n="debug.actions.chunkSource">Chunk Demo Source</button>
+                  <button id="extract-work-items-button" type="button" data-i18n="debug.actions.extractWorkItems">Extract Demo Work Items</button>
+                  <button id="group-project-button" type="button" data-i18n="debug.actions.groupProject">Group Demo Project</button>
+                  <button id="build-assets-button" type="button" data-i18n="debug.actions.buildAssets">Build Demo Assets</button>
+                  <button id="list-runs-button" type="button" data-i18n="debug.actions.listRuns">List Runs</button>
+                  <button id="list-sessions-button" type="button" data-i18n="debug.actions.listSessions">List Sessions</button>
+                  <button id="list-sources-button" type="button" data-i18n="debug.actions.listSources">List Sources</button>
+                  <button id="list-work-items-button" type="button" data-i18n="debug.actions.listWorkItems">List Work Items</button>
+                  <button id="list-projects-button" type="button" data-i18n="debug.actions.listProjects">List Projects</button>
+                  <button id="list-assets-button" type="button" data-i18n="debug.actions.listAssets">List Assets</button>
+                </div>
+                <p>
+                  <label for="source-id-input" data-i18n="debug.lookup.sourceId">Source ID for chunk lookup:</label>
+                  <input id="source-id-input" type="text" placeholder="source-..." data-i18n-placeholder="debug.placeholder.sourceId" />
+                  <button id="list-chunks-button" type="button" data-i18n="debug.actions.listChunks">List Chunks</button>
+                </p>
+              </section>
+
+              <section class="panel">
+                <h3 data-i18n="debug.panel.config.title">LLM Config Bar</h3>
+                <p data-i18n="debug.panel.config.description">All session and debug LLM calls read from the current provider and model configured here.</p>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="config-provider-input" data-i18n="debug.config.provider">Current Provider</label>
+                    <select id="config-provider-input"></select>
+                  </div>
+                  <div class="field">
+                    <label for="config-model-input" data-i18n="debug.config.model">Current Model</label>
+                    <select id="config-model-input"></select>
+                  </div>
+                  <div class="field">
+                    <label for="config-provider-name-input" data-i18n="debug.config.providerName">Provider Name</label>
+                    <input id="config-provider-name-input" type="text" placeholder="Ice" data-i18n-placeholder="debug.placeholder.providerName" />
+                  </div>
+                  <div class="field">
+                    <label for="config-provider-npm-input" data-i18n="debug.config.providerNpm">Provider NPM</label>
+                    <input id="config-provider-npm-input" type="text" value="@ai-sdk/openai-compatible" />
+                  </div>
+                  <div class="field field-full">
+                    <label for="config-base-url-input" data-i18n="debug.config.baseUrl">Base URL</label>
+                    <input id="config-base-url-input" type="text" placeholder="https://ice.v.ua/v1" data-i18n-placeholder="debug.placeholder.baseUrl" />
+                  </div>
+                  <div class="field field-full">
+                    <label for="config-api-key-input" data-i18n="debug.config.apiKey">API Key</label>
+                    <input id="config-api-key-input" type="password" placeholder="{file:secrets/ice.key} or secret value" data-i18n-placeholder="debug.placeholder.apiKey" />
+                  </div>
+                  <div class="field field-full">
+                    <label for="config-provider-json-input" data-i18n="debug.config.providerJson">Advanced Provider JSON</label>
+                    <textarea id="config-provider-json-input" data-i18n-placeholder="debug.placeholder.providerJson"></textarea>
+                  </div>
+                  <div class="field field-full">
+                    <label for="config-import-path-input" data-i18n="debug.config.importPath">OpenCode Config Path</label>
+                    <input id="config-import-path-input" type="text" placeholder="optional, defaults to ~/.config/opencode/opencode.json" data-i18n-placeholder="debug.placeholder.importPath" />
+                  </div>
+                </div>
+                <button id="config-load-button" type="button" data-i18n="debug.actions.loadConfig">Load Config</button>
+                <button id="config-new-button" type="button" data-i18n="debug.actions.newProvider">New Provider</button>
+                <button id="config-save-button" type="button" data-i18n="debug.actions.saveProvider">Save Current Provider</button>
+                <button id="config-delete-button" type="button" data-i18n="debug.actions.deleteProvider">Delete Provider</button>
+                <button id="config-import-button" type="button" data-i18n="debug.actions.importProviders">Import From OpenCode</button>
+                <button id="config-test-button" type="button" data-i18n="debug.actions.testProvider">Test Current Provider</button>
+              </section>
+
+              <section class="panel">
+                <h3 data-i18n="debug.panel.configOutput">Config Output</h3>
+                <pre id="config-result">No config loaded yet.</pre>
+              </section>
+
+              <section class="panel">
+                <h3 data-i18n="debug.panel.timeline.title">Session Timeline</h3>
+                <p data-i18n="debug.panel.timeline.description">Use the formal session flow below to send messages and inspect the current timeline.</p>
+                <div class="form-grid">
+                  <div class="field field-full">
+                    <label for="timeline-session-selector" data-i18n="debug.timeline.existingSessions">Existing Sessions</label>
+                    <select id="timeline-session-selector">
+                      <option value="" data-i18n="debug.timeline.placeholder.selectSession">Select an existing session...</option>
+                    </select>
+                  </div>
+                  <div class="field field-full">
+                    <label for="timeline-session-id-input" data-i18n="debug.timeline.sessionId">Session ID</label>
+                    <input id="timeline-session-id-input" type="text" placeholder="session-..." data-i18n-placeholder="debug.placeholder.sessionId" />
+                  </div>
+                  <div class="field field-full">
+                    <label for="timeline-message-input" data-i18n="debug.timeline.message">Session Message</label>
+                    <textarea id="timeline-message-input" data-i18n-placeholder="debug.placeholder.message"></textarea>
+                  </div>
+                  <div class="field field-full">
+                    <label for="timeline-attachments-input" data-i18n="debug.timeline.attachments">Attachment Paths</label>
+                    <textarea id="timeline-attachments-input" data-i18n-placeholder="debug.placeholder.attachments"></textarea>
+                  </div>
+                </div>
+                <button id="timeline-create-session-button" type="button" data-i18n="debug.actions.createAndUseSession">Create and Use New Session</button>
+                <button id="timeline-refresh-sessions-button" type="button" data-i18n="debug.actions.refreshSessions">Refresh Sessions</button>
+                <button id="timeline-send-button" type="button" data-i18n="debug.actions.sendMessage">Send Session Message</button>
+                <button id="timeline-refresh-button" type="button" data-i18n="debug.actions.refreshTimeline">Refresh Timeline</button>
+              </section>
+
+              <section class="panel">
+                <h3 data-i18n="debug.panel.timelineOutput">Timeline Output</h3>
+                <pre id="timeline-result">No timeline loaded yet.</pre>
+              </section>
+
+              <section class="panel">
+                <h3 data-i18n="debug.panel.output">Output</h3>
+                <pre id="result">No result yet.</pre>
+              </section>
+            </section>
+          </section>
+        </section>
+      </main>
+
+      <aside class="right-inspector shell-chrome surface" data-i18n-aria-label="inspector.aria">
+        <section class="inspector-surface" data-inspector-view="chat">
+          <p class="eyebrow" data-i18n="inspector.eyebrow">Inspector</p>
+          <h2 data-i18n="inspector.chat.title">Chat Inspector</h2>
+          <p data-i18n="inspector.chat.description">Keep room for session context, pinned excerpts, and structured outputs.</p>
+
+          <div class="inspector-chat-stack" data-chat-inspector-state="draft">
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.draft.stateLabel">Active state</p>
+              <p data-i18n="inspector.chat.draft.stateBody">Draft mode. Structured objects appear here only after work is created or explicitly linked.</p>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.draft.metaLabel">Metadata</p>
+              <dl class="inspector-meta-list">
+                <div>
+                  <dt data-i18n="inspector.chat.draft.engineLabel">Engine</dt>
+                  <dd data-i18n="inspector.chat.draft.engineValue">Distill-v4-Core</dd>
+                </div>
+                <div>
+                  <dt data-i18n="inspector.chat.draft.privacyLabel">Privacy</dt>
+                  <dd data-i18n="inspector.chat.draft.privacyValue">Private</dd>
+                </div>
+              </dl>
+            </section>
+            <section class="inspector-card inspector-empty surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.draft.emptyLabel">No structured objects yet</p>
+              <p data-i18n="inspector.chat.draft.emptyBody">Objects appear after the first send creates or links them.</p>
+            </section>
+          </div>
+
+          <div class="inspector-chat-stack" data-chat-inspector-state="active" hidden>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.active.contextLabel">Run context</p>
+              <dl class="inspector-meta-list inspector-meta-list-single">
+                <div>
+                  <dt data-i18n="inspector.chat.active.goalLabel">Goal</dt>
+                  <dd data-i18n="inspector.chat.active.goalValue">Distill the latest Delta evidence into updated work items, linked assets, and a clearer project state.</dd>
+                </div>
+                <div>
+                  <dt data-i18n="inspector.chat.active.stageLabel">Current stage</dt>
+                  <dd data-i18n="inspector.chat.active.stageValue">Evidence review and work-item update</dd>
+                </div>
+                <div>
+                  <dt data-i18n="inspector.chat.active.actionLabel">Recent action</dt>
+                  <dd data-i18n="inspector.chat.active.actionValue">derive_workitem_state (active)</dd>
+                </div>
+              </dl>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.active.objectsLabel">Related objects</p>
+              <div class="inspector-chip-wrap">
+                <span class="inspector-chip" data-i18n="inspector.chat.active.objectProject">Project / Delta</span>
+                <span class="inspector-chip" data-i18n="inspector.chat.active.objectAssetA">Delta_Raw_01.csv</span>
+                <span class="inspector-chip" data-i18n="inspector.chat.active.objectAssetB">Cluster_Meta.json</span>
+              </div>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.chat.active.agentLabel">Agent state</p>
+              <p data-i18n="inspector.chat.active.agentBody">Focused on extracting anomalies, preserving structure, and linking outputs to related work objects.</p>
+            </section>
+          </div>
+        </section>
+        <section class="inspector-surface" data-inspector-view="canvas" hidden>
+          <p class="eyebrow" data-i18n="inspector.eyebrow">Inspector</p>
+          <h2 data-i18n="inspector.canvas.title">Canvas Inspector</h2>
+          <p data-i18n="inspector.canvas.description">Keep the current canvas model readable without implying that every canvas state already has a selected object.</p>
+          <div class="inspector-chat-stack" data-canvas-inspector-state="global">
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.global.modelLabel">Visible Model</p>
+              <p data-i18n="inspector.canvas.global.modelBody">The global canvas describes the object world and its active working set without implying a selected object.</p>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.global.scopeLabel">Scope</p>
+              <dl class="inspector-meta-list inspector-meta-list-single">
+                <div>
+                  <dt data-i18n="inspector.canvas.global.scopePrimaryLabel">Center model</dt>
+                  <dd data-i18n="inspector.canvas.global.scopePrimaryValue">Recent Active Set across Project Delta</dd>
+                </div>
+                <div>
+                  <dt data-i18n="inspector.canvas.global.scopeSecondaryLabel">Visible hierarchy</dt>
+                  <dd data-i18n="inspector.canvas.global.scopeSecondaryValue">Project anchor, work items, linked assets, and peripheral context</dd>
+                </div>
+              </dl>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.global.contentsLabel">Contents</p>
+              <div class="inspector-chip-wrap">
+                <span class="inspector-chip" data-i18n="canvas.sample.projectDelta">Project Delta</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.analysis">Analysis</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.reporting">Reporting</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.review">Review</span>
+                <span class="inspector-chip">summary_report.pdf</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.projectBeta">Project Beta</span>
+              </div>
+            </section>
+          </div>
+          <div class="inspector-chat-stack" data-canvas-inspector-state="detail" hidden>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.detail.stateLabel">Visible Model</p>
+              <p data-i18n="inspector.canvas.detail.stateBody">The detail canvas centers one object while preserving its local neighborhood and nearby relation cues.</p>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.detail.statusLabel">Status</p>
+              <dl class="inspector-meta-list inspector-meta-list-single">
+                <div>
+                  <dt data-i18n="inspector.canvas.detail.statusPrimaryLabel">Focused object</dt>
+                  <dd data-i18n="inspector.canvas.detail.statusPrimaryValue">Analysis / AN-402-DELTA</dd>
+                </div>
+                <div>
+                  <dt data-i18n="inspector.canvas.detail.statusSecondaryLabel">Current state</dt>
+                  <dd data-i18n="inspector.canvas.detail.statusSecondaryValue">Running with linked reporting and review context</dd>
+                </div>
+              </dl>
+            </section>
+            <section class="inspector-card surface-muted">
+              <p class="inspector-card-label" data-i18n="inspector.canvas.detail.relatedLabel">Related Objects</p>
+              <div class="inspector-chip-wrap">
+                <span class="inspector-chip" data-i18n="canvas.sample.projectDelta">Project Delta</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.reporting">Reporting</span>
+                <span class="inspector-chip" data-i18n="canvas.sample.review">Review</span>
+                <span class="inspector-chip">summary_report.pdf</span>
+                <span class="inspector-chip">log_files.zip</span>
+              </div>
+            </section>
+          </div>
+        </section>
+        <section class="inspector-surface" data-inspector-view="settings" hidden>
+          <p class="eyebrow" data-i18n="inspector.eyebrow">Inspector</p>
+          <h2 data-i18n="inspector.settings.title">Settings Notes</h2>
+          <p data-i18n="inspector.settings.description">Preferences persist across shell switches, and Debug remains nested inside Settings.</p>
+        </section>
+      </aside>
+    </div>
+    <script type="module" src="./desktop-shell.js"></script>
+  </body>
+</html>
