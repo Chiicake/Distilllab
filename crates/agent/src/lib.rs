@@ -8,8 +8,9 @@ pub mod tools;
 pub use definition::AgentDefinition;
 pub use error::AgentError;
 pub use llm::{
-    send_chat_completion_request, LlmProviderConfig, OpenAiCompatibleChatMessage,
-    OpenAiCompatibleChatRequest, OpenAiCompatibleChatResponse,
+    send_chat_completion_request, stream_chat_completion_request, LlmProviderConfig,
+    OpenAiCompatibleChatMessage, OpenAiCompatibleChatRequest,
+    OpenAiCompatibleChatResponse,
 };
 pub use session_agent::{
     BasicSessionAgent, LlmSessionAgent, RunCreationRequest, SessionActionType, SessionAgent,

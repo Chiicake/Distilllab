@@ -16,8 +16,8 @@ pub use contracts::{
     ChatStreamEvent, ChatStreamPhase, DistillRunStepPreview, LlmSessionDebugRequest,
     MaterializeDedupePolicy, MaterializeFailure, MaterializeSkip, MaterializeSourcesInput,
     MaterializeSourcesResult, MaterializedSourceRef, RunHandoffPreview,
-    SessionIntakePreview, SessionMessageExecutionResult, SessionMessageRequest,
-    SourceOriginKind,
+    RunProgressPhase, RunProgressUpdate, SessionIntakePreview,
+    SessionMessageExecutionResult, SessionMessageRequest, SourceOriginKind,
 };
 pub use flows::{build_import_and_distill_handoff_preview, execute_materialize_sources};
 pub use services::{
@@ -29,5 +29,7 @@ pub use services::{
     list_session_messages, list_sessions, list_sources, list_work_items, list_runs,
     preview_session_intake, preview_session_intake_with_config, send_session_message,
     send_session_message_with_config, send_session_message_with_config_and_result,
+    send_session_message_with_config_and_result_streaming,
+    send_session_message_with_config_and_result_streaming_with_progress,
     ToolExecutionError, ToolExecutor,
 };

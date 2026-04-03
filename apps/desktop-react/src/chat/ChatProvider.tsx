@@ -60,6 +60,47 @@ function createRequestId() {
   return `request-${crypto.randomUUID()}`;
 }
 
+function runStateFromStatus(statusText: string): 'pending' | 'running' | 'completed' | 'failed' {
+  const normalized = statusText.toLowerCase();
+  if (normalized.includes('failed')) {
+    return 'failed';
+  }
+  if (normalized.includes('completed') || normalized.includes('finished')) {
+    return 'completed';
+  }
+  if (normalized.includes('running') || normalized.includes('started')) {
+    return 'running';
+  }
+  return 'pending';
+}
+
+function runProgressFromState(state: 'pending' | 'running' | 'completed' | 'failed'): number {
+  if (state === 'completed') {
+    return 100;
+  }
+  if (state === 'running') {
+    return 55;
+  }
+  if (state === 'failed') {
+    return 100;
+  }
+  return 10;
+}
+
+function asRunState(value: string | null | undefined): 'pending' | 'running' | 'completed' | 'failed' {
+  const normalized = (value ?? '').toLowerCase();
+  if (normalized === 'failed') {
+    return 'failed';
+  }
+  if (normalized === 'completed') {
+    return 'completed';
+  }
+  if (normalized === 'running') {
+    return 'running';
+  }
+  return 'pending';
+}
+
 function sessionSummaryFromOption(option: SessionSelectorOption): ChatSessionSummary {
   return {
     sessionId: option.sessionId,
@@ -207,42 +248,117 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
           };
         }
         case 'run_started': {
+          const runId = event.createdRunId ?? 'run-active';
+          const statusText = event.statusText ?? 'Run started.';
+          const state = runStateFromStatus(statusText);
           const runMessage: ChatMessage = {
-            id: `system-run-start-${event.requestId}`,
+            id: `run-card-${runId}`,
             role: 'system',
-            kind: 'status',
-            content: event.statusText ?? 'Run started.',
+            kind: 'run',
+            content: statusText,
             expandable: true,
-            summary: event.statusText ?? 'Run started.',
-            details: event.statusText ?? 'Run started.',
+            summary: statusText,
+            details: statusText,
+            runMeta: {
+              runId,
+              state,
+              progressPercent: runProgressFromState(state),
+            },
           };
+
+          const filteredMessages = previous.messages.filter((message) => message.id !== runMessage.id);
 
           return {
             ...previous,
-            messages: [...previous.messages, runMessage],
-            lastRunStatus: event.statusText ?? previous.lastRunStatus,
-            streamStatuses: event.statusText
-              ? [...previous.streamStatuses, event.statusText]
+            messages: [...filteredMessages, runMessage],
+            lastRunStatus: statusText,
+            streamStatuses: statusText
+              ? [...previous.streamStatuses, statusText]
               : previous.streamStatuses,
           };
         }
-        case 'run_finished': {
+        case 'run_created':
+        case 'run_step_started':
+        case 'run_step_finished':
+        case 'run_progress': {
+          const update = event.runProgress;
+          if (!update) {
+            return previous;
+          }
+
+          const runId = update.runId;
+          const runState = asRunState(update.runState);
+          const progressPercent =
+            typeof update.progressPercent === 'number'
+              ? Math.max(0, Math.min(100, update.progressPercent))
+              : runProgressFromState(runState);
+
+          const fallbackStatus = [
+            update.stepSummary ?? update.stepKey ?? `Run ${runId}`,
+            update.detailText,
+          ]
+            .filter(Boolean)
+            .join(' - ');
+          const statusText = event.statusText ?? (fallbackStatus || `run ${runId} progress`);
+
           const runMessage: ChatMessage = {
-            id: `system-run-finish-${event.requestId}`,
+            id: `run-card-${runId}`,
             role: 'system',
-            kind: 'status',
-            content: event.statusText ?? 'Run finished.',
+            kind: 'run',
+            content: statusText,
             expandable: true,
-            summary: event.statusText ?? 'Run finished.',
-            details: event.statusText ?? 'Run finished.',
+            summary: statusText,
+            details: statusText,
+            runMeta: {
+              runId,
+              state: runState,
+              progressPercent,
+              runType: update.runType,
+              stepKey: update.stepKey,
+              stepSummary: update.stepSummary,
+              stepStatus: update.stepStatus,
+              stepIndex: update.stepIndex,
+              stepsTotal: update.stepsTotal,
+              detailText: update.detailText,
+            },
           };
+
+          const filteredMessages = previous.messages.filter((message) => message.id !== runMessage.id);
+          return {
+            ...previous,
+            messages: [...filteredMessages, runMessage],
+            activeRunLabel: runId,
+            lastRunStatus: statusText,
+            streamStatuses: [...previous.streamStatuses, statusText],
+          };
+        }
+        case 'run_finished': {
+          const runId = event.createdRunId ?? 'run-active';
+          const statusText = event.statusText ?? 'Run finished.';
+          const state = runStateFromStatus(statusText);
+          const runMessage: ChatMessage = {
+            id: `run-card-${runId}`,
+            role: 'system',
+            kind: 'run',
+            content: statusText,
+            expandable: true,
+            summary: statusText,
+            details: statusText,
+            runMeta: {
+              runId,
+              state,
+              progressPercent: runProgressFromState(state),
+            },
+          };
+
+          const filteredMessages = previous.messages.filter((message) => message.id !== runMessage.id);
 
           return {
             ...previous,
-            messages: [...previous.messages, runMessage],
-            lastRunStatus: event.statusText ?? previous.lastRunStatus,
-            streamStatuses: event.statusText
-              ? [...previous.streamStatuses, event.statusText]
+            messages: [...filteredMessages, runMessage],
+            lastRunStatus: statusText,
+            streamStatuses: statusText
+              ? [...previous.streamStatuses, statusText]
               : previous.streamStatuses,
           };
         }
@@ -262,12 +378,18 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
         }
         case 'completed': {
           const parsedTimeline = event.timelineText ? parseTimelineText(event.timelineText) : previous.messages;
+          const streamRunMessages = previous.messages.filter((message) => message.kind === 'run');
+          const timelineIds = new Set(parsedTimeline.map((message) => message.id));
+          const mergedMessages = [
+            ...parsedTimeline,
+            ...streamRunMessages.filter((message) => !timelineIds.has(message.id)),
+          ];
 
           return {
             ...previous,
             isStreaming: false,
             errorText: null,
-            messages: parsedTimeline,
+            messages: mergedMessages,
             activeRunLabel: event.createdRunId ?? previous.activeRunLabel,
             streamStatuses: [...previous.streamStatuses, 'timeline synchronized'],
             liveAssistantText: '',

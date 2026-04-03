@@ -1,6 +1,7 @@
 use crate::{
-    send_chat_completion_request, AgentDefinition, AgentError, LlmProviderConfig,
-    OpenAiCompatibleChatMessage, OpenAiCompatibleChatRequest, SkillSelection, ToolInvocation,
+    send_chat_completion_request, stream_chat_completion_request, AgentDefinition, AgentError,
+    LlmProviderConfig, OpenAiCompatibleChatMessage, OpenAiCompatibleChatRequest,
+    SkillSelection, ToolInvocation,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -460,8 +461,8 @@ impl LlmSessionAgent {
         }
     }
 
-    fn build_chat_messages(&self, input: &SessionAgentInput) -> Vec<OpenAiCompatibleChatMessage> {
-        let attachment_context = if input.intake.attachments.is_empty() {
+    fn format_attachment_context(input: &SessionAgentInput) -> String {
+        if input.intake.attachments.is_empty() {
             "current_intake_attachments: none".to_string()
         } else {
             let attachment_lines = input
@@ -482,7 +483,11 @@ impl LlmSessionAgent {
                 .join("\n");
 
             format!("current_intake_attachments:\n{}", attachment_lines)
-        };
+        }
+    }
+
+    fn build_chat_messages(&self, input: &SessionAgentInput) -> Vec<OpenAiCompatibleChatMessage> {
+        let attachment_context = Self::format_attachment_context(input);
 
         let system_context = format!(
             "{}\nCurrent session context:\nsession_id: {}\nsession_title: {}\ncurrent_intent: {}\ncurrent_object_type: {}\ncurrent_object_id: {}\nsession_summary: {}\n{}",
@@ -508,6 +513,58 @@ impl LlmSessionAgent {
                 SessionMessageRole::User => "user",
                 SessionMessageRole::Assistant => "assistant",
                 SessionMessageRole::System => "system",
+            };
+
+            messages.push(OpenAiCompatibleChatMessage {
+                role: role.to_string(),
+                content: recent_message.content.clone(),
+            });
+        }
+
+        let current_turn_already_present = input.recent_messages.iter().rev().any(|message| {
+            message.role == SessionMessageRole::User && message.content == input.intake.user_message
+        });
+
+        if !current_turn_already_present {
+            messages.push(OpenAiCompatibleChatMessage {
+                role: "user".to_string(),
+                content: input.intake.user_message.clone(),
+            });
+        }
+
+        messages
+    }
+
+    fn build_direct_reply_stream_messages(
+        &self,
+        input: &SessionAgentInput,
+        decision: &SessionAgentDecision,
+    ) -> Vec<OpenAiCompatibleChatMessage> {
+        let attachment_context = Self::format_attachment_context(input);
+        let system_context = format!(
+            "You are the assistant for Distilllab. You are writing the final user-facing reply for an already-selected direct_reply action. Respond with plain text only. Do not output JSON, metadata fields, or markdown fences.\nCurrent session context:\nsession_id: {}\nsession_title: {}\ncurrent_intent: {}\ncurrent_object_type: {}\ncurrent_object_id: {}\nsession_summary: {}\n{}\nPlanner decision:\nintent: {}\naction_type: {}\nreply_text_draft: {}",
+            input.session.id,
+            input.session.title,
+            input.session.current_intent,
+            input.session.current_object_type,
+            input.session.current_object_id,
+            input.session.summary,
+            attachment_context,
+            decision.intent.as_str(),
+            decision.action_type.as_str(),
+            decision.reply_text,
+        );
+
+        let mut messages = vec![OpenAiCompatibleChatMessage {
+            role: "system".to_string(),
+            content: system_context,
+        }];
+
+        for recent_message in &input.recent_messages {
+            let role = match recent_message.role {
+                SessionMessageRole::User => "user",
+                SessionMessageRole::Assistant => "assistant",
+                SessionMessageRole::System => continue,
             };
 
             messages.push(OpenAiCompatibleChatMessage {
@@ -769,6 +826,7 @@ impl LlmSessionAgent {
         let request = OpenAiCompatibleChatRequest {
             model: self.config.model.clone(),
             messages,
+            stream: None,
         };
 
         let response = send_chat_completion_request(&self.client, &self.config, &request).await?;
@@ -791,6 +849,88 @@ impl LlmSessionAgent {
             raw_output,
             decision,
         })
+    }
+
+    pub async fn decide_with_stream<F>(
+        &self,
+        input: SessionAgentInput,
+        mut on_reply_chunk: F,
+    ) -> Result<LlmSessionAgentDebugResult, AgentError>
+    where
+        F: FnMut(&str),
+    {
+        let mut debug_result = self.decide_with_debug(input.clone()).await?;
+
+        if debug_result.decision.action_type != SessionActionType::DirectReply {
+            return Ok(debug_result);
+        }
+
+        let stream_messages = self.build_direct_reply_stream_messages(&input, &debug_result.decision);
+        let request = OpenAiCompatibleChatRequest {
+            model: self.config.model.clone(),
+            messages: stream_messages,
+            stream: Some(true),
+        };
+
+        let mut streamed_reply_from_chunks = String::new();
+        let mut emitted_any_chunk = false;
+        let streamed_reply_result = stream_chat_completion_request(
+            &self.client,
+            &self.config,
+            &request,
+            |chunk| {
+                if chunk.is_empty() {
+                    return;
+                }
+                emitted_any_chunk = true;
+                streamed_reply_from_chunks.push_str(chunk);
+                on_reply_chunk(chunk);
+            },
+        )
+        .await;
+
+        let streamed_reply = match streamed_reply_result {
+            Ok(full_reply) if !full_reply.trim().is_empty() => full_reply,
+            Ok(_) => streamed_reply_from_chunks.clone(),
+            Err(_) => {
+                let fallback_request = OpenAiCompatibleChatRequest {
+                    model: self.config.model.clone(),
+                    messages: self.build_direct_reply_stream_messages(&input, &debug_result.decision),
+                    stream: None,
+                };
+
+                let fallback_response =
+                    send_chat_completion_request(&self.client, &self.config, &fallback_request).await;
+
+                match fallback_response {
+                    Ok(response) => response
+                        .first_message_content()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| streamed_reply_from_chunks.clone()),
+                    Err(_) => streamed_reply_from_chunks.clone(),
+                }
+            }
+        };
+
+        let final_reply_text = if streamed_reply.trim().is_empty() {
+            debug_result.decision.reply_text.clone()
+        } else {
+            streamed_reply
+        };
+
+        if !emitted_any_chunk && !final_reply_text.trim().is_empty() {
+            on_reply_chunk(&final_reply_text);
+        } else if emitted_any_chunk && !streamed_reply_from_chunks.is_empty() {
+            if let Some(suffix) = final_reply_text.strip_prefix(&streamed_reply_from_chunks) {
+                if !suffix.is_empty() {
+                    on_reply_chunk(suffix);
+                }
+            }
+        }
+
+        debug_result.decision.reply_text = final_reply_text;
+
+        Ok(debug_result)
     }
 }
 
@@ -2455,4 +2595,345 @@ mod tests {
         assert!(definition.system_prompt.contains("request_clarification"));
         assert!(definition.system_prompt.contains("create_run"));
     }
+
+    #[tokio::test]
+    async fn llm_session_agent_streaming_direct_reply_uses_second_plain_text_call() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let (mut stream_one, _) = listener
+                .accept()
+                .await
+                .expect("server should accept first connection");
+            let mut buffer_one = [0_u8; 8192];
+            let bytes_one = stream_one
+                .read(&mut buffer_one)
+                .await
+                .expect("server should read first request");
+            let request_one = String::from_utf8_lossy(&buffer_one[..bytes_one]);
+            assert!(request_one.contains("\"stream\":false") || !request_one.contains("\"stream\":"));
+
+            let planner_json = "{\"intent\":\"general_reply\",\"action_type\":\"direct_reply\",\"reply_text\":\"Draft planner reply\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Providing direct reply\",\"tool_invocation\":null,\"skill_selection\":null,\"should_continue_planning\":false,\"failure_hint\":null}";
+            let encoded_planner_json = serde_json::to_string(planner_json)
+                .expect("planner json should encode");
+            let response_body_one = format!(
+                "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":{encoded_planner_json}}}}}]}}"
+            );
+            let response_one = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body_one.len(),
+                response_body_one
+            );
+            stream_one
+                .write_all(response_one.as_bytes())
+                .await
+                .expect("server should write first response");
+
+            let (mut stream_two, _) = listener
+                .accept()
+                .await
+                .expect("server should accept second connection");
+            let mut buffer_two = [0_u8; 8192];
+            let bytes_two = stream_two
+                .read(&mut buffer_two)
+                .await
+                .expect("server should read second request");
+            let request_two = String::from_utf8_lossy(&buffer_two[..bytes_two]);
+            assert!(request_two.contains("\"stream\":true"));
+
+            let response_body_two = concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n",
+                "data: [DONE]\n",
+                "\n"
+            );
+            let response_two = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body_two.len(),
+                response_body_two
+            );
+            stream_two
+                .write_all(response_two.as_bytes())
+                .await
+                .expect("server should write second response");
+        });
+
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: format!("http://{}", address),
+            model: "gpt-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Streaming Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing two-phase streaming direct reply".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Hello".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
+        };
+
+        let mut observed_chunks = Vec::new();
+        let result = agent
+            .decide_with_stream(input, |chunk| observed_chunks.push(chunk.to_string()))
+            .await
+            .expect("two-phase stream should succeed");
+
+        assert_eq!(observed_chunks, vec!["Hello".to_string(), " world".to_string()]);
+        assert_eq!(result.decision.action_type, SessionActionType::DirectReply);
+        assert_eq!(result.decision.reply_text, "Hello world");
+    }
+
+    #[tokio::test]
+    async fn llm_session_agent_streaming_non_direct_reply_skips_second_stream_call() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("server should accept connection");
+            let mut buffer = [0_u8; 8192];
+            let bytes = stream
+                .read(&mut buffer)
+                .await
+                .expect("server should read request");
+            let request = String::from_utf8_lossy(&buffer[..bytes]);
+            assert!(request.contains("\"stream\":false") || !request.contains("\"stream\":"));
+
+            let planner_json = "{\"intent\":\"general_reply\",\"action_type\":\"tool_call\",\"reply_text\":\"I will check first\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Need tool first\",\"tool_invocation\":{\"tool_name\":\"search_memory\",\"arguments\":{},\"reasoning_summary\":null,\"expected_follow_up\":null},\"skill_selection\":null,\"should_continue_planning\":true,\"failure_hint\":\"reply_or_clarify\"}";
+            let encoded_planner_json = serde_json::to_string(planner_json)
+                .expect("planner json should encode");
+            let response_body = format!(
+                "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":{encoded_planner_json}}}}}]}}"
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("server should write response");
+        });
+
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: format!("http://{}", address),
+            model: "gpt-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Streaming Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing non-direct-reply path".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Find related notes".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
+        };
+
+        let mut observed_chunks = Vec::new();
+        let result = agent
+            .decide_with_stream(input, |chunk| observed_chunks.push(chunk.to_string()))
+            .await
+            .expect("streaming decision should succeed");
+
+        assert!(observed_chunks.is_empty());
+        assert_eq!(result.decision.action_type, SessionActionType::ToolCall);
+        assert_eq!(
+            result
+                .decision
+                .tool_invocation
+                .as_ref()
+                .map(|value| value.tool_name.as_str()),
+            Some("search_memory")
+        );
+    }
+
+    #[tokio::test]
+    async fn llm_session_agent_streaming_direct_reply_fallback_emits_single_chunk() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            // First connection: planner non-stream JSON decision
+            let (mut stream_one, _) = listener
+                .accept()
+                .await
+                .expect("server should accept first connection");
+            let mut buffer_one = [0_u8; 8192];
+            let _ = stream_one
+                .read(&mut buffer_one)
+                .await
+                .expect("server should read first request");
+
+            let planner_json = "{\"intent\":\"general_reply\",\"action_type\":\"direct_reply\",\"reply_text\":\"Draft planner reply\",\"primary_object_type\":null,\"primary_object_id\":null,\"suggested_run_type\":null,\"session_summary\":\"Providing direct reply\",\"tool_invocation\":null,\"skill_selection\":null,\"should_continue_planning\":false,\"failure_hint\":null}";
+            let encoded_planner_json = serde_json::to_string(planner_json)
+                .expect("planner json should encode");
+            let response_body_one = format!(
+                "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":{encoded_planner_json}}}}}]}}"
+            );
+            let response_one = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body_one.len(),
+                response_body_one
+            );
+            stream_one
+                .write_all(response_one.as_bytes())
+                .await
+                .expect("server should write first response");
+
+            // Second connection: broken SSE to force stream parsing error
+            let (mut stream_two, _) = listener
+                .accept()
+                .await
+                .expect("server should accept second connection");
+            let mut buffer_two = [0_u8; 8192];
+            let _ = stream_two
+                .read(&mut buffer_two)
+                .await
+                .expect("server should read second request");
+
+            let response_body_two = concat!(
+                "data: {not-valid-json}\n",
+                "data: [DONE]\n",
+                "\n"
+            );
+            let response_two = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body_two.len(),
+                response_body_two
+            );
+            stream_two
+                .write_all(response_two.as_bytes())
+                .await
+                .expect("server should write second response");
+
+            // Third connection: non-stream fallback reply
+            let (mut stream_three, _) = listener
+                .accept()
+                .await
+                .expect("server should accept third connection");
+            let mut buffer_three = [0_u8; 8192];
+            let _ = stream_three
+                .read(&mut buffer_three)
+                .await
+                .expect("server should read third request");
+
+            let response_body_three = r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Fallback final reply"
+                        }
+                    }
+                ]
+            }"#;
+            let response_three = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body_three.len(),
+                response_body_three
+            );
+            stream_three
+                .write_all(response_three.as_bytes())
+                .await
+                .expect("server should write third response");
+        });
+
+        let agent = LlmSessionAgent::new(LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: format!("http://{}", address),
+            model: "gpt-test".to_string(),
+            api_key: None,
+        });
+
+        let input = SessionAgentInput {
+            session: Session {
+                id: "session-1".to_string(),
+                title: "Streaming Session".to_string(),
+                status: SessionStatus::Active,
+                current_intent: "idle".to_string(),
+                current_object_type: "none".to_string(),
+                current_object_id: "none".to_string(),
+                summary: "Testing fallback streaming path".to_string(),
+                started_at: "2026-03-28T00:00:00Z".to_string(),
+                updated_at: "2026-03-28T00:00:00Z".to_string(),
+                last_user_message_at: "2026-03-28T00:00:00Z".to_string(),
+                last_run_at: "2026-03-28T00:00:00Z".to_string(),
+                last_compacted_at: "2026-03-28T00:00:00Z".to_string(),
+                metadata_json: "{}".to_string(),
+            },
+            recent_messages: vec![],
+            intake: SessionIntake {
+                session_id: "session-1".to_string(),
+                user_message: "Hello".to_string(),
+                attachments: vec![],
+                current_object_type: None,
+                current_object_id: None,
+            },
+        };
+
+        let mut observed_chunks = Vec::new();
+        let result = agent
+            .decide_with_stream(input, |chunk| observed_chunks.push(chunk.to_string()))
+            .await
+            .expect("streaming decision should succeed with fallback");
+
+        assert_eq!(observed_chunks, vec!["Fallback final reply".to_string()]);
+        assert_eq!(result.decision.action_type, SessionActionType::DirectReply);
+        assert_eq!(result.decision.reply_text, "Fallback final reply");
+    }
+
 }

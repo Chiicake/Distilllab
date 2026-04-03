@@ -1,5 +1,5 @@
 use crate::app::AppRuntime;
-use crate::contracts::{MaterializeSourcesResult, RunInput};
+use crate::contracts::{MaterializeSourcesResult, RunInput, RunProgressPhase, RunProgressUpdate};
 use crate::flows::execute_materialize_sources;
 use agent::{SessionActionType, SessionAgentDecision};
 use chrono::Utc;
@@ -18,11 +18,49 @@ pub struct DistillRunExecutionOutcome {
     pub materialize_result: Option<MaterializeSourcesResult>,
 }
 
+fn run_progress_update(
+    phase: RunProgressPhase,
+    run: &Run,
+    progress_percent: Option<u8>,
+    step_key: Option<&str>,
+    step_summary: Option<&str>,
+    step_status: Option<&str>,
+    step_index: Option<u32>,
+    steps_total: Option<u32>,
+    detail_text: Option<&str>,
+) -> RunProgressUpdate {
+    RunProgressUpdate {
+        phase,
+        run_id: run.id.clone(),
+        run_type: run.run_type.as_str().to_string(),
+        run_state: run.status.as_str().to_string(),
+        progress_percent,
+        step_key: step_key.map(str::to_string),
+        step_summary: step_summary.map(str::to_string),
+        step_status: step_status.map(str::to_string),
+        step_index,
+        steps_total,
+        detail_text: detail_text.map(str::to_string),
+    }
+}
+
 pub fn create_and_execute_from_decision(
     runtime: &AppRuntime,
     decision: &SessionAgentDecision,
     run_input: RunInput,
 ) -> Result<DistillRunExecutionOutcome, RuntimeError> {
+    create_and_execute_from_decision_with_progress(runtime, decision, run_input, |_| {})
+}
+
+pub fn create_and_execute_from_decision_with_progress<F>(
+    runtime: &AppRuntime,
+    decision: &SessionAgentDecision,
+    run_input: RunInput,
+    mut on_progress: F,
+) -> Result<DistillRunExecutionOutcome, RuntimeError>
+where
+    F: FnMut(RunProgressUpdate),
+{
     if decision.action_type != SessionActionType::CreateRun {
         return Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -62,8 +100,63 @@ pub fn create_and_execute_from_decision(
 
     insert_run(&conn, &run)?;
 
+    on_progress(run_progress_update(
+        RunProgressPhase::Created,
+        &run,
+        Some(0),
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("run created"),
+    ));
+
+    run.status = RunState::Running;
+    update_run_status(&conn, &run.id, &run.status)?;
+    on_progress(run_progress_update(
+        RunProgressPhase::StateChanged,
+        &run,
+        Some(5),
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("run state changed to running"),
+    ));
+
     let materialize_result = if run.run_type.as_str() == "import_and_distill" {
+        on_progress(run_progress_update(
+            RunProgressPhase::StepStarted,
+            &run,
+            Some(10),
+            Some("materialize_sources"),
+            Some("Materialize message and attachment sources for the run"),
+            Some("running"),
+            Some(1),
+            Some(1),
+            Some("materialize step started"),
+        ));
+
         let result = execute_materialize_sources(runtime, &run.id, run_input)?;
+
+        on_progress(run_progress_update(
+            RunProgressPhase::StepFinished,
+            &run,
+            Some(90),
+            Some("materialize_sources"),
+            Some("Materialize message and attachment sources for the run"),
+            Some(if result.can_continue {
+                "completed"
+            } else {
+                "failed"
+            }),
+            Some(1),
+            Some(1),
+            Some(result.summary.as_str()),
+        ));
+
         let next_status = if result.can_continue {
             RunState::Completed
         } else {
@@ -71,8 +164,68 @@ pub fn create_and_execute_from_decision(
         };
         update_run_status(&conn, &run.id, &next_status)?;
         run.status = next_status;
+        on_progress(run_progress_update(
+            RunProgressPhase::StateChanged,
+            &run,
+            Some(if matches!(run.status, RunState::Completed) {
+                100
+            } else {
+                100
+            }),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(match run.status {
+                RunState::Completed => "run completed",
+                RunState::Failed => "run failed",
+                _ => "run state changed",
+            }),
+        ));
         Some(result)
     } else {
+        let detail = format!(
+            "run type {} has no execution pipeline yet",
+            run.run_type.as_str()
+        );
+        on_progress(run_progress_update(
+            RunProgressPhase::StepStarted,
+            &run,
+            Some(10),
+            Some("run_pipeline"),
+            Some("Execute run pipeline"),
+            Some("running"),
+            Some(1),
+            Some(1),
+            Some(detail.as_str()),
+        ));
+
+        run.status = RunState::Completed;
+        update_run_status(&conn, &run.id, &run.status)?;
+
+        on_progress(run_progress_update(
+            RunProgressPhase::StepFinished,
+            &run,
+            Some(100),
+            Some("run_pipeline"),
+            Some("Execute run pipeline"),
+            Some("completed"),
+            Some(1),
+            Some(1),
+            Some(detail.as_str()),
+        ));
+        on_progress(run_progress_update(
+            RunProgressPhase::StateChanged,
+            &run,
+            Some(100),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("run completed"),
+        ));
         None
     };
 

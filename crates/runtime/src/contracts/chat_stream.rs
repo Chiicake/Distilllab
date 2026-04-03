@@ -7,12 +7,41 @@ pub enum ChatStreamPhase {
     DecisionReady,
     ToolStarted,
     ToolFinished,
+    RunCreated,
     RunStarted,
+    RunStepStarted,
+    RunStepFinished,
+    RunProgress,
     RunFinished,
     AssistantStarted,
     AssistantChunk,
     Completed,
     Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RunProgressPhase {
+    Created,
+    StateChanged,
+    StepStarted,
+    StepFinished,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunProgressUpdate {
+    pub phase: RunProgressPhase,
+    pub run_id: String,
+    pub run_type: String,
+    pub run_state: String,
+    pub progress_percent: Option<u8>,
+    pub step_key: Option<String>,
+    pub step_summary: Option<String>,
+    pub step_status: Option<String>,
+    pub step_index: Option<u32>,
+    pub steps_total: Option<u32>,
+    pub detail_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +58,7 @@ pub struct ChatStreamEvent {
     pub timeline_text: Option<String>,
     pub error_text: Option<String>,
     pub created_run_id: Option<String>,
+    pub run_progress: Option<RunProgressUpdate>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

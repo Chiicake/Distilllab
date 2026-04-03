@@ -2,7 +2,8 @@ use agent::{LlmProviderConfig, SessionActionType, SessionAgentDecision};
 use runtime::{
     AppConfig, AppRuntime, ChatStreamEvent, ChatStreamPhase, DesktopUiConfig,
     LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry, ProviderOptions,
-    SessionIntakePreview, SessionMessageExecutionResult, SessionMessageRequest,
+    RunProgressPhase, RunProgressUpdate, SessionIntakePreview,
+    SessionMessageExecutionResult, SessionMessageRequest,
     default_app_config_path,
     create_session,
     delete_failed_first_send_session,
@@ -316,32 +317,101 @@ fn build_chat_stream_event(
         timeline_text,
         error_text,
         created_run_id,
+        run_progress: None,
+    }
+}
+
+fn build_chat_stream_event_with_run_progress(
+    request_id: &str,
+    session_id: &str,
+    phase: ChatStreamPhase,
+    action_type: Option<String>,
+    intent: Option<String>,
+    chunk_text: Option<String>,
+    status_text: Option<String>,
+    assistant_text: Option<String>,
+    timeline_text: Option<String>,
+    error_text: Option<String>,
+    created_run_id: Option<String>,
+    run_progress: RunProgressUpdate,
+) -> ChatStreamEvent {
+    ChatStreamEvent {
+        request_id: request_id.to_string(),
+        session_id: session_id.to_string(),
+        phase,
+        action_type,
+        intent,
+        chunk_text,
+        status_text,
+        assistant_text,
+        timeline_text,
+        error_text,
+        created_run_id,
+        run_progress: Some(run_progress),
+    }
+}
+
+fn progress_status_text(update: &RunProgressUpdate) -> String {
+    let percent = update
+        .progress_percent
+        .map(|value| format!("{}%", value))
+        .unwrap_or_else(|| "n/a".to_string());
+    let step_key = update.step_key.as_deref().unwrap_or("run");
+    let detail = update.detail_text.as_deref().unwrap_or("");
+    match update.phase {
+        RunProgressPhase::Created => format!(
+            "run created: {} ({})",
+            update.run_id,
+            update.run_type
+        ),
+        RunProgressPhase::StateChanged => format!(
+            "run state: {} {} ({}){}",
+            update.run_id,
+            update.run_state,
+            percent,
+            if detail.is_empty() {
+                "".to_string()
+            } else {
+                format!(" - {}", detail)
+            }
+        ),
+        RunProgressPhase::StepStarted => format!(
+            "run step started: {} [{}] ({}){}",
+            update.run_id,
+            step_key,
+            percent,
+            if detail.is_empty() {
+                "".to_string()
+            } else {
+                format!(" - {}", detail)
+            }
+        ),
+        RunProgressPhase::StepFinished => format!(
+            "run step finished: {} [{}] ({}){}",
+            update.run_id,
+            step_key,
+            percent,
+            if detail.is_empty() {
+                "".to_string()
+            } else {
+                format!(" - {}", detail)
+            }
+        ),
+    }
+}
+
+fn stream_phase_from_progress(update: &RunProgressUpdate) -> ChatStreamPhase {
+    match update.phase {
+        RunProgressPhase::Created => ChatStreamPhase::RunCreated,
+        RunProgressPhase::StateChanged => ChatStreamPhase::RunProgress,
+        RunProgressPhase::StepStarted => ChatStreamPhase::RunStepStarted,
+        RunProgressPhase::StepFinished => ChatStreamPhase::RunStepFinished,
     }
 }
 
 fn emit_chat_stream_event(app: &tauri::AppHandle, event: &ChatStreamEvent) -> Result<(), String> {
     app.emit("distilllab://chat-stream", event)
         .map_err(|e| e.to_string())
-}
-
-fn assistant_chunks(text: &str) -> Vec<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return vec![];
-    }
-
-    let chunks = trimmed
-        .split_inclusive(['.', '!', '?', '\n'])
-        .map(str::trim)
-        .filter(|segment| !segment.is_empty())
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-
-    if chunks.is_empty() {
-        vec![trimmed.to_string()]
-    } else {
-        chunks
-    }
 }
 
 fn emit_execution_result_stream(
@@ -471,42 +541,6 @@ fn emit_execution_result_stream(
         &build_chat_stream_event(
             request_id,
             &result.session_id,
-            ChatStreamPhase::AssistantStarted,
-            Some(result.action_type.clone()),
-            Some(result.intent.clone()),
-            None,
-            Some("assistant response started".to_string()),
-            None,
-            None,
-            None,
-            result.created_run_id.clone(),
-        ),
-    )?;
-
-    for chunk in assistant_chunks(&result.assistant_text) {
-        emit_chat_stream_event(
-            app,
-            &build_chat_stream_event(
-                request_id,
-                &result.session_id,
-                ChatStreamPhase::AssistantChunk,
-                Some(result.action_type.clone()),
-                Some(result.intent.clone()),
-                Some(chunk),
-                None,
-                None,
-                None,
-                None,
-                result.created_run_id.clone(),
-            ),
-        )?;
-    }
-
-    emit_chat_stream_event(
-        app,
-        &build_chat_stream_event(
-            request_id,
-            &result.session_id,
             ChatStreamPhase::Completed,
             Some(result.action_type.clone()),
             Some(result.intent.clone()),
@@ -520,6 +554,34 @@ fn emit_execution_result_stream(
     )?;
 
     Ok(())
+}
+
+fn emit_run_progress_stream(
+    app: &tauri::AppHandle,
+    request_id: &str,
+    session_id: &str,
+    update: &RunProgressUpdate,
+) -> Result<(), String> {
+    let phase = stream_phase_from_progress(update);
+    let status_text = progress_status_text(update);
+
+    emit_chat_stream_event(
+        app,
+        &build_chat_stream_event_with_run_progress(
+            request_id,
+            session_id,
+            phase,
+            None,
+            None,
+            None,
+            Some(status_text),
+            None,
+            None,
+            None,
+            Some(update.run_id.clone()),
+            update.clone(),
+        ),
+    )
 }
 
 fn format_app_config_text(config_json: &str) -> Result<String, String> {
@@ -1031,7 +1093,8 @@ async fn stream_session_message_command(
                 }
             };
 
-            let result = runtime::send_session_message_with_config_and_result(
+            let mut emitted_assistant_started = false;
+            let result = runtime::send_session_message_with_config_and_result_streaming_with_progress(
                 &runtime,
                 SessionMessageRequest {
                     session_id: form.session_id.clone(),
@@ -1041,6 +1104,52 @@ async fn stream_session_message_command(
                     base_url: resolved.base_url,
                     model: resolved.model_id,
                     api_key: resolved.api_key,
+                },
+                |chunk| {
+                    if !emitted_assistant_started {
+                        emitted_assistant_started = true;
+                        let _ = emit_chat_stream_event(
+                            &app_handle,
+                            &build_chat_stream_event(
+                                &request_id,
+                                &form.session_id,
+                                ChatStreamPhase::AssistantStarted,
+                                None,
+                                None,
+                                None,
+                                Some("assistant response started".to_string()),
+                                None,
+                                None,
+                                None,
+                                None,
+                            ),
+                        );
+                    }
+
+                    let _ = emit_chat_stream_event(
+                        &app_handle,
+                        &build_chat_stream_event(
+                            &request_id,
+                            &form.session_id,
+                            ChatStreamPhase::AssistantChunk,
+                            None,
+                            None,
+                            Some(chunk.to_string()),
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        ),
+                    );
+                },
+                |update| {
+                    let _ = emit_run_progress_stream(
+                        &app_handle,
+                        &request_id,
+                        &form.session_id,
+                        &update,
+                    );
                 },
             )
             .await;
@@ -1209,7 +1318,8 @@ async fn stream_first_session_message_command(
                 }
             };
 
-            let result = runtime::send_session_message_with_config_and_result(
+            let mut emitted_assistant_started = false;
+            let result = runtime::send_session_message_with_config_and_result_streaming_with_progress(
                 &runtime,
                 SessionMessageRequest {
                     session_id: first_session_id.clone(),
@@ -1219,6 +1329,52 @@ async fn stream_first_session_message_command(
                     base_url: resolved.base_url,
                     model: resolved.model_id,
                     api_key: resolved.api_key,
+                },
+                |chunk| {
+                    if !emitted_assistant_started {
+                        emitted_assistant_started = true;
+                        let _ = emit_chat_stream_event(
+                            &app_handle,
+                            &build_chat_stream_event(
+                                &request_id,
+                                &first_session_id,
+                                ChatStreamPhase::AssistantStarted,
+                                None,
+                                None,
+                                None,
+                                Some("assistant response started".to_string()),
+                                None,
+                                None,
+                                None,
+                                None,
+                            ),
+                        );
+                    }
+
+                    let _ = emit_chat_stream_event(
+                        &app_handle,
+                        &build_chat_stream_event(
+                            &request_id,
+                            &first_session_id,
+                            ChatStreamPhase::AssistantChunk,
+                            None,
+                            None,
+                            Some(chunk.to_string()),
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        ),
+                    );
+                },
+                |update| {
+                    let _ = emit_run_progress_stream(
+                        &app_handle,
+                        &request_id,
+                        &first_session_id,
+                        &update,
+                    );
                 },
             )
             .await;

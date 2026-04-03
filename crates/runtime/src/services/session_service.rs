@@ -1,11 +1,15 @@
 use crate::app::AppRuntime;
 use crate::contracts::{
-    LlmSessionDebugRequest, SessionIntakePreview, SessionMessageExecutionResult,
-    SessionMessageRequest,
+    LlmSessionDebugRequest, RunProgressUpdate, SessionIntakePreview,
+    SessionMessageExecutionResult, SessionMessageRequest,
 };
 use crate::flows::build_import_and_distill_handoff_preview;
-use crate::services::distill_run_executor::create_and_execute_from_decision;
-use crate::services::session_intake_coordinator::decide_and_record_intake;
+use crate::services::distill_run_executor::{
+    create_and_execute_from_decision, create_and_execute_from_decision_with_progress,
+};
+use crate::services::session_intake_coordinator::{
+    decide_and_record_intake, decide_and_record_intake_streaming,
+};
 use agent::{
     BasicSessionAgent, LlmProviderConfig, LlmSessionAgent, SessionAgent, SessionAgentDecision,
     SessionAgentInput, SessionIntent,
@@ -313,6 +317,128 @@ async fn send_session_message_with_optional_provider_config_and_result(
         })?;
 
         Some(create_and_execute_from_decision(runtime, &decision, run_input)?)
+    } else {
+        None
+    };
+    let created_run_id = execution_outcome.as_ref().map(|outcome| outcome.run.id.clone());
+    let materialize_result = execution_outcome
+        .as_ref()
+        .and_then(|outcome| outcome.materialize_result.clone());
+
+    let final_assistant_content = match &materialize_result {
+        Some(result) => format!("{}\n\n{}", decision.reply_text, result.summary),
+        None => decision.reply_text.clone(),
+    };
+    update_session_message_run_and_content(
+        &conn,
+        &assistant_message_id,
+        created_run_id.as_deref(),
+        &final_assistant_content,
+    )?;
+
+    let messages = list_session_messages_for_session(&conn, &session.id)?;
+
+    Ok(SessionMessageExecutionResult {
+        session_id: session.id,
+        action_type: decision.action_type.as_str().to_string(),
+        intent: decision.intent.as_str().to_string(),
+        tool_name: outcome.tool_result.as_ref().map(|result| result.tool_name.clone()),
+        tool_ok: outcome.tool_result.as_ref().map(|result| result.ok),
+        tool_summary: outcome
+            .tool_result
+            .as_ref()
+            .and_then(|result| result.rendered_summary.clone().or(result.error_message.clone())),
+        assistant_text: final_assistant_content,
+        timeline_text: format_session_messages_for_debug(&messages),
+        created_run_id,
+        run_status: execution_outcome
+            .as_ref()
+            .map(|outcome| outcome.run.status.as_str().to_string()),
+    })
+}
+
+pub async fn send_session_message_with_config_and_result_streaming<F>(
+    runtime: &AppRuntime,
+    request: SessionMessageRequest,
+    mut on_reply_chunk: F,
+) -> Result<SessionMessageExecutionResult, RuntimeError>
+where
+    F: FnMut(&str),
+{
+    send_session_message_with_config_and_result_streaming_with_progress(
+        runtime,
+        request,
+        |chunk| on_reply_chunk(chunk),
+        |_| {},
+    )
+    .await
+}
+
+pub async fn send_session_message_with_config_and_result_streaming_with_progress<F, G>(
+    runtime: &AppRuntime,
+    request: SessionMessageRequest,
+    mut on_reply_chunk: F,
+    mut on_run_progress: G,
+) -> Result<SessionMessageExecutionResult, RuntimeError>
+where
+    F: FnMut(&str),
+    G: FnMut(RunProgressUpdate),
+{
+    let provider_config = LlmProviderConfig {
+        provider_kind: request.provider_kind.clone(),
+        base_url: request.base_url.clone(),
+        model: request.model.clone(),
+        api_key: normalize_optional_api_key(request.api_key.clone()),
+    };
+
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    let session = get_session_by_id(&conn, &request.session_id)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("session not found: {}", request.session_id),
+        )
+    })?;
+
+    let outcome = decide_and_record_intake_streaming(
+        runtime,
+        SessionIntake {
+            session_id: session.id.clone(),
+            user_message: request.user_message,
+            attachments: request.attachments,
+            current_object_type: match session.current_object_type.as_str() {
+                "none" => None,
+                other => Some(other.to_string()),
+            },
+            current_object_id: match session.current_object_id.as_str() {
+                "none" => None,
+                other => Some(other.to_string()),
+            },
+        },
+        Some(provider_config),
+        |chunk| on_reply_chunk(chunk),
+    )
+    .await?;
+
+    let decision = outcome.decision;
+    let assistant_message_id = outcome.assistant_message_id;
+    let coordinator_run_input = outcome.run_input;
+
+    let execution_outcome = if decision.action_type == agent::SessionActionType::CreateRun {
+        let run_input = coordinator_run_input.clone().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "missing run_input for create_run decision",
+            )
+        })?;
+
+        Some(create_and_execute_from_decision_with_progress(
+            runtime,
+            &decision,
+            run_input,
+            |update| on_run_progress(update),
+        )?)
     } else {
         None
     };

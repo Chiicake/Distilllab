@@ -45,6 +45,8 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
         const showCollapsed = isSystem && isExpandable && !isExpanded;
         const displayText = showCollapsed ? collapsedText : message.details ?? message.content;
         const isToolLike = message.kind === 'tool';
+        const isRunLike = message.kind === 'run';
+        const runMeta = message.runMeta;
 
         return (
           <div
@@ -73,6 +75,8 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
                       : `max-w-xl rounded-xl p-6 ${
                           isToolLike
                             ? 'border border-primary/15 bg-primary/5'
+                            : isRunLike
+                              ? 'border border-secondary/20 bg-secondary-container/20'
                             : 'bg-surface-container-low'
                         }`
                   }
@@ -85,6 +89,50 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
                       <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
                         Tool Call
                       </span>
+                    </div>
+                  ) : null}
+
+                  {isRunLike ? (
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[16px] text-secondary" data-icon="play_circle">
+                        play_circle
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-secondary">
+                        Run
+                      </span>
+                      {runMeta ? (
+                        <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.12em] text-secondary">
+                          {runMeta.state}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {isRunLike && runMeta ? (
+                    <div className="mb-3">
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest">
+                        <div
+                          className="h-full rounded-full bg-secondary transition-all duration-500"
+                          style={{ width: `${Math.max(0, Math.min(100, runMeta.progressPercent))}%` }}
+                        />
+                      </div>
+                      <div className="mt-1 flex justify-between text-[10px] text-on-surface-variant">
+                        <span>{runMeta.runId}</span>
+                        <span>{runMeta.progressPercent}%</span>
+                      </div>
+                      {(runMeta.stepSummary || runMeta.stepKey || runMeta.detailText) ? (
+                        <div className="mt-2 rounded-lg border border-secondary/15 bg-surface-container-low px-3 py-2 text-[11px] text-on-surface-variant">
+                          <p className="font-medium text-on-surface">
+                            {runMeta.stepSummary ?? runMeta.stepKey ?? 'run step'}
+                          </p>
+                          {runMeta.detailText ? <p className="mt-1">{runMeta.detailText}</p> : null}
+                          {runMeta.stepIndex != null && runMeta.stepsTotal != null ? (
+                            <p className="mt-1 text-[10px] uppercase tracking-[0.12em]">
+                              Step {runMeta.stepIndex}/{runMeta.stepsTotal}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
 

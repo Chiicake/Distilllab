@@ -14,13 +14,17 @@ pub use chunk_service::{chunk_demo_source, list_chunks_for_source};
 pub use distill_run_executor::{create_and_execute_from_decision, DistillRunExecutionOutcome};
 pub use project_service::{group_demo_project, list_projects};
 pub use run_service::{create_demo_run, list_runs};
-pub use session_intake_coordinator::{decide_and_record_intake, IntakeDecisionOutcome};
+pub use session_intake_coordinator::{
+    decide_and_record_intake, decide_and_record_intake_streaming, IntakeDecisionOutcome,
+};
 pub use session_service::{
     create_demo_session, create_session, create_session_and_send_first_message_with_config,
     delete_failed_first_send_session,
     decide_llm_session_message_with_config, list_session_messages, list_sessions,
     preview_session_intake, preview_session_intake_with_config, send_session_message,
     send_session_message_with_config, send_session_message_with_config_and_result,
+    send_session_message_with_config_and_result_streaming,
+    send_session_message_with_config_and_result_streaming_with_progress,
 };
 pub use source_service::{
     create_attachment_source, create_demo_source, create_message_source,
