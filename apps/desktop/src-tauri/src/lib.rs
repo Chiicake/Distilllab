@@ -1,7 +1,9 @@
 use agent::{LlmProviderConfig, SessionActionType, SessionAgentDecision};
 use runtime::{
-    AppConfig, AppRuntime, DesktopUiConfig, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
-    ProviderOptions, SessionIntakePreview, SessionMessageRequest, default_app_config_path,
+    AppConfig, AppRuntime, ChatStreamEvent, ChatStreamPhase, DesktopUiConfig,
+    LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry, ProviderOptions,
+    SessionIntakePreview, SessionMessageExecutionResult, SessionMessageRequest,
+    default_app_config_path,
     create_session,
     delete_failed_first_send_session,
     delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
@@ -10,6 +12,7 @@ use runtime::{
 };
 use runtime::flows::attachment_storage::{remove_session_attachment_storage, store_attachment_copy};
 use schema::{SessionIntake, SessionMessage, SessionMessageRole};
+use tauri::Emitter;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +54,13 @@ struct SessionSelectorOption {
 struct FirstSendCommandResponse {
     session_id: String,
     timeline_text: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StreamSessionMessageForm {
+    request_id: String,
+    form: SessionMessageForm,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -279,6 +289,237 @@ fn indent_block(text: &str) -> String {
         .map(|line| format!("  {}", line))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn build_chat_stream_event(
+    request_id: &str,
+    session_id: &str,
+    phase: ChatStreamPhase,
+    action_type: Option<String>,
+    intent: Option<String>,
+    chunk_text: Option<String>,
+    status_text: Option<String>,
+    assistant_text: Option<String>,
+    timeline_text: Option<String>,
+    error_text: Option<String>,
+    created_run_id: Option<String>,
+) -> ChatStreamEvent {
+    ChatStreamEvent {
+        request_id: request_id.to_string(),
+        session_id: session_id.to_string(),
+        phase,
+        action_type,
+        intent,
+        chunk_text,
+        status_text,
+        assistant_text,
+        timeline_text,
+        error_text,
+        created_run_id,
+    }
+}
+
+fn emit_chat_stream_event(app: &tauri::AppHandle, event: &ChatStreamEvent) -> Result<(), String> {
+    app.emit("distilllab://chat-stream", event)
+        .map_err(|e| e.to_string())
+}
+
+fn assistant_chunks(text: &str) -> Vec<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return vec![];
+    }
+
+    let chunks = trimmed
+        .split_inclusive(['.', '!', '?', '\n'])
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    if chunks.is_empty() {
+        vec![trimmed.to_string()]
+    } else {
+        chunks
+    }
+}
+
+fn emit_execution_result_stream(
+    app: &tauri::AppHandle,
+    request_id: &str,
+    result: &SessionMessageExecutionResult,
+) -> Result<(), String> {
+    emit_chat_stream_event(
+        app,
+        &build_chat_stream_event(
+            request_id,
+            &result.session_id,
+            ChatStreamPhase::DecisionReady,
+            Some(result.action_type.clone()),
+            Some(result.intent.clone()),
+            None,
+            Some(format!(
+                "decision: intent={} action={}{}",
+                result.intent,
+                result.action_type,
+                result
+                    .created_run_id
+                    .as_ref()
+                    .map(|run_id| format!(" run={}", run_id))
+                    .unwrap_or_default()
+            )),
+            None,
+            None,
+            None,
+            result.created_run_id.clone(),
+        ),
+    )?;
+
+    if let Some(tool_name) = &result.tool_name {
+        emit_chat_stream_event(
+            app,
+            &build_chat_stream_event(
+                request_id,
+                &result.session_id,
+                ChatStreamPhase::ToolStarted,
+                Some(result.action_type.clone()),
+                Some(result.intent.clone()),
+                None,
+                Some(format!("tool started: {}", tool_name)),
+                None,
+                None,
+                None,
+                result.created_run_id.clone(),
+            ),
+        )?;
+
+        emit_chat_stream_event(
+            app,
+            &build_chat_stream_event(
+                request_id,
+                &result.session_id,
+                ChatStreamPhase::ToolFinished,
+                Some(result.action_type.clone()),
+                Some(result.intent.clone()),
+                None,
+                Some(match result.tool_ok {
+                    Some(true) => format!(
+                        "tool succeeded: {}",
+                        result
+                            .tool_summary
+                            .clone()
+                            .unwrap_or_else(|| tool_name.clone())
+                    ),
+                    Some(false) => format!(
+                        "tool failed: {}",
+                        result
+                            .tool_summary
+                            .clone()
+                            .unwrap_or_else(|| tool_name.clone())
+                    ),
+                    None => format!("tool finished: {}", tool_name),
+                }),
+                None,
+                None,
+                None,
+                result.created_run_id.clone(),
+            ),
+        )?;
+    }
+
+    if let Some(run_id) = &result.created_run_id {
+        emit_chat_stream_event(
+            app,
+            &build_chat_stream_event(
+                request_id,
+                &result.session_id,
+                ChatStreamPhase::RunStarted,
+                Some(result.action_type.clone()),
+                Some(result.intent.clone()),
+                None,
+                Some(format!("run started: {}", run_id)),
+                None,
+                None,
+                None,
+                result.created_run_id.clone(),
+            ),
+        )?;
+
+        emit_chat_stream_event(
+            app,
+            &build_chat_stream_event(
+                request_id,
+                &result.session_id,
+                ChatStreamPhase::RunFinished,
+                Some(result.action_type.clone()),
+                Some(result.intent.clone()),
+                None,
+                Some(match result.run_status.as_deref() {
+                    Some(status) => format!("run {} status: {}", run_id, status),
+                    None => format!("run {} finished", run_id),
+                }),
+                None,
+                None,
+                None,
+                result.created_run_id.clone(),
+            ),
+        )?;
+    }
+
+    emit_chat_stream_event(
+        app,
+        &build_chat_stream_event(
+            request_id,
+            &result.session_id,
+            ChatStreamPhase::AssistantStarted,
+            Some(result.action_type.clone()),
+            Some(result.intent.clone()),
+            None,
+            Some("assistant response started".to_string()),
+            None,
+            None,
+            None,
+            result.created_run_id.clone(),
+        ),
+    )?;
+
+    for chunk in assistant_chunks(&result.assistant_text) {
+        emit_chat_stream_event(
+            app,
+            &build_chat_stream_event(
+                request_id,
+                &result.session_id,
+                ChatStreamPhase::AssistantChunk,
+                Some(result.action_type.clone()),
+                Some(result.intent.clone()),
+                Some(chunk),
+                None,
+                None,
+                None,
+                None,
+                result.created_run_id.clone(),
+            ),
+        )?;
+    }
+
+    emit_chat_stream_event(
+        app,
+        &build_chat_stream_event(
+            request_id,
+            &result.session_id,
+            ChatStreamPhase::Completed,
+            Some(result.action_type.clone()),
+            Some(result.intent.clone()),
+            None,
+            None,
+            Some(result.assistant_text.clone()),
+            Some(result.timeline_text.clone()),
+            None,
+            result.created_run_id.clone(),
+        ),
+    )?;
+
+    Ok(())
 }
 
 fn format_app_config_text(config_json: &str) -> Result<String, String> {
@@ -726,6 +967,119 @@ async fn send_session_message_command(form: SessionMessageForm) -> Result<String
 }
 
 #[tauri::command]
+async fn stream_session_message_command(
+    app: tauri::AppHandle,
+    payload: StreamSessionMessageForm,
+) -> Result<(), String> {
+    let request_id = payload.request_id.clone();
+    let form = payload.form.clone();
+    let app_handle = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let task = async {
+            let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+            let (config_path, config) = load_or_create_app_config()?;
+            let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
+            let storage_root = config_path
+                .parent()
+                .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?
+                .to_path_buf();
+
+            emit_chat_stream_event(
+                &app_handle,
+                &build_chat_stream_event(
+                    &request_id,
+                    &form.session_id,
+                    ChatStreamPhase::Started,
+                    None,
+                    None,
+                    None,
+                    Some("message send started".to_string()),
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            )?;
+
+            let attachments = form
+                .attachment_paths
+                .iter()
+                .map(|path| store_attachment_copy(&storage_root, &form.session_id, path).map_err(|e| e.to_string()))
+                .collect::<Result<Vec<_>, _>>();
+
+            let attachments = match attachments {
+                Ok(attachments) => attachments,
+                Err(error) => {
+                    emit_chat_stream_event(
+                        &app_handle,
+                        &build_chat_stream_event(
+                            &request_id,
+                            &form.session_id,
+                            ChatStreamPhase::Error,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            Some(error.clone()),
+                            None,
+                        ),
+                    )?;
+                    return Err(error);
+                }
+            };
+
+            let result = runtime::send_session_message_with_config_and_result(
+                &runtime,
+                SessionMessageRequest {
+                    session_id: form.session_id.clone(),
+                    user_message: form.user_message,
+                    attachments,
+                    provider_kind: resolved.provider_type.replace('-', "_"),
+                    base_url: resolved.base_url,
+                    model: resolved.model_id,
+                    api_key: resolved.api_key,
+                },
+            )
+            .await;
+
+            match result {
+                Ok(execution) => emit_execution_result_stream(&app_handle, &request_id, &execution),
+                Err(error) => {
+                    let error_text = error.to_string();
+                    emit_chat_stream_event(
+                        &app_handle,
+                        &build_chat_stream_event(
+                            &request_id,
+                            &form.session_id,
+                            ChatStreamPhase::Error,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            Some(error_text.clone()),
+                            None,
+                        ),
+                    )?;
+                    Err(error_text)
+                }
+            }
+        }
+        .await;
+
+        if let Err(error) = task {
+            log::error!("stream_session_message_command failed: {}", error);
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn create_session_and_send_first_message_command(
     form: SessionMessageForm,
 ) -> Result<FirstSendCommandResponse, String> {
@@ -734,7 +1088,8 @@ async fn create_session_and_send_first_message_command(
     let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
     let storage_root = config_path
         .parent()
-        .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?;
+        .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?
+        .to_path_buf();
 
     let session = create_session(&runtime).map_err(|e| e.to_string())?;
     let session_id = session.id.clone();
@@ -742,14 +1097,14 @@ async fn create_session_and_send_first_message_command(
     let attachments = form
         .attachment_paths
         .iter()
-        .map(|path| store_attachment_copy(storage_root, &session_id, path).map_err(|e| e.to_string()))
+        .map(|path| store_attachment_copy(&storage_root, &session_id, path).map_err(|e| e.to_string()))
         .collect::<Result<Vec<_>, _>>();
 
     let attachments = match attachments {
         Ok(attachments) => attachments,
         Err(error) => {
             delete_failed_first_send_session(&runtime, &session_id).map_err(|e| e.to_string())?;
-            remove_session_attachment_storage(storage_root, &session_id).map_err(|e| e.to_string())?;
+            remove_session_attachment_storage(&storage_root, &session_id).map_err(|e| e.to_string())?;
             return Err(error);
         }
     };
@@ -770,7 +1125,7 @@ async fn create_session_and_send_first_message_command(
 
     if let Err(error) = send_result {
         delete_failed_first_send_session(&runtime, &session_id).map_err(|e| e.to_string())?;
-        remove_session_attachment_storage(storage_root, &session_id).map_err(|e| e.to_string())?;
+        remove_session_attachment_storage(&storage_root, &session_id).map_err(|e| e.to_string())?;
         return Err(error.to_string());
     }
 
@@ -783,19 +1138,142 @@ async fn create_session_and_send_first_message_command(
 }
 
 #[tauri::command]
+async fn stream_first_session_message_command(
+    app: tauri::AppHandle,
+    payload: StreamSessionMessageForm,
+) -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let (config_path, config) = load_or_create_app_config()?;
+    let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
+    let storage_root = config_path
+        .parent()
+        .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?
+        .to_path_buf();
+    let form = payload.form;
+
+    let session = create_session(&runtime).map_err(|e| e.to_string())?;
+    let session_id = session.id.clone();
+
+    let request_id = payload.request_id.clone();
+    let app_handle = app.clone();
+    let first_form = form.clone();
+    let first_session_id = session_id.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let task = async {
+            emit_chat_stream_event(
+                &app_handle,
+                &build_chat_stream_event(
+                    &request_id,
+                    &first_session_id,
+                    ChatStreamPhase::Started,
+                    None,
+                    None,
+                    None,
+                    Some("first message send started".to_string()),
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            )?;
+
+            let attachments = first_form
+                .attachment_paths
+                .iter()
+                .map(|path| store_attachment_copy(&storage_root, &first_session_id, path).map_err(|e| e.to_string()))
+                .collect::<Result<Vec<_>, _>>();
+
+            let attachments = match attachments {
+                Ok(attachments) => attachments,
+                Err(error) => {
+                    delete_failed_first_send_session(&runtime, &first_session_id).map_err(|e| e.to_string())?;
+                    remove_session_attachment_storage(&storage_root, &first_session_id).map_err(|e| e.to_string())?;
+                    emit_chat_stream_event(
+                        &app_handle,
+                        &build_chat_stream_event(
+                            &request_id,
+                            &first_session_id,
+                            ChatStreamPhase::Error,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            Some(error.clone()),
+                            None,
+                        ),
+                    )?;
+                    return Err(error);
+                }
+            };
+
+            let result = runtime::send_session_message_with_config_and_result(
+                &runtime,
+                SessionMessageRequest {
+                    session_id: first_session_id.clone(),
+                    user_message: first_form.user_message,
+                    attachments,
+                    provider_kind: resolved.provider_type.replace('-', "_"),
+                    base_url: resolved.base_url,
+                    model: resolved.model_id,
+                    api_key: resolved.api_key,
+                },
+            )
+            .await;
+
+            match result {
+                Ok(execution) => emit_execution_result_stream(&app_handle, &request_id, &execution),
+                Err(error) => {
+                    delete_failed_first_send_session(&runtime, &first_session_id).map_err(|e| e.to_string())?;
+                    remove_session_attachment_storage(&storage_root, &first_session_id).map_err(|e| e.to_string())?;
+                    let error_text = error.to_string();
+                    emit_chat_stream_event(
+                        &app_handle,
+                        &build_chat_stream_event(
+                            &request_id,
+                            &first_session_id,
+                            ChatStreamPhase::Error,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            Some(error_text.clone()),
+                            None,
+                        ),
+                    )?;
+                    Err(error_text)
+                }
+            }
+        }
+        .await;
+
+        if let Err(error) = task {
+            log::error!("stream_first_session_message_command failed: {}", error);
+        }
+    });
+
+    Ok(session_id)
+}
+
+#[tauri::command]
 async fn preview_session_intake_command(form: SessionMessageForm) -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
     let config_path = default_app_config_path().map_err(|e| e.to_string())?;
     let storage_root = config_path
         .parent()
-        .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?;
+        .ok_or_else(|| "failed to resolve distilllab storage root".to_string())?
+        .to_path_buf();
     let (_, config) = load_or_create_app_config()?;
     let resolved = resolve_current_provider_model(&config, &config_path).map_err(|e| e.to_string())?;
 
     let attachments = form
         .attachment_paths
         .iter()
-        .map(|path| store_attachment_copy(storage_root, &form.session_id, path).map_err(|e| e.to_string()))
+        .map(|path| store_attachment_copy(&storage_root, &form.session_id, path).map_err(|e| e.to_string()))
         .collect::<Result<Vec<_>, _>>()?;
 
     let preview = runtime::preview_session_intake_with_config(
@@ -961,6 +1439,7 @@ pub fn run() {
             create_demo_session,
             create_session_command,
             create_session_and_send_first_message_command,
+            stream_first_session_message_command,
             create_demo_source,
             list_runs,
             list_sessions,
@@ -976,6 +1455,7 @@ pub fn run() {
             list_assets,
             test_current_provider_command,
             send_session_message_command,
+            stream_session_message_command,
             list_session_messages_command,
             load_llm_config_command,
             load_llm_config_json_command,

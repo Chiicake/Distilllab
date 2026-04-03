@@ -1,4 +1,23 @@
-export default function ActiveComposer() {
+import { useState } from 'react';
+
+type ActiveComposerProps = {
+  onSend: (message: string) => Promise<void>;
+  isStreaming: boolean;
+};
+
+export default function ActiveComposer({ onSend, isStreaming }: ActiveComposerProps) {
+  const [message, setMessage] = useState('');
+
+  const submit = async () => {
+    const trimmed = message.trim();
+    if (!trimmed || isStreaming) {
+      return;
+    }
+
+    await onSend(trimmed);
+    setMessage('');
+  };
+
   return (
     <div className="px-8 pb-8 pt-4">
       <div className="max-w-3xl mx-auto relative">
@@ -6,7 +25,15 @@ export default function ActiveComposer() {
           <textarea
             aria-label="Type a command or follow-up question"
             className="bg-transparent border-none focus:ring-0 text-on-surface placeholder:text-outline/50 resize-none font-body text-md h-12 w-full"
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault();
+                void submit();
+              }
+            }}
             placeholder="Type a command or follow-up question..."
+            value={message}
           />
 
           <div className="flex items-center justify-between">
@@ -26,9 +53,13 @@ export default function ActiveComposer() {
 
             <button
               className="gradient-primary px-5 py-2 rounded-lg font-label font-bold text-xs uppercase tracking-widest text-on-primary-container hover:opacity-90 transition-opacity"
+              disabled={isStreaming}
+              onClick={() => {
+                void submit();
+              }}
               type="button"
             >
-              Send
+              {isStreaming ? 'Sending' : 'Send'}
             </button>
           </div>
         </div>

@@ -1,7 +1,9 @@
+pub mod chat_stream;
 pub mod session;
 pub mod session_intake;
 pub mod source_materialization;
 
+pub use chat_stream::{ChatStreamEvent, ChatStreamPhase, SessionMessageExecutionResult};
 pub use session::{LlmSessionDebugRequest, SessionMessageRequest};
 pub use session_intake::{
     DistillRunStepPreview, RunHandoffPreview, RunInput, SessionIntakePreview,

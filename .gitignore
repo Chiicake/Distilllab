@@ -2,6 +2,8 @@
 /docs/
 .idea
 *.db
+/.claude
+CLAUDE.md
 # Added by cargo
 
 /target

@@ -1,8 +1,11 @@
+import type { ChatSessionSummary } from '../../chat/types';
+
 type LeftRailProps = {
-  onOpenPreviewRun: () => void;
+  sessions: ChatSessionSummary[];
+  onOpenSession: (sessionId: string) => Promise<void>;
 };
 
-export default function LeftRail({ onOpenPreviewRun }: LeftRailProps) {
+export default function LeftRail({ sessions, onOpenSession }: LeftRailProps) {
   return (
     <aside className="bg-[#191a1a] text-[#bac3ff] font-['Inter'] text-sm docked h-full left-0 w-64 no-border bg-[#191a1a] flat no shadows flex flex-col h-full py-6 px-4 gap-4 border-r border-outline-variant/10">
       <div className="mb-4">
@@ -22,36 +25,27 @@ export default function LeftRail({ onOpenPreviewRun }: LeftRailProps) {
           Recent Sessions
         </div>
 
-        <button
-          className="text-[#acabaa] opacity-60 hover:bg-[#1f2020] hover:opacity-100 rounded-md flex items-center gap-3 px-3 py-2.5 transition-all duration-300"
-          onClick={onOpenPreviewRun}
-          type="button"
-        >
-          <span className="material-symbols-outlined" data-icon="filter_list">
-            filter_list
-          </span>
-          <span className="truncate">Data Filtering Logic</span>
-        </button>
+        {sessions.length === 0 ? (
+          <div className="rounded-md border border-outline-variant/10 px-3 py-3 text-xs text-on-surface-variant/60">
+            No real sessions yet.
+          </div>
+        ) : null}
 
-        <button
-          className="text-[#acabaa] opacity-60 hover:bg-[#1f2020] hover:opacity-100 rounded-md flex items-center gap-3 px-3 py-2.5 transition-all duration-300"
-          type="button"
-        >
-          <span className="material-symbols-outlined" data-icon="account_tree">
-            account_tree
-          </span>
-          <span className="truncate">Workflow Schema v2</span>
-        </button>
-
-        <button
-          className="text-[#acabaa] opacity-60 hover:bg-[#1f2020] hover:opacity-100 rounded-md flex items-center gap-3 px-3 py-2.5 transition-all duration-300"
-          type="button"
-        >
-          <span className="material-symbols-outlined" data-icon="history">
-            history
-          </span>
-          <span className="truncate">Previous Explorations</span>
-        </button>
+        {sessions.map((session) => (
+          <button
+            key={session.sessionId}
+            className="text-[#acabaa] opacity-60 hover:bg-[#1f2020] hover:opacity-100 rounded-md flex items-center gap-3 px-3 py-2.5 transition-all duration-300"
+            onClick={() => {
+              void onOpenSession(session.sessionId);
+            }}
+            type="button"
+          >
+            <span className="material-symbols-outlined" data-icon="chat_bubble">
+              chat_bubble
+            </span>
+            <span className="truncate">{session.title}</span>
+          </button>
+        ))}
       </div>
 
       <div className="pt-6 border-t border-outline-variant/10 space-y-2">

@@ -13,9 +13,10 @@ pub use config::{
     set_current_provider_model, upsert_provider_entry,
 };
 pub use contracts::{
-    DistillRunStepPreview, LlmSessionDebugRequest, RunHandoffPreview, SessionIntakePreview,
-    SessionMessageRequest, MaterializeDedupePolicy, MaterializeFailure, MaterializeSkip,
-    MaterializeSourcesInput, MaterializeSourcesResult, MaterializedSourceRef,
+    ChatStreamEvent, ChatStreamPhase, DistillRunStepPreview, LlmSessionDebugRequest,
+    MaterializeDedupePolicy, MaterializeFailure, MaterializeSkip, MaterializeSourcesInput,
+    MaterializeSourcesResult, MaterializedSourceRef, RunHandoffPreview,
+    SessionIntakePreview, SessionMessageExecutionResult, SessionMessageRequest,
     SourceOriginKind,
 };
 pub use flows::{build_import_and_distill_handoff_preview, execute_materialize_sources};
@@ -27,5 +28,6 @@ pub use services::{
     group_demo_project, list_assets, list_chunks_for_source, list_projects,
     list_session_messages, list_sessions, list_sources, list_work_items, list_runs,
     preview_session_intake, preview_session_intake_with_config, send_session_message,
-    send_session_message_with_config, ToolExecutionError, ToolExecutor,
+    send_session_message_with_config, send_session_message_with_config_and_result,
+    ToolExecutionError, ToolExecutor,
 };

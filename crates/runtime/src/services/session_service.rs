@@ -1,5 +1,8 @@
 use crate::app::AppRuntime;
-use crate::contracts::{LlmSessionDebugRequest, SessionIntakePreview, SessionMessageRequest};
+use crate::contracts::{
+    LlmSessionDebugRequest, SessionIntakePreview, SessionMessageExecutionResult,
+    SessionMessageRequest,
+};
 use crate::flows::build_import_and_distill_handoff_preview;
 use crate::services::distill_run_executor::create_and_execute_from_decision;
 use crate::services::session_intake_coordinator::decide_and_record_intake;
@@ -124,6 +127,46 @@ fn normalize_optional_api_key(api_key: Option<String>) -> Option<String> {
     })
 }
 
+fn indent_block(text: &str) -> String {
+    text.lines()
+        .map(|line| format!("  {}", line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(crate) fn format_session_messages_for_debug(messages: &[SessionMessage]) -> String {
+    if messages.is_empty() {
+        return "no session messages found".to_string();
+    }
+
+    messages
+        .iter()
+        .map(|message| {
+            if message.message_type == "tool_result_message" {
+                let tool_header = serde_json::from_str::<serde_json::Value>(&message.data_json)
+                    .ok()
+                    .and_then(|value| {
+                        let tool_name = value.get("tool_name").and_then(|v| v.as_str())?;
+                        let arguments = value.get("arguments")?;
+                        Some(format!("[Tool] {}({})", tool_name, arguments))
+                    })
+                    .unwrap_or_else(|| "[Tool] unknown()".to_string());
+
+                format!("{}\n{}", tool_header, indent_block(&message.content))
+            } else {
+                let role_header = match message.role {
+                    schema::SessionMessageRole::User => "[User]",
+                    schema::SessionMessageRole::Assistant => "[Assistant]",
+                    schema::SessionMessageRole::System => "[System]",
+                };
+
+                format!("{}\n{}", role_header, indent_block(&message.content))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 async fn decide_llm_session_message_with_provider_config(
     config: LlmProviderConfig,
     user_message: &str,
@@ -220,6 +263,94 @@ async fn send_session_message_with_optional_provider_config(
     )?;
 
     Ok(decision)
+}
+
+async fn send_session_message_with_optional_provider_config_and_result(
+    runtime: &AppRuntime,
+    session_id: &str,
+    user_message: &str,
+    attachments: Vec<schema::AttachmentRef>,
+    provider_config: Option<LlmProviderConfig>,
+) -> Result<SessionMessageExecutionResult, RuntimeError> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    let session = get_session_by_id(&conn, session_id)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("session not found: {session_id}"),
+        )
+    })?;
+    let outcome = decide_and_record_intake(
+        runtime,
+        SessionIntake {
+            session_id: session.id.clone(),
+            user_message: user_message.to_string(),
+            attachments: attachments.clone(),
+            current_object_type: match session.current_object_type.as_str() {
+                "none" => None,
+                other => Some(other.to_string()),
+            },
+            current_object_id: match session.current_object_id.as_str() {
+                "none" => None,
+                other => Some(other.to_string()),
+            },
+        },
+        provider_config,
+    )
+    .await?;
+
+    let decision = outcome.decision;
+    let assistant_message_id = outcome.assistant_message_id;
+    let coordinator_run_input = outcome.run_input;
+
+    let execution_outcome = if decision.action_type == agent::SessionActionType::CreateRun {
+        let run_input = coordinator_run_input.clone().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "missing run_input for create_run decision",
+            )
+        })?;
+
+        Some(create_and_execute_from_decision(runtime, &decision, run_input)?)
+    } else {
+        None
+    };
+    let created_run_id = execution_outcome.as_ref().map(|outcome| outcome.run.id.clone());
+    let materialize_result = execution_outcome
+        .as_ref()
+        .and_then(|outcome| outcome.materialize_result.clone());
+
+    let final_assistant_content = match &materialize_result {
+        Some(result) => format!("{}\n\n{}", decision.reply_text, result.summary),
+        None => decision.reply_text.clone(),
+    };
+    update_session_message_run_and_content(
+        &conn,
+        &assistant_message_id,
+        created_run_id.as_deref(),
+        &final_assistant_content,
+    )?;
+
+    let messages = list_session_messages_for_session(&conn, &session.id)?;
+
+    Ok(SessionMessageExecutionResult {
+        session_id: session.id,
+        action_type: decision.action_type.as_str().to_string(),
+        intent: decision.intent.as_str().to_string(),
+        tool_name: outcome.tool_result.as_ref().map(|result| result.tool_name.clone()),
+        tool_ok: outcome.tool_result.as_ref().map(|result| result.ok),
+        tool_summary: outcome
+            .tool_result
+            .as_ref()
+            .and_then(|result| result.rendered_summary.clone().or(result.error_message.clone())),
+        assistant_text: final_assistant_content,
+        timeline_text: format_session_messages_for_debug(&messages),
+        created_run_id,
+        run_status: execution_outcome
+            .as_ref()
+            .map(|outcome| outcome.run.status.as_str().to_string()),
+    })
 }
 
 fn llm_provider_config_from_env() -> Result<Option<LlmProviderConfig>, RuntimeError> {
@@ -327,6 +458,27 @@ pub async fn send_session_message_with_config(
     };
 
     send_session_message_with_optional_provider_config(
+        runtime,
+        &request.session_id,
+        &request.user_message,
+        request.attachments,
+        Some(provider_config),
+    )
+    .await
+}
+
+pub async fn send_session_message_with_config_and_result(
+    runtime: &AppRuntime,
+    request: SessionMessageRequest,
+) -> Result<SessionMessageExecutionResult, RuntimeError> {
+    let provider_config = LlmProviderConfig {
+        provider_kind: request.provider_kind.clone(),
+        base_url: request.base_url.clone(),
+        model: request.model.clone(),
+        api_key: normalize_optional_api_key(request.api_key.clone()),
+    };
+
+    send_session_message_with_optional_provider_config_and_result(
         runtime,
         &request.session_id,
         &request.user_message,
@@ -1011,6 +1163,35 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[1].message_type, "system_message");
         assert_eq!(messages[1].run_id.as_deref(), Some(runs[0].id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn send_session_message_with_config_and_result_returns_created_run_and_timeline_text() {
+        let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
+        let _env_guard = TestLlmEnvGuard::clear();
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-execution-result-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let execution = super::send_session_message_with_optional_provider_config_and_result(
+            &runtime,
+            &session.id,
+            "Please distill these work notes into Distilllab",
+            vec![],
+            None,
+        )
+        .await
+        .expect("execution should succeed");
+
+        assert_eq!(execution.session_id, session.id);
+        assert_eq!(execution.intent, "distill_material");
+        assert_eq!(execution.action_type, "create_run");
+        assert!(execution.created_run_id.is_some());
+        assert!(execution.assistant_text.contains("I will start a distill run"));
+        assert!(execution.timeline_text.contains("[User]"));
+        assert!(execution.timeline_text.contains("[Assistant]"));
     }
 
     #[tokio::test]

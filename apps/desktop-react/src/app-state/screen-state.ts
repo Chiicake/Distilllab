@@ -1,6 +1,6 @@
 export type Screen =
   | { kind: 'chat-draft' }
-  | { kind: 'chat-active' }
+  | { kind: 'chat-active'; sessionId?: string }
   | { kind: 'canvas' }
   | { kind: 'settings'; section?: 'workspace' | 'debug' };
 

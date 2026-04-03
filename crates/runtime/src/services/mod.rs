@@ -20,7 +20,7 @@ pub use session_service::{
     delete_failed_first_send_session,
     decide_llm_session_message_with_config, list_session_messages, list_sessions,
     preview_session_intake, preview_session_intake_with_config, send_session_message,
-    send_session_message_with_config,
+    send_session_message_with_config, send_session_message_with_config_and_result,
 };
 pub use source_service::{
     create_attachment_source, create_demo_source, create_message_source,

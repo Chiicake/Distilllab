@@ -1,4 +1,20 @@
-export default function ActiveInspector() {
+type ActiveInspectorProps = {
+  decisionSummary: string | null;
+  lastToolStatus: string | null;
+  lastRunStatus: string | null;
+  streamStatuses: string[];
+  liveAssistantText: string;
+};
+
+export default function ActiveInspector({
+  decisionSummary,
+  lastToolStatus,
+  lastRunStatus,
+  streamStatuses,
+  liveAssistantText,
+}: ActiveInspectorProps) {
+  const recentStatuses = streamStatuses.slice(-6).reverse();
+
   return (
     <aside className="hidden lg:flex flex-col w-80 h-full border-l border-outline-variant/10 bg-surface-bright/60 backdrop-blur-[20px] z-20">
       <div className="p-6 flex flex-col h-full">
@@ -22,14 +38,49 @@ export default function ActiveInspector() {
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-xs text-on-surface-variant font-medium">Current Stage</span>
-                <span className="text-sm text-on-surface">Evidence Review &amp; WorkItem Update</span>
+                <span className="text-xs text-on-surface-variant font-medium">Decision</span>
+                <span className="text-sm text-on-surface">{decisionSummary ?? 'Waiting for next decision...'}</span>
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-xs text-on-surface-variant font-medium">Recent Action</span>
-                <span className="text-sm text-primary">derive_workitem_state (Active)</span>
+                <span className="text-xs text-on-surface-variant font-medium">Tool Status</span>
+                <span className="text-sm text-primary">{lastToolStatus ?? 'No tool activity yet.'}</span>
               </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-on-surface-variant font-medium">Run Status</span>
+                <span className="text-sm text-primary">{lastRunStatus ?? 'No run activity yet.'}</span>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <label className="mb-4 block text-[10px] font-bold uppercase tracking-[0.2em] text-secondary">
+              Stream Events
+            </label>
+
+            <div className="space-y-2 rounded-xl border border-outline-variant/20 bg-surface-container-highest p-3">
+              {recentStatuses.length === 0 ? (
+                <p className="text-xs text-on-surface-variant">No stream events yet.</p>
+              ) : (
+                recentStatuses.map((status, index) => (
+                  <p key={`${status}-${index}`} className="text-xs leading-relaxed text-on-surface-variant">
+                    {status}
+                  </p>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section>
+            <label className="mb-4 block text-[10px] font-bold uppercase tracking-[0.2em] text-primary">
+              Live Assistant Output
+            </label>
+
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
+              <p className="text-xs leading-relaxed text-on-surface-variant whitespace-pre-wrap">
+                {liveAssistantText || 'Waiting for streaming chunks...'}
+              </p>
             </div>
           </section>
 

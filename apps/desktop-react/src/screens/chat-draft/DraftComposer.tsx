@@ -1,4 +1,24 @@
-export default function DraftComposer() {
+import { useState } from 'react';
+
+type DraftComposerProps = {
+  onSend: (message: string) => Promise<void>;
+  isStreaming: boolean;
+  errorText: string | null;
+};
+
+export default function DraftComposer({ onSend, isStreaming, errorText }: DraftComposerProps) {
+  const [message, setMessage] = useState('');
+
+  const submit = async () => {
+    const trimmed = message.trim();
+    if (!trimmed || isStreaming) {
+      return;
+    }
+
+    await onSend(trimmed);
+    setMessage('');
+  };
+
   return (
     <div className="bg-gradient-to-t from-surface to-transparent p-6">
       <div className="relative mx-auto max-w-4xl">
@@ -6,8 +26,16 @@ export default function DraftComposer() {
           <textarea
             aria-label="Describe the work you want to distill into structure"
             className="min-h-[64px] w-full resize-none border-none bg-transparent p-5 font-body text-on-surface placeholder:text-on-surface-variant/40 focus:ring-0"
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault();
+                void submit();
+              }
+            }}
             placeholder="Describe the work you want to distill into structure..."
             rows={1}
+            value={message}
           />
 
           <div className="flex items-center justify-between bg-surface-container-highest/50 px-5 py-3">
@@ -35,15 +63,21 @@ export default function DraftComposer() {
 
             <button
               className="flex items-center gap-2 rounded-lg bg-primary px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-on-primary transition-all hover:brightness-110"
+              disabled={isStreaming}
+              onClick={() => {
+                void submit();
+              }}
               type="button"
             >
-              Send
+              {isStreaming ? 'Sending' : 'Send'}
               <span aria-hidden="true" className="material-symbols-outlined" data-icon="arrow_forward">
                 arrow_forward
               </span>
             </button>
           </div>
         </div>
+
+        {errorText ? <p className="mt-3 text-sm text-[#ff8d8d]">{errorText}</p> : null}
 
         <div className="mt-3 text-center text-[10px] uppercase tracking-wide text-on-surface-variant/40">
           Press <kbd className="rounded border border-outline-variant/20 bg-surface px-1.5 py-0.5">Ctrl/Cmd</kbd> +{' '}
