@@ -1,5 +1,6 @@
 import type { SettingsSection } from '../../app-state/screen-state';
 import { useI18n } from '../../i18n/I18nProvider';
+import DebugPanel from './DebugPanel';
 import SettingsSidebar from './SettingsSidebar';
 
 type SettingsScreenProps = {
@@ -172,23 +173,27 @@ function WorkspaceSettingsView() {
   );
 }
 
-function DebugSettingsView() {
+function DebugSettingsView({ onReturnToWorkspace }: { onReturnToWorkspace: () => void }) {
   const { t } = useI18n();
 
   return (
-    <div className="w-full max-w-3xl space-y-8">
-      <header>
-        <h2 className="font-headline text-4xl font-extrabold tracking-tighter text-on-surface">
-          {t('settings.system.title')}
-        </h2>
-        <p className="mt-2 max-w-lg font-body text-on-surface-variant">
-          {t('settings.system.description')}
-        </p>
+    <div className="w-full max-w-5xl space-y-6">
+      <header className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-on-surface-variant">
+            {t('settings.debug.sectionLabel')}
+          </p>
+        </div>
+        <button
+          className="rounded-sm border border-outline-variant/40 bg-surface-container-high px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-on-surface-variant transition-colors hover:border-primary/40 hover:text-primary"
+          onClick={onReturnToWorkspace}
+          type="button"
+        >
+          {t('settings.debug.back')}
+        </button>
       </header>
 
-      <div className="rounded-sm border border-outline-variant/20 bg-surface-container p-8">
-        <p className="text-sm leading-relaxed text-on-surface-variant">{t('settings.system.placeholder')}</p>
-      </div>
+      <DebugPanel />
     </div>
   );
 }
@@ -201,7 +206,11 @@ export default function SettingsScreen({ section = 'workspace', onChangeSection 
       <SettingsSidebar section={activeSection} onChangeSection={onChangeSection} />
 
       <main className="flex min-w-0 flex-1 overflow-y-auto px-12 py-12">
-        {activeSection === 'workspace' ? <WorkspaceSettingsView /> : <DebugSettingsView />}
+        {activeSection === 'workspace' ? (
+          <WorkspaceSettingsView />
+        ) : (
+          <DebugSettingsView onReturnToWorkspace={() => onChangeSection('workspace')} />
+        )}
       </main>
     </div>
   );

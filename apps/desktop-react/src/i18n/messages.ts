@@ -21,7 +21,7 @@ const enMessages = {
   'settings.sidebar.profile': 'Profile',
   'settings.sidebar.workspace': 'Workspace',
   'settings.sidebar.notifications': 'Notifications',
-  'settings.sidebar.system': 'System',
+  'settings.sidebar.debug': 'Debug',
   'settings.sidebar.help': 'Help',
 
   'settings.workspace.title': 'Workspace Settings',
@@ -60,11 +60,22 @@ const enMessages = {
   'settings.action.discard': 'Discard',
   'settings.action.save': 'Save Changes',
 
-  'settings.system.title': 'System Settings',
-  'settings.system.description':
-    'Diagnostics and local debug controls remain intentionally minimal in this mock.',
-  'settings.system.placeholder':
-    'Debug controls are staged for a later pass. The current focus remains preserving visual fidelity for the workspace settings canvas.',
+  'settings.debug.sectionLabel': 'Settings / Debug',
+  'settings.debug.back': 'Return',
+  'settings.debug.title': 'Debug Workspace',
+  'settings.debug.description':
+    'This is the first migration step of the Tauri-to-Rust bridge. Commands below call the same backend surface used by apps/desktop.',
+  'settings.debug.commands.title': 'Quick Commands',
+  'settings.debug.commands.badge': 'Bridge',
+  'settings.debug.action.createRun': 'Create Demo Run',
+  'settings.debug.action.createSession': 'Create Demo Session',
+  'settings.debug.action.listSessions': 'List Sessions',
+  'settings.debug.output.title': 'Command Output',
+  'settings.debug.output.default': 'No command executed yet.',
+  'settings.debug.output.running': 'Running',
+  'settings.debug.output.errorPrefix': 'Error: ',
+  'settings.debug.output.bridgeMissing':
+    'Tauri bridge is unavailable. Open this screen from the Tauri app instead of plain Vite browser mode.',
 } as const;
 
 export type MessageKey = keyof typeof enMessages;
@@ -78,7 +89,7 @@ const zhCnMessages: Record<MessageKey, string> = {
   'settings.sidebar.profile': '个人资料',
   'settings.sidebar.workspace': '工作区',
   'settings.sidebar.notifications': '通知',
-  'settings.sidebar.system': '系统',
+  'settings.sidebar.debug': '调试',
   'settings.sidebar.help': '帮助',
 
   'settings.workspace.title': '工作区设置',
@@ -113,9 +124,20 @@ const zhCnMessages: Record<MessageKey, string> = {
   'settings.action.discard': '放弃',
   'settings.action.save': '保存更改',
 
-  'settings.system.title': '系统设置',
-  'settings.system.description': '诊断与调试能力在当前 mock 中保持最小展示。',
-  'settings.system.placeholder': '调试控制将在后续迭代补齐，当前重点是还原工作区设置界面的视觉设计。',
+  'settings.debug.sectionLabel': '设置 / 调试',
+  'settings.debug.back': '返回',
+  'settings.debug.title': '调试工作区',
+  'settings.debug.description': '这是 Tauri 空壳接入 Rust 的第一步迁移。下面按钮调用与 apps/desktop 一致的后端命令。',
+  'settings.debug.commands.title': '快捷命令',
+  'settings.debug.commands.badge': '桥接',
+  'settings.debug.action.createRun': '创建示例 Run',
+  'settings.debug.action.createSession': '创建示例 Session',
+  'settings.debug.action.listSessions': '列出 Session',
+  'settings.debug.output.title': '命令输出',
+  'settings.debug.output.default': '尚未执行任何命令。',
+  'settings.debug.output.running': '执行中',
+  'settings.debug.output.errorPrefix': '错误：',
+  'settings.debug.output.bridgeMissing': '当前没有 Tauri 桥接，请在 Tauri 应用中打开此页面，而不是纯 Vite 浏览器模式。',
 };
 
 export const messages: Record<Locale, Record<MessageKey, string>> = {
