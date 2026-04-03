@@ -101,6 +101,58 @@ function asRunState(value: string | null | undefined): 'pending' | 'running' | '
   return 'pending';
 }
 
+function normalizeStepStatus(value: string | null | undefined): 'pending' | 'running' | 'completed' | 'failed' {
+  const normalized = (value ?? '').toLowerCase();
+  if (normalized === 'failed') {
+    return 'failed';
+  }
+  if (normalized === 'completed' || normalized === 'finished') {
+    return 'completed';
+  }
+  if (normalized === 'running' || normalized === 'started') {
+    return 'running';
+  }
+  return 'pending';
+}
+
+function mergeRunSteps(
+  previousSteps: NonNullable<ChatMessage['runMeta']>['steps'] | undefined,
+  nextStep: {
+    key: string;
+    summary: string;
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    index?: number | null;
+    total?: number | null;
+    detailText?: string | null;
+  } | null,
+) {
+  if (!nextStep) {
+    return previousSteps ?? [];
+  }
+
+  const base = [...(previousSteps ?? [])];
+  const existingIndex = base.findIndex((step) => step.key === nextStep.key);
+  if (existingIndex >= 0) {
+    base[existingIndex] = {
+      ...base[existingIndex],
+      ...nextStep,
+    };
+  } else {
+    base.push(nextStep);
+  }
+
+  base.sort((a, b) => {
+    const aIndex = a.index ?? Number.MAX_SAFE_INTEGER;
+    const bIndex = b.index ?? Number.MAX_SAFE_INTEGER;
+    if (aIndex !== bIndex) {
+      return aIndex - bIndex;
+    }
+    return a.key.localeCompare(b.key);
+  });
+
+  return base;
+}
+
 function sessionSummaryFromOption(option: SessionSelectorOption): ChatSessionSummary {
   return {
     sessionId: option.sessionId,
@@ -251,6 +303,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
           const runId = event.createdRunId ?? 'run-active';
           const statusText = event.statusText ?? 'Run started.';
           const state = runStateFromStatus(statusText);
+          const previousRunMeta = previous.messages.find((message) => message.id === `run-card-${runId}`)?.runMeta;
           const runMessage: ChatMessage = {
             id: `run-card-${runId}`,
             role: 'system',
@@ -263,6 +316,15 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
               runId,
               state,
               progressPercent: runProgressFromState(state),
+              runType: previousRunMeta?.runType ?? null,
+              stepKey: previousRunMeta?.stepKey ?? null,
+              stepSummary: previousRunMeta?.stepSummary ?? null,
+              stepStatus: previousRunMeta?.stepStatus ?? null,
+              stepIndex: previousRunMeta?.stepIndex ?? null,
+              stepsTotal: previousRunMeta?.stepsTotal ?? null,
+              detailText: previousRunMeta?.detailText ?? null,
+              currentStepKey: previousRunMeta?.currentStepKey ?? null,
+              steps: previousRunMeta?.steps ?? [],
             },
           };
 
@@ -301,6 +363,20 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
             .join(' - ');
           const statusText = event.statusText ?? (fallbackStatus || `run ${runId} progress`);
 
+          const previousRunMessage = previous.messages.find((message) => message.id === `run-card-${runId}`);
+          const previousRunMeta = previousRunMessage?.runMeta;
+          const nextStep = update.stepKey
+            ? {
+                key: update.stepKey,
+                summary: update.stepSummary ?? update.stepKey,
+                status: normalizeStepStatus(update.stepStatus ?? update.phase),
+                index: update.stepIndex,
+                total: update.stepsTotal,
+                detailText: update.detailText,
+              }
+            : null;
+          const mergedSteps = mergeRunSteps(previousRunMeta?.steps, nextStep);
+
           const runMessage: ChatMessage = {
             id: `run-card-${runId}`,
             role: 'system',
@@ -320,6 +396,8 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
               stepIndex: update.stepIndex,
               stepsTotal: update.stepsTotal,
               detailText: update.detailText,
+              currentStepKey: update.stepKey ?? previousRunMeta?.currentStepKey,
+              steps: mergedSteps,
             },
           };
 
@@ -336,6 +414,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
           const runId = event.createdRunId ?? 'run-active';
           const statusText = event.statusText ?? 'Run finished.';
           const state = runStateFromStatus(statusText);
+          const previousRunMeta = previous.messages.find((message) => message.id === `run-card-${runId}`)?.runMeta;
           const runMessage: ChatMessage = {
             id: `run-card-${runId}`,
             role: 'system',
@@ -348,6 +427,15 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
               runId,
               state,
               progressPercent: runProgressFromState(state),
+              runType: previousRunMeta?.runType ?? null,
+              stepKey: previousRunMeta?.stepKey ?? null,
+              stepSummary: previousRunMeta?.stepSummary ?? null,
+              stepStatus: previousRunMeta?.stepStatus ?? null,
+              stepIndex: previousRunMeta?.stepIndex ?? null,
+              stepsTotal: previousRunMeta?.stepsTotal ?? null,
+              detailText: previousRunMeta?.detailText ?? null,
+              currentStepKey: previousRunMeta?.currentStepKey ?? null,
+              steps: previousRunMeta?.steps ?? [],
             },
           };
 

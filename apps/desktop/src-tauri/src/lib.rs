@@ -271,6 +271,29 @@ fn format_session_messages_text(messages: &[SessionMessage]) -> String {
                     .unwrap_or_else(|| "[Tool] unknown()".to_string());
 
                 format!("{}\n{}", tool_header, indent_block(&message.content))
+            } else if message.message_type == "run_progress_message" {
+                let run_header = serde_json::from_str::<serde_json::Value>(&message.data_json)
+                    .ok()
+                    .and_then(|value| {
+                        let run_progress = value.get("runProgress")?;
+                        let run_id = run_progress.get("runId").and_then(|v| v.as_str())?;
+                        let step_key = run_progress.get("stepKey").and_then(|v| v.as_str());
+                        let run_phase = run_progress
+                            .get("phase")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("state_changed");
+
+                        Some(match step_key {
+                            Some(key) => {
+                                format!("[Run] {} [{}] ({})", run_id, key, run_phase)
+                            }
+                            None => format!("[Run] {} ({})", run_id, run_phase),
+                        })
+                    })
+                    .unwrap_or_else(|| "[Run] unknown".to_string());
+
+                let run_body = format!("{}\n{}", message.content, message.data_json);
+                format!("{}\n{}", run_header, indent_block(&run_body))
             } else {
                 let role_header = match message.role {
                     SessionMessageRole::User => "[User]",

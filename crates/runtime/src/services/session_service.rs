@@ -18,13 +18,13 @@ use chrono::Utc;
 use memory::db::open_database;
 use memory::migrations::run_migrations;
 use memory::session_message_store::{
-    delete_session_messages_for_session, list_session_messages_for_session,
-    update_session_message_run_and_content,
+    delete_session_messages_for_session, insert_session_message,
+    list_session_messages_for_session, update_session_message_run_and_content,
 };
 use memory::session_store::{
     delete_session, get_session_by_id, insert_session, list_sessions as memory_list_sessions,
 };
-use schema::{Session, SessionIntake, SessionMessage, SessionStatus};
+use schema::{Session, SessionIntake, SessionMessage, SessionMessageRole, SessionStatus};
 use uuid::Uuid;
 
 type RuntimeError = Box<dyn std::error::Error + Send + Sync>;
@@ -138,6 +138,110 @@ fn indent_block(text: &str) -> String {
         .join("\n")
 }
 
+fn run_progress_status_text(update: &RunProgressUpdate) -> String {
+    let percent = update
+        .progress_percent
+        .map(|value| format!("{}%", value))
+        .unwrap_or_else(|| "n/a".to_string());
+    let step_key = update.step_key.as_deref().unwrap_or("run");
+    let detail = update.detail_text.as_deref().unwrap_or("");
+
+    match update.phase {
+        crate::contracts::RunProgressPhase::Created => {
+            format!("run created: {} ({})", update.run_id, update.run_type)
+        }
+        crate::contracts::RunProgressPhase::StateChanged => format!(
+            "run state: {} {} ({}){}",
+            update.run_id,
+            update.run_state,
+            percent,
+            if detail.is_empty() {
+                "".to_string()
+            } else {
+                format!(" - {}", detail)
+            }
+        ),
+        crate::contracts::RunProgressPhase::StepStarted => format!(
+            "run step started: {} [{}] ({}){}",
+            update.run_id,
+            step_key,
+            percent,
+            if detail.is_empty() {
+                "".to_string()
+            } else {
+                format!(" - {}", detail)
+            }
+        ),
+        crate::contracts::RunProgressPhase::StepFinished => format!(
+            "run step finished: {} [{}] ({}){}",
+            update.run_id,
+            step_key,
+            percent,
+            if detail.is_empty() {
+                "".to_string()
+            } else {
+                format!(" - {}", detail)
+            }
+        ),
+    }
+}
+
+fn record_run_progress_message(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    update: &RunProgressUpdate,
+) -> Result<(), RuntimeError> {
+    let status_text = run_progress_status_text(update);
+    let mut history = Vec::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT data_json FROM session_messages WHERE session_id = ?1 AND run_id = ?2 AND message_type = 'run_progress_message' ORDER BY created_at ASC, id ASC",
+            )
+            .map_err(|error| Box::new(error) as RuntimeError)?;
+
+        let rows = stmt
+            .query_map([session_id, update.run_id.as_str()], |row| row.get::<_, String>(0))
+            .map_err(|error| Box::new(error) as RuntimeError)?;
+
+        for row in rows {
+            let raw = row.map_err(|error| Box::new(error) as RuntimeError)?;
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw)
+                && let Some(existing_update) = value.get("runProgress")
+            {
+                history.push(existing_update.clone());
+            }
+        }
+    }
+
+    history.push(
+        serde_json::to_value(update)
+            .map_err(|error| Box::new(error) as RuntimeError)?,
+    );
+
+    let data_json = serde_json::json!({
+        "statusText": status_text,
+        "runProgress": update,
+        "runProgressHistory": history,
+    })
+    .to_string();
+
+    insert_session_message(
+        conn,
+        &SessionMessage {
+            id: format!("message-{}", Uuid::new_v4()),
+            session_id: session_id.to_string(),
+            run_id: Some(update.run_id.clone()),
+            message_type: "run_progress_message".to_string(),
+            role: SessionMessageRole::System,
+            content: status_text,
+            data_json,
+            created_at: Utc::now().to_string(),
+        },
+    )
+    .map_err(|error| Box::new(error) as RuntimeError)
+}
+
 pub(crate) fn format_session_messages_for_debug(messages: &[SessionMessage]) -> String {
     if messages.is_empty() {
         return "no session messages found".to_string();
@@ -157,6 +261,29 @@ pub(crate) fn format_session_messages_for_debug(messages: &[SessionMessage]) -> 
                     .unwrap_or_else(|| "[Tool] unknown()".to_string());
 
                 format!("{}\n{}", tool_header, indent_block(&message.content))
+            } else if message.message_type == "run_progress_message" {
+                let run_header = serde_json::from_str::<serde_json::Value>(&message.data_json)
+                    .ok()
+                    .and_then(|value| {
+                        let run_progress = value.get("runProgress")?;
+                        let run_id = run_progress.get("runId").and_then(|v| v.as_str())?;
+                        let step_key = run_progress.get("stepKey").and_then(|v| v.as_str());
+                        let run_phase = run_progress
+                            .get("phase")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("state_changed");
+
+                        Some(match step_key {
+                            Some(key) => {
+                                format!("[Run] {} [{}] ({})", run_id, key, run_phase)
+                            }
+                            None => format!("[Run] {} ({})", run_id, run_phase),
+                        })
+                    })
+                    .unwrap_or_else(|| "[Run] unknown".to_string());
+
+                let run_body = format!("{}\n{}", message.content, message.data_json);
+                format!("{}\n{}", run_header, indent_block(&run_body))
             } else {
                 let role_header = match message.role {
                     schema::SessionMessageRole::User => "[User]",
@@ -400,6 +527,7 @@ where
             format!("session not found: {}", request.session_id),
         )
     })?;
+    let session_id_for_progress = session.id.clone();
 
     let outcome = decide_and_record_intake_streaming(
         runtime,
@@ -437,7 +565,10 @@ where
             runtime,
             &decision,
             run_input,
-            |update| on_run_progress(update),
+            |update| {
+                let _ = record_run_progress_message(&conn, &session_id_for_progress, &update);
+                on_run_progress(update);
+            },
         )?)
     } else {
         None

@@ -1,6 +1,6 @@
-import type { ChatMessage, ChatMessageRole } from './types';
+import type { ChatMessage, ChatMessageRole, RunCardMeta } from './types';
 
-const HEADER_PATTERN = /^\[(User|Assistant|System|Tool)\]/;
+const HEADER_PATTERN = /^\[(User|Assistant|System|Tool|Run)\]/;
 
 function compactJsonSnippet(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -53,6 +53,159 @@ function roleFromHeader(header: string): ChatMessageRole {
   return 'assistant';
 }
 
+function parseRunHeaderMeta(header: string): {
+  runId: string;
+  stepKey: string | null;
+  phase: string;
+} {
+  const normalized = header.trim();
+  const withStep = normalized.match(/^\[Run\]\s+([^\s\[]+)\s+\[([^\]]+)\]\s+\(([^\)]+)\)$/);
+  if (withStep) {
+    return {
+      runId: withStep[1],
+      stepKey: withStep[2],
+      phase: withStep[3],
+    };
+  }
+
+  const withoutStep = normalized.match(/^\[Run\]\s+([^\s\[]+)\s+\(([^\)]+)\)$/);
+  if (withoutStep) {
+    return {
+      runId: withoutStep[1],
+      stepKey: null,
+      phase: withoutStep[2],
+    };
+  }
+
+  return {
+    runId: 'run-unknown',
+    stepKey: null,
+    phase: 'state_changed',
+  };
+}
+
+function parseRunMetaFromDataJson(dataJson: string, fallbackHeader: string): RunCardMeta {
+  const fallback = parseRunHeaderMeta(fallbackHeader);
+  const fallbackState: RunCardMeta['state'] =
+    fallback.phase.includes('finished') || fallback.phase.includes('completed')
+      ? 'completed'
+      : fallback.phase.includes('failed')
+        ? 'failed'
+        : fallback.phase.includes('started')
+          ? 'running'
+          : 'pending';
+
+  const fallbackPercent =
+    fallbackState === 'completed' || fallbackState === 'failed'
+      ? 100
+      : fallbackState === 'running'
+        ? 55
+        : 10;
+
+  try {
+    const parsed = JSON.parse(dataJson) as {
+      runProgress?: {
+        runId?: string;
+        runState?: string;
+        progressPercent?: number;
+        runType?: string;
+        stepKey?: string;
+        stepSummary?: string;
+        stepStatus?: string;
+        stepIndex?: number;
+        stepsTotal?: number;
+        detailText?: string;
+      };
+    };
+    const rp = parsed.runProgress;
+    if (!rp) {
+      return {
+        runId: fallback.runId,
+        state: fallbackState,
+        progressPercent: fallbackPercent,
+        stepKey: fallback.stepKey,
+      };
+    }
+
+    const normalizedState = (rp.runState ?? '').toLowerCase();
+    const state: RunCardMeta['state'] =
+      normalizedState === 'completed'
+        ? 'completed'
+        : normalizedState === 'failed'
+          ? 'failed'
+          : normalizedState === 'running'
+            ? 'running'
+            : 'pending';
+
+    return {
+      runId: rp.runId ?? fallback.runId,
+      state,
+      progressPercent:
+        typeof rp.progressPercent === 'number'
+          ? Math.max(0, Math.min(100, rp.progressPercent))
+          : fallbackPercent,
+      runType: rp.runType ?? null,
+      stepKey: rp.stepKey ?? fallback.stepKey,
+      stepSummary: rp.stepSummary ?? null,
+      stepStatus: rp.stepStatus ?? null,
+      stepIndex: typeof rp.stepIndex === 'number' ? rp.stepIndex : null,
+      stepsTotal: typeof rp.stepsTotal === 'number' ? rp.stepsTotal : null,
+      detailText: rp.detailText ?? null,
+    };
+  } catch {
+    return {
+      runId: fallback.runId,
+      state: fallbackState,
+      progressPercent: fallbackPercent,
+      stepKey: fallback.stepKey,
+    };
+  }
+}
+
+function parseStepHistoryFromDataJson(dataJson: string): RunCardMeta['steps'] {
+  try {
+    const parsed = JSON.parse(dataJson) as {
+      runProgressHistory?: Array<{
+        stepKey?: string;
+        stepSummary?: string;
+        stepStatus?: string;
+        stepIndex?: number;
+        stepsTotal?: number;
+        detailText?: string;
+      }>;
+    };
+
+    if (!Array.isArray(parsed.runProgressHistory)) {
+      return [];
+    }
+
+    return parsed.runProgressHistory
+      .filter((entry) => typeof entry.stepKey === 'string' && entry.stepKey.trim().length > 0)
+      .map((entry) => {
+        const normalized = (entry.stepStatus ?? '').toLowerCase();
+        const status: 'pending' | 'running' | 'completed' | 'failed' =
+          normalized === 'failed'
+            ? 'failed'
+            : normalized === 'completed' || normalized === 'finished'
+              ? 'completed'
+              : normalized === 'running' || normalized === 'started'
+                ? 'running'
+                : 'pending';
+
+        return {
+          key: entry.stepKey as string,
+          summary: entry.stepSummary ?? (entry.stepKey as string),
+          status,
+          index: typeof entry.stepIndex === 'number' ? entry.stepIndex : null,
+          total: typeof entry.stepsTotal === 'number' ? entry.stepsTotal : null,
+          detailText: entry.detailText ?? null,
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
 function parseToolMessage(header: string, body: string, index: number): ChatMessage {
   const summary = summarizeToolHeader(header, body);
 
@@ -76,6 +229,27 @@ function parseRegularMessage(header: string, body: string, index: number): ChatM
   };
 }
 
+function parseRunMessage(header: string, body: string, dataJson: string): ChatMessage {
+  const runMeta = parseRunMetaFromDataJson(dataJson, header);
+  const stepHistory = parseStepHistoryFromDataJson(dataJson);
+  const summary = body.split('\n').find((line) => line.trim().length > 0)?.trim() ?? body;
+
+  return {
+    id: `run-card-${runMeta.runId}`,
+    role: 'system',
+    kind: 'run',
+    expandable: true,
+    summary,
+    details: body,
+    content: body,
+    runMeta: {
+      ...runMeta,
+      currentStepKey: runMeta.stepKey,
+      steps: stepHistory,
+    },
+  };
+}
+
 export function parseTimelineText(timelineText: string): ChatMessage[] {
   const lines = timelineText.split('\n');
   const messages: ChatMessage[] = [];
@@ -91,6 +265,17 @@ export function parseTimelineText(timelineText: string): ChatMessage[] {
     const normalizedBody = activeContent.map((line) => line.replace(/^\s{2}/, '')).join('\n').trim();
     if (activeHeader.startsWith('[Tool]')) {
       messages.push(parseToolMessage(activeHeader, normalizedBody, messages.length));
+    } else if (activeHeader.startsWith('[Run]')) {
+      const firstLine = normalizedBody.split('\n')[0] ?? '';
+      const payloadMatch = firstLine.match(/\{.*\}$/);
+      const dataJson = payloadMatch ? payloadMatch[0] : '{}';
+      const runMessage = parseRunMessage(activeHeader, normalizedBody, dataJson);
+      const existingIndex = messages.findIndex((message) => message.id === runMessage.id);
+      if (existingIndex >= 0) {
+        messages[existingIndex] = runMessage;
+      } else {
+        messages.push(runMessage);
+      }
     } else if (normalizedBody.length > 0) {
       messages.push(parseRegularMessage(activeHeader, normalizedBody, messages.length));
     }

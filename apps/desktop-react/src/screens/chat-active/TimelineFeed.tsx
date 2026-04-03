@@ -47,6 +47,7 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
         const isToolLike = message.kind === 'tool';
         const isRunLike = message.kind === 'run';
         const runMeta = message.runMeta;
+        const runSteps = runMeta?.steps ?? [];
 
         return (
           <div
@@ -131,6 +132,42 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
                               Step {runMeta.stepIndex}/{runMeta.stepsTotal}
                             </p>
                           ) : null}
+                        </div>
+                      ) : null}
+
+                      {runSteps.length > 0 ? (
+                        <div className="mt-2 space-y-1">
+                          {runSteps.map((step) => {
+                            const isCurrent = runMeta.currentStepKey === step.key;
+                            const statusColor =
+                              step.status === 'completed'
+                                ? 'text-secondary'
+                                : step.status === 'failed'
+                                  ? 'text-[#ff8d8d]'
+                                  : step.status === 'running'
+                                    ? 'text-primary'
+                                    : 'text-on-surface-variant';
+                            return (
+                              <div
+                                key={step.key}
+                                className={`flex items-start justify-between rounded-md border px-2 py-1 text-[11px] ${
+                                  isCurrent
+                                    ? 'border-primary/25 bg-primary/5'
+                                    : 'border-outline-variant/20 bg-surface-container'
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate text-on-surface">{step.summary}</p>
+                                  {step.detailText ? (
+                                    <p className="truncate text-[10px] text-on-surface-variant">{step.detailText}</p>
+                                  ) : null}
+                                </div>
+                                <div className={`ml-2 shrink-0 text-[10px] uppercase tracking-[0.1em] ${statusColor}`}>
+                                  {step.status}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : null}
                     </div>

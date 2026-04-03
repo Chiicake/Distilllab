@@ -1,6 +1,18 @@
+import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
+
 import brandIconDp1 from '../../assets/brand-icon-dp1.svg';
 import type { Screen } from '../../app-state/screen-state';
 import { useI18n } from '../../i18n/I18nProvider';
+
+type WindowControlsApi = {
+  minimize: () => Promise<void>;
+  maximize: () => Promise<void>;
+  unmaximize: () => Promise<void>;
+  toggleMaximize: () => Promise<void>;
+  isMaximized: () => Promise<boolean>;
+  startDragging: () => Promise<void>;
+  close: () => Promise<void>;
+};
 
 type TopNavProps = {
   currentScreen: Screen;
@@ -14,20 +26,131 @@ export default function TopNav({ currentScreen, onOpenChat, onOpenCanvas, onOpen
   const isChatActive = currentScreen.kind === 'chat-draft' || currentScreen.kind === 'chat-active';
   const isCanvasActive = currentScreen.kind === 'canvas';
   const isSettingsActive = currentScreen.kind === 'settings';
+  const [windowControls, setWindowControls] = useState<WindowControlsApi | null>(null);
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const setupWindowControls = async () => {
+      try {
+        const module = await import('@tauri-apps/api/window');
+        const appWindow = module.getCurrentWindow();
+        if (cancelled) {
+          return;
+        }
+
+        setWindowControls({
+          minimize: () => appWindow.minimize(),
+          maximize: () => appWindow.maximize(),
+          unmaximize: () => appWindow.unmaximize(),
+          toggleMaximize: () => appWindow.toggleMaximize(),
+          isMaximized: () => appWindow.isMaximized(),
+          startDragging: () => appWindow.startDragging(),
+          close: () => appWindow.close(),
+        });
+
+        const maximized = await appWindow.isMaximized();
+        if (!cancelled) {
+          setIsMaximized(maximized);
+        }
+        } catch (error) {
+          if (!cancelled) {
+            setWindowControls(null);
+            if (typeof window !== 'undefined') {
+              window.console.error('[TopNav] failed to initialize window controls', error);
+            }
+          }
+        }
+      };
+
+    void setupWindowControls();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleMinimize = useCallback(() => {
+    if (!windowControls) {
+      if (typeof window !== 'undefined') {
+        window.console.warn('[TopNav] window controls unavailable: minimize ignored');
+      }
+      return;
+    }
+
+    void windowControls.minimize().catch((error) => {
+      if (typeof window !== 'undefined') {
+        window.console.error('[TopNav] minimize failed', error);
+      }
+    });
+  }, [windowControls]);
+
+  const handleToggleMaximize = useCallback(() => {
+    if (!windowControls) {
+      if (typeof window !== 'undefined') {
+        window.console.warn('[TopNav] window controls unavailable: maximize ignored');
+      }
+      return;
+    }
+
+    void (async () => {
+      try {
+        await windowControls.toggleMaximize();
+        const nextMaximized = await windowControls.isMaximized();
+        setIsMaximized(nextMaximized);
+      } catch (error) {
+        if (typeof window !== 'undefined') {
+          window.console.error('[TopNav] toggle maximize failed', error);
+        }
+      }
+    })();
+  }, [windowControls]);
+
+  const handleClose = useCallback(() => {
+    if (!windowControls) {
+      if (typeof window !== 'undefined') {
+        window.console.warn('[TopNav] window controls unavailable: close ignored');
+      }
+      return;
+    }
+
+    void windowControls.close().catch((error) => {
+      if (typeof window !== 'undefined') {
+        window.console.error('[TopNav] close failed', error);
+      }
+    });
+  }, [windowControls]);
+
+  const handleDragRegionMouseDown = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0 || !windowControls) {
+        return;
+      }
+
+      event.preventDefault();
+      void windowControls.startDragging().catch((error) => {
+        if (typeof window !== 'undefined') {
+          window.console.error('[TopNav] start dragging failed', error);
+        }
+      });
+    },
+    [windowControls],
+  );
 
   return (
-    <header className="bg-[#0e0e0e] text-[#bac3ff] font-['Manrope'] tracking-wider uppercase text-sm font-bold docked w-full top-0 h-16 no-border tonal-shift bg-[#191a1a] flat no shadows flex justify-between items-center px-6 w-full max-w-full z-50">
-      <div className="flex items-center gap-8">
-        <div className="flex items-center gap-3">
-          <img alt="DistillLab brand icon" className="h-8 w-8 rounded-sm" src={brandIconDp1} />
-          <span className="text-xl font-black tracking-tighter text-[#bac3ff] normal-case">DistillLab</span>
+    <header className="flex h-11 w-full items-center border-b border-outline-variant/25 bg-[#151616]/95 px-3 text-[#bac3ff] backdrop-blur-sm">
+      <div className="tauri-no-drag flex items-center gap-3 font-['Manrope']">
+        <div className="flex items-center gap-2">
+          <img alt="DistillLab brand icon" className="h-5 w-5 rounded-sm" src={brandIconDp1} />
+          <span className="text-[12px] font-extrabold tracking-[0.08em] text-[#cfd5ff]">DistillLab</span>
         </div>
-        <nav className="hidden md:flex gap-6 items-center lowercase tracking-normal">
+        <nav className="hidden items-center gap-1 md:flex">
           <button
             className={
               isChatActive
-                ? 'text-[#bac3ff] border-b-2 border-[#bac3ff] pb-1 hover:text-[#f3faff] transition-colors scale-95 duration-200'
-                : 'text-[#acabaa] opacity-60 hover:text-[#f3faff] transition-colors scale-95 duration-200'
+                ? 'rounded-md border border-[#bac3ff]/40 bg-[#bac3ff]/10 px-2 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[#bac3ff]'
+                : 'rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[#8f95bf] transition-colors hover:text-[#dbe1ff]'
             }
             onClick={onOpenChat}
             type="button"
@@ -37,8 +160,8 @@ export default function TopNav({ currentScreen, onOpenChat, onOpenCanvas, onOpen
           <button
             className={
               isCanvasActive
-                ? 'text-[#bac3ff] border-b-2 border-[#bac3ff] pb-1 hover:text-[#f3faff] transition-colors scale-95 duration-200'
-                : 'text-[#acabaa] opacity-60 hover:text-[#f3faff] transition-colors scale-95 duration-200'
+                ? 'rounded-md border border-[#bac3ff]/40 bg-[#bac3ff]/10 px-2 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[#bac3ff]'
+                : 'rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[#8f95bf] transition-colors hover:text-[#dbe1ff]'
             }
             onClick={onOpenCanvas}
             type="button"
@@ -47,37 +170,60 @@ export default function TopNav({ currentScreen, onOpenChat, onOpenCanvas, onOpen
           </button>
         </nav>
       </div>
-      <div className="flex items-center gap-4">
-        <button
-          aria-label={t('nav.notifications')}
-          className="text-[#acabaa] opacity-60 hover:text-[#f3faff] transition-colors"
-        >
-          <span className="material-symbols-outlined" data-icon="notifications">
-            notifications
-          </span>
-        </button>
+
+      <div
+        className="tauri-drag-region mx-2 h-7 flex-1 rounded-md"
+        data-tauri-drag-region
+        onDoubleClick={handleToggleMaximize}
+        onMouseDown={handleDragRegionMouseDown}
+      />
+
+      <div className="tauri-no-drag flex items-center gap-1">
         <button
           aria-label={t('nav.settings')}
           className={
             isSettingsActive
-              ? 'text-[#bac3ff] hover:text-[#f3faff] transition-colors'
-              : 'text-[#acabaa] opacity-60 hover:text-[#f3faff] transition-colors'
+              ? 'rounded-md bg-[#bac3ff]/15 p-1 text-[#bac3ff] transition-colors'
+              : 'rounded-md p-1 text-[#8f95bf] transition-colors hover:text-[#dbe1ff]'
           }
           onClick={onOpenSettings}
           type="button"
         >
-          <span className="material-symbols-outlined" data-icon="settings">
+          <span className="material-symbols-outlined text-[18px]" data-icon="settings">
             settings
           </span>
         </button>
-        <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-container-highest flex items-center justify-center border border-outline-variant/10">
-          <img
-            alt="User profile"
-            className="w-full h-full object-cover"
-            data-alt="professional portrait of a creative technologist in a minimalist studio environment with neutral lighting"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuBLE1X6_qx-lu7Xt3Zg2kw2IJTC6EWjIwuvAzJKqJmWeI1giXx2k46EZQhuGlNNeL0oBJumtPz9osVMI-y_pVbIHYKSGLbeOlqVHQWCZ80k1OScacXnpHTc2SKGj5UWNSS_45KLysTfEjeh29fSqtI0vAyOH37VcEJmz4U4vdFj4e5S0zRo_WsECGpZR9C7zdH4d16aX97HtkNQV_WlE_KsWb_1ioFgbNpzA_ldzuOMpIYvad3EsxF8qZrCCD8NNAhrdv7ppR5hchQ"
-          />
-        </div>
+
+        {windowControls ? (
+          <div className="ml-1 flex items-center rounded-md border border-outline-variant/20 bg-surface-container/40">
+            <button
+              aria-label="Minimize window"
+              className="window-control-btn"
+              onClick={handleMinimize}
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[14px]">remove</span>
+            </button>
+            <button
+              aria-label="Toggle maximize window"
+              className="window-control-btn"
+              onClick={handleToggleMaximize}
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[12px]">
+                {isMaximized ? 'filter_none' : 'crop_square'}
+              </span>
+            </button>
+            <button
+              aria-label="Close window"
+              className="window-control-btn hover:bg-[#d65f5f]/25 hover:text-[#ffd9d9]"
+              onClick={handleClose}
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[14px]">close</span>
+            </button>
+          </div>
+        ) : null}
       </div>
     </header>
   );

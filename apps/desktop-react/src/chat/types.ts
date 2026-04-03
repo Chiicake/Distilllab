@@ -11,6 +11,17 @@ export type RunCardMeta = {
   stepIndex?: number | null;
   stepsTotal?: number | null;
   detailText?: string | null;
+  currentStepKey?: string | null;
+  steps?: RunStepMeta[];
+};
+
+export type RunStepMeta = {
+  key: string;
+  summary: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | string;
+  index?: number | null;
+  total?: number | null;
+  detailText?: string | null;
 };
 
 export type ChatMessage = {
