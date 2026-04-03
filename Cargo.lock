@@ -776,6 +776,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "distilllab-desktop-react"
+version = "0.1.0"
+dependencies = [
+ "distilllab-agent",
+ "distilllab-runtime",
+ "distilllab-schema",
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-log",
+]
+
+[[package]]
 name = "distilllab-memory"
 version = "0.1.0"
 dependencies = [
