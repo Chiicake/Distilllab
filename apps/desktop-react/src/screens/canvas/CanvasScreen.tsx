@@ -1,13 +1,27 @@
+import { useState } from 'react';
+
+import CanvasGlobalView from './CanvasGlobalView';
+import CanvasObjectDetail from './CanvasObjectDetail';
+
+type CanvasMockView =
+  | { kind: 'global-view' }
+  | { kind: 'object-detail'; objectId: 'analysis-an-402-delta' };
+
 export default function CanvasScreen() {
-  return (
-    <div className="flex min-w-0 flex-1 items-center justify-center bg-surface px-6 py-10">
-      <div className="max-w-xl space-y-4 text-center">
-        <h1 className="font-headline text-3xl font-extrabold text-on-surface">Canvas</h1>
-        <p className="text-sm leading-relaxed text-on-surface-variant">
-          Canvas preview placeholder. This screen exists so the app architecture has an explicit
-          non-chat workspace before the real canvas UI lands.
-        </p>
-      </div>
-    </div>
-  );
+  const [view, setView] = useState<CanvasMockView>({ kind: 'global-view' });
+
+  const openAnalysisDetail = () => {
+    setView({ kind: 'object-detail', objectId: 'analysis-an-402-delta' });
+  };
+
+  const returnToGlobalView = () => {
+    setView({ kind: 'global-view' });
+  };
+
+  switch (view.kind) {
+    case 'object-detail':
+      return <CanvasObjectDetail onReturnToGlobalView={returnToGlobalView} />;
+    case 'global-view':
+      return <CanvasGlobalView onOpenObjectDetail={openAnalysisDetail} />;
+  }
 }
