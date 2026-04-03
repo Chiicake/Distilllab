@@ -1,5 +1,6 @@
 import brandIconDp1 from '../../assets/brand-icon-dp1.svg';
 import type { Screen } from '../../app-state/screen-state';
+import { useI18n } from '../../i18n/I18nProvider';
 
 type TopNavProps = {
   currentScreen: Screen;
@@ -9,6 +10,7 @@ type TopNavProps = {
 };
 
 export default function TopNav({ currentScreen, onOpenChat, onOpenCanvas, onOpenSettings }: TopNavProps) {
+  const { t } = useI18n();
   const isChatActive = currentScreen.kind === 'chat-draft' || currentScreen.kind === 'chat-active';
   const isCanvasActive = currentScreen.kind === 'canvas';
   const isSettingsActive = currentScreen.kind === 'settings';
@@ -30,7 +32,7 @@ export default function TopNav({ currentScreen, onOpenChat, onOpenCanvas, onOpen
             onClick={onOpenChat}
             type="button"
           >
-            Chat
+            {t('nav.chat')}
           </button>
           <button
             className={
@@ -41,18 +43,21 @@ export default function TopNav({ currentScreen, onOpenChat, onOpenCanvas, onOpen
             onClick={onOpenCanvas}
             type="button"
           >
-            Canvas
+            {t('nav.canvas')}
           </button>
         </nav>
       </div>
       <div className="flex items-center gap-4">
-        <button aria-label="Notifications" className="text-[#acabaa] opacity-60 hover:text-[#f3faff] transition-colors">
+        <button
+          aria-label={t('nav.notifications')}
+          className="text-[#acabaa] opacity-60 hover:text-[#f3faff] transition-colors"
+        >
           <span className="material-symbols-outlined" data-icon="notifications">
             notifications
           </span>
         </button>
         <button
-          aria-label="Settings"
+          aria-label={t('nav.settings')}
           className={
             isSettingsActive
               ? 'text-[#bac3ff] hover:text-[#f3faff] transition-colors'
