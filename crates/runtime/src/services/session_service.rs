@@ -1,6 +1,6 @@
 use crate::app::AppRuntime;
 use crate::contracts::{
-    LlmSessionDebugRequest, RunProgressUpdate, SessionIntakePreview,
+    LlmSessionDebugRequest, RunProgressUpdate, RunResultContext, SessionIntakePreview,
     SessionMessageExecutionResult, SessionMessageRequest,
 };
 use crate::flows::build_import_and_distill_handoff_preview;
@@ -11,7 +11,8 @@ use crate::services::session_intake_coordinator::{
     decide_and_record_intake, decide_and_record_intake_streaming,
 };
 use agent::{
-    BasicSessionAgent, LlmProviderConfig, LlmSessionAgent, SessionAgent, SessionAgentDecision,
+    run_run_completion_summarizer, BasicSessionAgent, LlmProviderConfig, LlmSessionAgent,
+    RunCompletionResultContext, RunCompletionSummaryInput, SessionAgent, SessionAgentDecision,
     SessionAgentInput, SessionIntent,
 };
 use chrono::Utc;
@@ -309,6 +310,120 @@ fn record_run_progress_message(
     .map_err(|error| Box::new(error) as RuntimeError)
 }
 
+fn record_run_progress_message_for_runtime(
+    runtime: &AppRuntime,
+    session_id: &str,
+    update: &RunProgressUpdate,
+) -> Result<(), RuntimeError> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+    record_run_progress_message(&conn, session_id, update)
+}
+
+fn build_run_result_context(
+    run: &schema::Run,
+    output: &crate::contracts::RunExecutionOutput,
+    assets: &[schema::Asset],
+) -> RunResultContext {
+    RunResultContext {
+        run_id: run.id.clone(),
+        run_type: run.run_type.as_str().to_string(),
+        status: run.status.as_str().to_string(),
+        asset_count: output.asset_ids.len(),
+        work_item_count: output.work_item_ids.len(),
+        primary_asset_title: output.primary_asset_id.as_ref().and_then(|primary_id| {
+            assets
+                .iter()
+                .find(|asset| &asset.id == primary_id)
+                .map(|asset| asset.title.clone())
+        }),
+        asset_summaries: assets.iter().map(|asset| asset.summary.clone()).collect(),
+        execution_summary: output.execution_summary.clone(),
+    }
+}
+
+async fn summarize_run_completion(
+    client: &reqwest::Client,
+    provider_config: &LlmProviderConfig,
+    session_id: &str,
+    user_message: &str,
+    run_result: RunResultContext,
+) -> Result<agent::RunCompletionSummaryOutput, RuntimeError> {
+    run_run_completion_summarizer(
+        client,
+        provider_config,
+        &RunCompletionSummaryInput {
+            session_id: session_id.to_string(),
+            user_message: user_message.to_string(),
+            run_result: RunCompletionResultContext {
+                run_id: run_result.run_id,
+                run_type: run_result.run_type,
+                status: run_result.status,
+                asset_count: run_result.asset_count,
+                work_item_count: run_result.work_item_count,
+                primary_asset_title: run_result.primary_asset_title,
+                asset_summaries: run_result.asset_summaries,
+                execution_summary: run_result.execution_summary,
+            },
+        },
+    )
+    .await
+    .map_err(RuntimeError::from)
+}
+
+async fn append_run_completion_summary_message(
+    runtime: &AppRuntime,
+    provider_config: &LlmProviderConfig,
+    session_id: &str,
+    user_message: &str,
+    execution_outcome: &crate::services::distill_run_executor::DistillRunExecutionOutcome,
+) -> Result<Option<String>, RuntimeError> {
+    let Some(output) = &execution_outcome.output else {
+        return Ok(None);
+    };
+
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    let assets = memory::asset_store::list_assets(&conn)?
+        .into_iter()
+        .filter(|asset| output.asset_ids.contains(&asset.id))
+        .collect::<Vec<_>>();
+
+    let run_result_context = build_run_result_context(&execution_outcome.run, output, &assets);
+    let llm_client = reqwest::Client::new();
+    let completion_summary = summarize_run_completion(
+        &llm_client,
+        provider_config,
+        session_id,
+        user_message,
+        run_result_context,
+    )
+    .await?;
+
+    let content = completion_summary.reply_text;
+    insert_session_message(
+        &conn,
+        &SessionMessage {
+            id: format!("message-{}", Uuid::new_v4()),
+            session_id: session_id.to_string(),
+            run_id: Some(execution_outcome.run.id.clone()),
+            message_type: "assistant_message".to_string(),
+            role: SessionMessageRole::Assistant,
+            content: content.clone(),
+            data_json: serde_json::json!({
+                "sessionSummary": completion_summary.session_summary,
+                "runId": execution_outcome.run.id,
+                "runOutput": output,
+            })
+            .to_string(),
+            created_at: Utc::now().to_string(),
+        },
+    )?;
+
+    Ok(Some(content))
+}
+
 pub(crate) fn format_session_messages_for_debug(messages: &[SessionMessage]) -> String {
     if messages.is_empty() {
         return "no session messages found".to_string();
@@ -424,7 +539,7 @@ async fn send_session_message_with_optional_provider_config(
                 other => Some(other.to_string()),
             },
         },
-        provider_config,
+        provider_config.clone(),
     )
     .await?;
 
@@ -440,7 +555,13 @@ async fn send_session_message_with_optional_provider_config(
             )
         })?;
 
-        Some(create_and_execute_from_decision(runtime, &decision, run_input)?)
+        Some(create_and_execute_from_decision(
+            runtime,
+            provider_config.as_ref(),
+            &decision,
+            run_input,
+        )
+        .await?)
     } else {
         None
     };
@@ -448,10 +569,26 @@ async fn send_session_message_with_optional_provider_config(
     let materialize_result = execution_outcome
         .as_ref()
         .and_then(|outcome| outcome.materialize_result.clone());
+    let completion_summary_text = match (&provider_config, &execution_outcome) {
+        (Some(provider_config), Some(execution_outcome)) => {
+            append_run_completion_summary_message(
+                runtime,
+                provider_config,
+                &session.id,
+                user_message,
+                execution_outcome,
+            )
+            .await?
+        }
+        _ => None,
+    };
 
-    let final_assistant_content = match &materialize_result {
+    let final_assistant_content = match completion_summary_text {
+        Some(summary) => summary,
+        None => match &materialize_result {
         Some(result) => format!("{}\n\n{}", decision.reply_text, result.summary),
         None => decision.reply_text.clone(),
+        },
     };
     update_session_message_run_and_content(
         &conn,
@@ -494,7 +631,7 @@ async fn send_session_message_with_optional_provider_config_and_result(
                 other => Some(other.to_string()),
             },
         },
-        provider_config,
+        provider_config.clone(),
     )
     .await?;
 
@@ -510,7 +647,13 @@ async fn send_session_message_with_optional_provider_config_and_result(
             )
         })?;
 
-        Some(create_and_execute_from_decision(runtime, &decision, run_input)?)
+        Some(create_and_execute_from_decision(
+            runtime,
+            provider_config.as_ref(),
+            &decision,
+            run_input,
+        )
+        .await?)
     } else {
         None
     };
@@ -518,10 +661,26 @@ async fn send_session_message_with_optional_provider_config_and_result(
     let materialize_result = execution_outcome
         .as_ref()
         .and_then(|outcome| outcome.materialize_result.clone());
+    let completion_summary_text = match (&provider_config, &execution_outcome) {
+        (Some(provider_config), Some(execution_outcome)) => {
+            append_run_completion_summary_message(
+                runtime,
+                provider_config,
+                &session.id,
+                user_message,
+                execution_outcome,
+            )
+            .await?
+        }
+        _ => None,
+    };
 
-    let final_assistant_content = match &materialize_result {
+    let final_assistant_content = match completion_summary_text.clone() {
+        Some(summary) => summary,
+        None => match &materialize_result {
         Some(result) => format!("{}\n\n{}", decision.reply_text, result.summary),
         None => decision.reply_text.clone(),
+        },
     };
     update_session_message_run_and_content(
         &conn,
@@ -611,7 +770,7 @@ where
                 other => Some(other.to_string()),
             },
         },
-        Some(provider_config),
+        Some(provider_config.clone()),
         |chunk| on_reply_chunk(chunk),
     )
     .await?;
@@ -630,13 +789,15 @@ where
 
         Some(create_and_execute_from_decision_with_progress(
             runtime,
+            Some(&provider_config),
             &decision,
             run_input,
             |update| {
-                let _ = record_run_progress_message(&conn, &session_id_for_progress, &update);
+                let _ = record_run_progress_message_for_runtime(runtime, &session_id_for_progress, &update);
                 on_run_progress(update);
             },
-        )?)
+        )
+        .await?)
     } else {
         None
     };
@@ -1170,6 +1331,154 @@ mod tests {
         }
     }
 
+    fn mock_distill_response_for_request(request_text: &str, chunk_inputs: &[&str]) -> String {
+        if request_text.contains("RunCompletionSummarizer") {
+            return r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"reply_text\":\"The distill run completed and produced 2 insight assets. The main outputs focus on launch readiness and scope control. If you want, I can next turn these into a recap report or expand one asset in detail.\",\"session_summary\":\"Distill run completed with reusable insight assets.\"}"
+                        }
+                    }
+                ]
+            }"#
+            .to_string();
+        }
+
+        if request_text.contains("AssetExtractionAgent") {
+            return r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"assets\":[{\"title\":\"Prototype launch readiness\",\"summary\":\"The launch is gated by scope finalization and clear coordination before next week.\"},{\"title\":\"Prototype scope control\",\"summary\":\"Scope clarity is the key stabilizer for this delivery cycle.\"}]}"
+                        }
+                    }
+                ]
+            }"#
+            .to_string();
+        }
+
+        if request_text.contains("ProjectResolutionAgent") {
+            return r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"decision\":\"create_new_project\",\"title\":\"Prototype Program\",\"summary\":\"Prototype planning, scope, and delivery work.\",\"reasoning_summary\":\"The extracted work belongs to a distinct prototype-focused body of work.\"}"
+                        }
+                    }
+                ]
+            }"#
+            .to_string();
+        }
+
+        if request_text.contains("WorkItemExtractionAgent") {
+            return r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"work_items\":[{\"title\":\"Finalize prototype scope\",\"summary\":\"Scope must be finalized before distillation output is shared.\",\"work_item_type\":\"note\"}]}"
+                        }
+                    }
+                ]
+            }"#
+            .to_string();
+        }
+
+        if request_text.contains("ChunkExtractionAgent") {
+            let matched_chunk_input = chunk_inputs
+                .iter()
+                .find(|chunk_input| request_text.contains(**chunk_input))
+                .copied()
+                .unwrap_or(chunk_inputs.first().copied().unwrap_or(""));
+            let encoded_chunk_input = serde_json::to_string(matched_chunk_input)
+                .expect("chunk input should encode for mock response");
+            let chunk_content = format!(
+                "{{\"chunks\":[{{\"title\":\"Progress update\",\"summary\":\"A concrete work update was captured.\",\"content\":{}}}]}}",
+                encoded_chunk_input
+            );
+
+            return serde_json::json!({
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": chunk_content,
+                        }
+                    }
+                ]
+            })
+            .to_string();
+        }
+
+        r#"{
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "{\"intent\":\"distill_material\",\"action_type\":\"create_run\",\"reply_text\":\"I will start a distill run for this work material.\",\"primary_object_type\":\"material\",\"primary_object_id\":null,\"suggested_run_type\":\"import_and_distill\",\"session_summary\":\"Preparing to distill work material\",\"tool_invocation\":null,\"skill_selection\":null,\"should_continue_planning\":true,\"failure_hint\":\"clarify_or_stop\"}"
+                    }
+                }
+            ]
+        }"#
+        .to_string()
+    }
+
+    async fn spawn_mock_distill_llm_server(chunk_inputs: Vec<String>) -> LlmProviderConfig {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let chunk_input_refs = chunk_inputs.iter().map(String::as_str).collect::<Vec<_>>();
+            loop {
+                let (mut stream, _) = listener
+                    .accept()
+                    .await
+                    .expect("server should accept connection");
+                let mut buffer = [0_u8; 8192];
+                let bytes_read = tokio::io::AsyncReadExt::read(&mut stream, &mut buffer)
+                    .await
+                    .expect("server should read request");
+                let request_text = String::from_utf8_lossy(&buffer[..bytes_read]);
+                let response_body = mock_distill_response_for_request(&request_text, &chunk_input_refs);
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes())
+                    .await
+                    .expect("server should write response");
+            }
+        });
+
+        LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: format!("http://{}", address),
+            model: "gpt-test".to_string(),
+            api_key: None,
+        }
+    }
+
+    async fn mock_distill_provider_config(user_message: &str) -> LlmProviderConfig {
+        mock_distill_provider_config_for_chunks(&[user_message]).await
+    }
+
+    async fn mock_distill_provider_config_for_chunks(chunk_inputs: &[&str]) -> LlmProviderConfig {
+        spawn_mock_distill_llm_server(
+            chunk_inputs.iter().map(|value| value.to_string()).collect(),
+        )
+        .await
+    }
+
     #[tokio::test]
     async fn runtime_can_get_structured_decision_from_session_agent() {
         let runtime = AppRuntime::new("/tmp/distilllab-runtime-test.db".to_string());
@@ -1418,11 +1727,18 @@ mod tests {
             Uuid::new_v4()
         ));
         let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+        let provider_config = mock_distill_provider_config_for_chunks(&[
+            "Please distill these work notes into Distilllab",
+            "# Work notes\nshipped feature",
+        ])
+        .await;
 
-        let _reply = send_session_message(
+        let _reply = super::send_session_message_with_optional_provider_config(
             &runtime,
             &session.id,
             "Please distill these work notes into Distilllab",
+            vec![],
+            Some(provider_config),
         )
         .await
         .expect("runtime should send a session message");
@@ -1444,11 +1760,18 @@ mod tests {
             Uuid::new_v4()
         ));
         let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+        let provider_config = mock_distill_provider_config_for_chunks(&[
+            "Please distill these work notes into Distilllab",
+            "# Work notes\nshipped feature",
+        ])
+        .await;
 
-        let reply = send_session_message(
+        let reply = super::send_session_message_with_optional_provider_config(
             &runtime,
             &session.id,
             "Please distill these work notes into Distilllab",
+            vec![],
+            Some(provider_config),
         )
         .await
         .expect("runtime should send a session message");
@@ -1461,7 +1784,7 @@ mod tests {
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].run_type.as_str(), "import_and_distill");
         assert_eq!(runs[0].status.as_str(), "completed");
-        assert_eq!(runs[0].primary_object_type, "material");
+        assert_eq!(runs[0].primary_object_type, "asset");
     }
 
     #[tokio::test]
@@ -1473,11 +1796,17 @@ mod tests {
             Uuid::new_v4()
         ));
         let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+        let provider_config = mock_distill_provider_config(
+            "Please distill these work notes into Distilllab",
+        )
+        .await;
 
-        send_session_message(
+        super::send_session_message_with_optional_provider_config(
             &runtime,
             &session.id,
             "Please distill these work notes into Distilllab",
+            vec![],
+            Some(provider_config),
         )
         .await
         .expect("runtime should send a session message");
@@ -1488,9 +1817,11 @@ mod tests {
             .expect("session messages should load");
 
         assert_eq!(runs.len(), 1);
-        assert_eq!(messages.len(), 2);
+        assert_eq!(messages.len(), 3);
         assert_eq!(messages[1].message_type, "system_message");
         assert_eq!(messages[1].run_id.as_deref(), Some(runs[0].id.as_str()));
+        assert_eq!(messages[2].message_type, "assistant_message");
+        assert_eq!(messages[2].run_id.as_deref(), Some(runs[0].id.as_str()));
     }
 
     #[tokio::test]
@@ -1502,13 +1833,17 @@ mod tests {
             Uuid::new_v4()
         ));
         let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+        let provider_config = mock_distill_provider_config(
+            "Please distill these work notes into Distilllab",
+        )
+        .await;
 
         let execution = super::send_session_message_with_optional_provider_config_and_result(
             &runtime,
             &session.id,
             "Please distill these work notes into Distilllab",
             vec![],
-            None,
+            Some(provider_config),
         )
         .await
         .expect("execution should succeed");
@@ -1517,9 +1852,121 @@ mod tests {
         assert_eq!(execution.intent, "distill_material");
         assert_eq!(execution.action_type, "create_run");
         assert!(execution.created_run_id.is_some());
-        assert!(execution.assistant_text.contains("I will start a distill run"));
+        assert!(execution.assistant_text.contains("The distill run completed and produced 2 insight assets"));
         assert!(execution.timeline_text.contains("[User]"));
         assert!(execution.timeline_text.contains("[Assistant]"));
+    }
+
+    #[tokio::test]
+    async fn send_session_message_with_config_and_result_appends_run_completion_summary_message() {
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-run-summary-msg-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener.local_addr().expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            for response_body in [
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"intent\":\"distill_material\",\"action_type\":\"create_run\",\"reply_text\":\"I will start a distill run for this work material.\",\"primary_object_type\":\"material\",\"primary_object_id\":null,\"suggested_run_type\":\"import_and_distill\",\"session_summary\":\"Preparing to distill work material\",\"tool_invocation\":null,\"skill_selection\":null,\"should_continue_planning\":true,\"failure_hint\":\"clarify_or_stop\"}"
+                            }
+                        }
+                    ]
+                }"#,
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"chunks\":[{\"title\":\"Progress update\",\"summary\":\"A concrete work update was captured.\",\"content\":\"Please distill these work notes into Distilllab\"}]}"
+                            }
+                        }
+                    ]
+                }"#,
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"work_items\":[{\"title\":\"Finalize prototype scope\",\"summary\":\"Scope must be finalized before distillation output is shared.\",\"work_item_type\":\"note\"}]}"
+                            }
+                        }
+                    ]
+                }"#,
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"decision\":\"create_new_project\",\"title\":\"Prototype Program\",\"summary\":\"Prototype planning, scope, and delivery work.\",\"reasoning_summary\":\"The extracted work belongs to a distinct prototype-focused body of work.\"}"
+                            }
+                        }
+                    ]
+                }"#,
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"assets\":[{\"title\":\"Prototype launch readiness\",\"summary\":\"The launch is gated by scope finalization and clear coordination before next week.\"},{\"title\":\"Prototype scope control\",\"summary\":\"Scope clarity is the key stabilizer for this delivery cycle.\"}]}"
+                            }
+                        }
+                    ]
+                }"#,
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"reply_text\":\"The distill run completed and produced 2 insight assets. The main outputs focus on launch readiness and scope control. If you want, I can next turn these into a recap report or expand one asset in detail.\",\"session_summary\":\"Distill run completed with reusable insight assets.\"}"
+                            }
+                        }
+                    ]
+                }"#,
+            ] {
+                let (mut stream, _) = listener.accept().await.expect("server should accept connection");
+                let mut buffer = [0_u8; 8192];
+                let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buffer)
+                    .await
+                    .expect("server should read request");
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes())
+                    .await
+                    .expect("server should write response");
+            }
+        });
+
+        let execution = super::send_session_message_with_optional_provider_config_and_result(
+            &runtime,
+            &session.id,
+            "Please distill these work notes into Distilllab",
+            vec![],
+            Some(LlmProviderConfig {
+                provider_kind: "openai_compatible".to_string(),
+                base_url: format!("http://{}", address),
+                model: "gpt-test".to_string(),
+                api_key: None,
+            }),
+        )
+        .await
+        .expect("execution should succeed");
+
+        assert!(execution.assistant_text.contains("The distill run completed and produced 2 insight assets"));
+        assert!(execution.timeline_text.contains("The distill run completed and produced 2 insight assets"));
     }
 
     #[tokio::test]
@@ -1531,11 +1978,17 @@ mod tests {
             Uuid::new_v4()
         ));
         let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+        let provider_config = mock_distill_provider_config(
+            "Please distill these work notes into Distilllab",
+        )
+        .await;
 
-        send_session_message(
+        super::send_session_message_with_optional_provider_config(
             &runtime,
             &session.id,
             "Please distill these work notes into Distilllab",
+            vec![],
+            Some(provider_config),
         )
         .await
         .expect("runtime should send a session message");
@@ -1560,11 +2013,17 @@ mod tests {
             Uuid::new_v4()
         ));
         let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+        let provider_config = mock_distill_provider_config(
+            "Please distill these work notes into Distilllab",
+        )
+        .await;
 
-        send_session_message(
+        super::send_session_message_with_optional_provider_config(
             &runtime,
             &session.id,
             "Please distill these work notes into Distilllab",
+            vec![],
+            Some(provider_config),
         )
         .await
         .expect("runtime should send a session message");
@@ -1573,8 +2032,9 @@ mod tests {
         let messages = list_session_messages_for_session(&conn, &session.id)
             .expect("session messages should load");
 
-        assert_eq!(messages.len(), 2);
-        assert!(messages[1].content.contains("materialized 1 sources"));
+        assert_eq!(messages.len(), 3);
+        assert!(messages[1].content.contains("produced 2 insight assets"));
+        assert!(messages[2].content.contains("produced 2 insight assets"));
     }
 
     #[tokio::test]
@@ -1586,6 +2046,10 @@ mod tests {
             Uuid::new_v4()
         ));
         let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+        let provider_config = mock_distill_provider_config(
+            "Please distill these work notes into Distilllab",
+        )
+        .await;
 
         let attachment_path = format!(
             "/tmp/distilllab-runtime-session-attachment-{}.md",
@@ -1607,7 +2071,7 @@ mod tests {
                 size: 64,
                 metadata_json: "{}".to_string(),
             }],
-            None,
+            Some(provider_config),
         )
         .await
         .expect("runtime should send attachment-aware session message");
@@ -1668,6 +2132,86 @@ mod tests {
             Uuid::new_v4()
         ));
 
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            for response_body in [
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"chunks\":[{\"title\":\"Progress update\",\"summary\":\"A concrete work update was captured.\",\"content\":\"Please distill these work notes into Distilllab\"}]}"
+                            }
+                        }
+                    ]
+                }"#,
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"work_items\":[{\"title\":\"Finalize prototype scope\",\"summary\":\"Scope must be finalized before distillation output is shared.\",\"work_item_type\":\"note\"}]}"
+                            }
+                        }
+                    ]
+                }"#,
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"decision\":\"create_new_project\",\"title\":\"Prototype Program\",\"summary\":\"Prototype planning, scope, and delivery work.\",\"reasoning_summary\":\"The extracted work belongs to a distinct prototype-focused body of work.\"}"
+                            }
+                        }
+                    ]
+                }"#,
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"assets\":[{\"title\":\"Prototype launch readiness\",\"summary\":\"The launch is gated by scope finalization and clear coordination before next week.\"},{\"title\":\"Prototype scope control\",\"summary\":\"Scope clarity is the key stabilizer for this delivery cycle.\"}]}"
+                            }
+                        }
+                    ]
+                }"#,
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"reply_text\":\"The distill run completed and produced 2 insight assets. The main outputs focus on launch readiness and scope control. If you want, I can next turn these into a recap report or expand one asset in detail.\",\"session_summary\":\"Distill run completed with reusable insight assets.\"}"
+                            }
+                        }
+                    ]
+                }"#,
+            ] {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("server should accept connection");
+            let mut buffer = [0_u8; 8192];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buffer)
+                .await
+                .expect("server should read request");
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes())
+                .await
+                .expect("server should write response");
+            }
+        });
+
         let decision = agent::SessionAgentDecision {
             intent: SessionIntent::DistillMaterial,
             primary_object_type: Some("material".to_string()),
@@ -1701,14 +2245,60 @@ mod tests {
 
         let outcome = crate::services::distill_run_executor::create_and_execute_from_decision(
             &runtime,
+            Some(&LlmProviderConfig {
+                provider_kind: "openai_compatible".to_string(),
+                base_url: format!("http://{}", address),
+                model: "gpt-test".to_string(),
+                api_key: None,
+            }),
             &decision,
             run_input,
         )
+        .await
         .expect("executor should create and execute run");
 
         assert_eq!(outcome.run.run_type.as_str(), "import_and_distill");
         assert_eq!(outcome.run.status.as_str(), "completed");
         assert!(outcome.materialize_result.is_some());
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let sources = memory::source_store::list_sources(&conn).expect("sources should load");
+        assert_eq!(sources.len(), 1);
+
+        let chunks = memory::chunk_store::list_chunks_by_source(&conn, &sources[0].id)
+            .expect("chunks should load");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].title, "Progress update");
+        assert_eq!(chunks[0].summary, "A concrete work update was captured.");
+        assert!(outcome.output.is_some());
+        assert_eq!(outcome.run.primary_object_type, "asset");
+        assert_eq!(
+            outcome.output.as_ref().map(|value| value.execution_summary.as_str()),
+            Some("materialized sources, created 1 chunks, extracted 1 work item drafts, resolved project Prototype Program, created 2 assets")
+        );
+
+        let projects = memory::project_store::list_projects(&conn).expect("projects should load");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].name, "Prototype Program");
+
+        let assets = memory::asset_store::list_assets(&conn).expect("assets should load");
+        assert_eq!(assets.len(), 2);
+        assert_eq!(assets[0].project_id, projects[0].id);
+        assert_eq!(assets[0].asset_type.as_str(), "insight");
+        assert_eq!(outcome.run.primary_object_id, assets[0].id);
+        assert_eq!(
+            outcome.output.as_ref().map(|value| value.asset_ids.len()),
+            Some(2)
+        );
+        assert_eq!(
+            outcome.output.as_ref().and_then(|value| value.primary_asset_id.as_ref()),
+            Some(&assets[0].id)
+        );
+        assert_eq!(
+            outcome.output.as_ref().map(|value| value.execution_summary.as_str()),
+            Some("materialized sources, created 1 chunks, extracted 1 work item drafts, resolved project Prototype Program, created 2 assets")
+        );
+
     }
 
     #[tokio::test]
@@ -2603,11 +3193,12 @@ mod tests {
             .expect("distill intake should produce a handoff preview");
 
         assert_eq!(handoff.run_type, "import_and_distill");
-        assert_eq!(handoff.planned_steps.len(), 4);
+        assert_eq!(handoff.planned_steps.len(), 5);
         assert_eq!(handoff.planned_steps[0].step_key, "materialize_sources");
         assert_eq!(handoff.planned_steps[1].step_key, "chunk_sources");
         assert_eq!(handoff.planned_steps[2].step_key, "extract_work_items");
-        assert_eq!(handoff.planned_steps[3].step_key, "extract_assets");
+        assert_eq!(handoff.planned_steps[3].step_key, "resolve_project_context");
+        assert_eq!(handoff.planned_steps[4].step_key, "extract_assets");
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@ use schema::{Source, SourceType};
 
 pub fn insert_source(conn: &Connection, source: &Source) -> Result<()> {
     conn.execute(
-        "INSERT INTO sources (id, source_type, title, run_id, origin_key, locator, metadata_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO sources (id, source_type, title, run_id, origin_key, locator, content, metadata_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             source.id,
             source.source_type.as_str(),
@@ -11,6 +11,7 @@ pub fn insert_source(conn: &Connection, source: &Source) -> Result<()> {
             source.run_id,
             source.origin_key,
             source.locator,
+            source.content,
             source.metadata_json,
             source.created_at
         ],
@@ -21,7 +22,7 @@ pub fn insert_source(conn: &Connection, source: &Source) -> Result<()> {
 
 pub fn list_sources(conn: &Connection) -> Result<Vec<Source>> {
     let mut stmt = conn.prepare(
-        "SELECT id, source_type, title, run_id, origin_key, locator, metadata_json, created_at FROM sources ORDER BY created_at DESC",
+        "SELECT id, source_type, title, run_id, origin_key, locator, content, metadata_json, created_at FROM sources ORDER BY created_at DESC",
     )?;
 
     let source_iter = stmt.query_map([], |row| {
@@ -44,8 +45,9 @@ pub fn list_sources(conn: &Connection) -> Result<Vec<Source>> {
             run_id: row.get(3)?,
             origin_key: row.get(4)?,
             locator: row.get(5)?,
-            metadata_json: row.get(6)?,
-            created_at: row.get(7)?,
+            content: row.get(6)?,
+            metadata_json: row.get(7)?,
+            created_at: row.get(8)?,
         })
     })?;
 
@@ -63,7 +65,7 @@ pub fn get_source_by_run_origin(
     origin_key: &str,
 ) -> Result<Option<Source>> {
     let mut stmt = conn.prepare(
-        "SELECT id, source_type, title, run_id, origin_key, locator, metadata_json, created_at FROM sources WHERE run_id = ?1 AND origin_key = ?2 LIMIT 1",
+        "SELECT id, source_type, title, run_id, origin_key, locator, content, metadata_json, created_at FROM sources WHERE run_id = ?1 AND origin_key = ?2 LIMIT 1",
     )?;
 
     let mut rows = stmt.query(params![run_id, origin_key])?;
@@ -90,14 +92,15 @@ pub fn get_source_by_run_origin(
         run_id: row.get(3)?,
         origin_key: row.get(4)?,
         locator: row.get(5)?,
-        metadata_json: row.get(6)?,
-        created_at: row.get(7)?,
+        content: row.get(6)?,
+        metadata_json: row.get(7)?,
+        created_at: row.get(8)?,
     }))
 }
 
 pub fn list_sources_by_run(conn: &Connection, run_id: &str) -> Result<Vec<Source>> {
     let mut stmt = conn.prepare(
-        "SELECT id, source_type, title, run_id, origin_key, locator, metadata_json, created_at FROM sources WHERE run_id = ?1 ORDER BY created_at DESC",
+        "SELECT id, source_type, title, run_id, origin_key, locator, content, metadata_json, created_at FROM sources WHERE run_id = ?1 ORDER BY created_at DESC",
     )?;
 
     let source_iter = stmt.query_map([run_id], |row| {
@@ -120,8 +123,9 @@ pub fn list_sources_by_run(conn: &Connection, run_id: &str) -> Result<Vec<Source
             run_id: row.get(3)?,
             origin_key: row.get(4)?,
             locator: row.get(5)?,
-            metadata_json: row.get(6)?,
-            created_at: row.get(7)?,
+            content: row.get(6)?,
+            metadata_json: row.get(7)?,
+            created_at: row.get(8)?,
         })
     })?;
 

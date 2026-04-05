@@ -1,4 +1,5 @@
 pub mod app;
+pub mod agents;
 pub mod config;
 pub mod contracts;
 pub mod flows;

@@ -13,6 +13,35 @@ use uuid::Uuid;
 
 type ServiceError = Box<dyn std::error::Error + Send + Sync>;
 
+pub fn read_source_text(runtime: &AppRuntime, source_id: &str) -> Result<String, ServiceError> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    let source = memory::source_store::list_sources(&conn)?
+        .into_iter()
+        .find(|source| source.id == source_id)
+        .ok_or_else(|| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("source not found: {source_id}"),
+            )) as ServiceError
+        })?;
+
+    if let Some(content) = source.content {
+        return Ok(content);
+    }
+
+    let locator = source.locator.ok_or_else(|| {
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("source {source_id} has neither inline content nor locator"),
+        )) as ServiceError
+    })?;
+
+    let text = std::fs::read_to_string(locator)?;
+    Ok(text)
+}
+
 pub fn create_demo_source(runtime: &AppRuntime) -> Result<Source, ServiceError> {
     let conn = open_database(&runtime.database_path)?;
     run_migrations(&conn)?;
@@ -24,6 +53,7 @@ pub fn create_demo_source(runtime: &AppRuntime) -> Result<Source, ServiceError> 
         run_id: None,
         origin_key: None,
         locator: None,
+        content: Some("Demo source content".to_string()),
         metadata_json: "{}".to_string(),
         created_at: Utc::now().to_string(),
     };
@@ -81,6 +111,7 @@ pub fn create_message_source(
         run_id: Some(run_id.to_string()),
         origin_key: Some(origin_key.to_string()),
         locator: None,
+        content: Some(message_text.to_string()),
         metadata_json: format!(
             r#"{{"session_id":"{}","message_length":{}}}"#,
             session_id,
@@ -110,6 +141,7 @@ pub fn create_attachment_source(
         run_id: Some(run_id.to_string()),
         origin_key: Some(origin_key.to_string()),
         locator: Some(attachment.path_or_locator.clone()),
+        content: None,
         metadata_json: format!(
             r#"{{"session_id":"{}","attachment_id":"{}","mime_type":"{}","size":{}}}"#,
             session_id, attachment.attachment_id, attachment.mime_type, attachment.size
@@ -136,7 +168,7 @@ pub fn list_sources_for_run(
 mod tests {
     use super::{
         create_attachment_source, create_message_source, find_source_for_run_origin,
-        list_sources_for_run,
+        list_sources_for_run, read_source_text,
     };
     use crate::app::AppRuntime;
     use schema::AttachmentRef;
@@ -163,6 +195,10 @@ mod tests {
             Some("session-message:session-1:abcd1234")
         );
         assert!(source.locator.is_none());
+        assert_eq!(
+            source.content.as_deref(),
+            Some("Please distill these notes")
+        );
         assert!(source.metadata_json.contains("session-1"));
 
         let _ = std::fs::remove_file(db_path);
@@ -203,6 +239,7 @@ mod tests {
             source.locator.as_deref(),
             Some("/tmp/distilllab/attachments/notes.md")
         );
+        assert!(source.content.is_none());
         assert!(source.metadata_json.contains("attachment-1"));
 
         let _ = std::fs::remove_file(db_path);
@@ -270,6 +307,26 @@ mod tests {
             list_sources_for_run(&runtime, "run-1").expect("failed to list sources for run");
 
         assert_eq!(sources.len(), 2);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn reads_inline_text_for_message_source() {
+        let db_path = format!("/tmp/distilllab-source-service-test-{}.db", Uuid::new_v4());
+        let runtime = AppRuntime::new(db_path.clone());
+
+        let source = create_message_source(
+            &runtime,
+            "run-1",
+            "session-1",
+            "Please distill these notes",
+            "session-message:session-1:abcd1234",
+        )
+        .expect("failed to create message source");
+
+        let text = read_source_text(&runtime, &source.id).expect("failed to read source text");
+        assert_eq!(text, "Please distill these notes");
 
         let _ = std::fs::remove_file(db_path);
     }

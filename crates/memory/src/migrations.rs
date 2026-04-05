@@ -11,6 +11,7 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             run_id TEXT,
             origin_key TEXT,
             locator TEXT,
+            content TEXT,
             metadata_json TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
@@ -47,6 +48,8 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             id TEXT PRIMARY KEY,
             source_id TEXT NOT NULL,
             sequence INTEGER NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
             content TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS work_items (
@@ -82,6 +85,9 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "sources", "run_id", "TEXT")?;
     add_column_if_missing(conn, "sources", "origin_key", "TEXT")?;
     add_column_if_missing(conn, "sources", "locator", "TEXT")?;
+    add_column_if_missing(conn, "sources", "content", "TEXT")?;
+    add_column_if_missing(conn, "chunks", "title", "TEXT NOT NULL DEFAULT ''")?;
+    add_column_if_missing(conn, "chunks", "summary", "TEXT NOT NULL DEFAULT ''")?;
     add_column_if_missing(
         conn,
         "sources",

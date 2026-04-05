@@ -23,6 +23,7 @@ pub fn extract_demo_work_items(
         run_id: None,
         origin_key: None,
         locator: None,
+        content: Some("Demo work item source content".to_string()),
         metadata_json: "{}".to_string(),
         created_at: Utc::now().to_string(),
     };
@@ -33,12 +34,16 @@ pub fn extract_demo_work_items(
             id: format!("chunk-{}", Uuid::new_v4()),
             source_id: source.id.clone(),
             sequence: 0,
+            title: "Runtime traceability".to_string(),
+            summary: "Why runtime behavior should stay explicit.".to_string(),
             content: "Runtime should be explicit and traceable.".to_string(),
         },
         Chunk {
             id: format!("chunk-{}", Uuid::new_v4()),
             source_id: source.id.clone(),
             sequence: 1,
+            title: "Asset transformation".to_string(),
+            summary: "Why source material should become assets.".to_string(),
             content: "Source materials should become structured assets.".to_string(),
         },
     ];

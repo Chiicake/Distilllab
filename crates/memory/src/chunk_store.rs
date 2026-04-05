@@ -1,10 +1,17 @@
-use rusqlite::{Connection, Result, params};
+use rusqlite::{params, Connection, Result};
 use schema::Chunk;
 
 pub fn insert_chunk(conn: &Connection, chunk: &Chunk) -> Result<()> {
     conn.execute(
-        "INSERT INTO chunks (id, source_id, sequence, content) VALUES (?1, ?2, ?3, ?4)",
-        params![chunk.id, chunk.source_id, chunk.sequence, chunk.content],
+        "INSERT INTO chunks (id, source_id, sequence, title, summary, content) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            chunk.id,
+            chunk.source_id,
+            chunk.sequence,
+            chunk.title,
+            chunk.summary,
+            chunk.content
+        ],
     )?;
 
     Ok(())
@@ -12,7 +19,7 @@ pub fn insert_chunk(conn: &Connection, chunk: &Chunk) -> Result<()> {
 
 pub fn list_chunks_by_source(conn: &Connection, source_id: &str) -> Result<Vec<Chunk>> {
     let mut stmt = conn.prepare(
-        "SELECT id, source_id, sequence, content FROM chunks WHERE source_id = ?1 ORDER BY sequence ASC",
+        "SELECT id, source_id, sequence, title, summary, content FROM chunks WHERE source_id = ?1 ORDER BY sequence ASC",
     )?;
 
     let chunk_iter = stmt.query_map([source_id], |row| {
@@ -20,7 +27,9 @@ pub fn list_chunks_by_source(conn: &Connection, source_id: &str) -> Result<Vec<C
             id: row.get(0)?,
             source_id: row.get(1)?,
             sequence: row.get(2)?,
-            content: row.get(3)?,
+            title: row.get(3)?,
+            summary: row.get(4)?,
+            content: row.get(5)?,
         })
     })?;
 
@@ -47,6 +56,8 @@ mod tests {
             id: "chunk-1".to_string(),
             source_id: "source-1".to_string(),
             sequence: 0,
+            title: "Chunk One".to_string(),
+            summary: "First summary".to_string(),
             content: "First chunk".to_string(),
         };
 
@@ -54,6 +65,8 @@ mod tests {
             id: "chunk-2".to_string(),
             source_id: "source-1".to_string(),
             sequence: 1,
+            title: "Chunk Two".to_string(),
+            summary: "Second summary".to_string(),
             content: "Second chunk".to_string(),
         };
 
@@ -65,6 +78,8 @@ mod tests {
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].id, "chunk-1");
         assert_eq!(chunks[1].id, "chunk-2");
+        assert_eq!(chunks[0].title, "Chunk One");
+        assert_eq!(chunks[1].summary, "Second summary");
         assert_eq!(chunks[0].content, "First chunk");
         assert_eq!(chunks[1].content, "Second chunk");
     }
