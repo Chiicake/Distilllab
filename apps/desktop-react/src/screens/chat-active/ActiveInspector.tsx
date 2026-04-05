@@ -29,7 +29,10 @@ export default function ActiveInspector({
   currentRun,
 }: ActiveInspectorProps) {
   const recentStatuses = streamStatuses.slice(-6).reverse();
-  const hasActiveRun = Boolean(currentRun && (currentRun.state === 'running' || currentRun.state === 'pending'));
+  const hasActiveRun = Boolean(
+    currentRun
+    && (currentRun.state === 'queued' || currentRun.state === 'running' || currentRun.state === 'pending'),
+  );
 
   return (
     <aside className="hidden lg:flex flex-col w-80 h-full border-l border-outline-variant/10 bg-surface-bright/60 backdrop-blur-[20px] z-20">

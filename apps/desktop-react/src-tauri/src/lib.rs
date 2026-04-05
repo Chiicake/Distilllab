@@ -377,10 +377,423 @@ fn format_session_messages_text(messages: &[SessionMessage]) -> String {
         .join("\n\n")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopTimelineAttachment {
+    name: String,
+    size: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopRunStepMeta {
+    key: String,
+    summary: String,
+    status: String,
+    index: Option<u32>,
+    total: Option<u32>,
+    detail_text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopRunCardMeta {
+    run_id: String,
+    state: String,
+    progress_percent: u8,
+    run_type: Option<String>,
+    step_key: Option<String>,
+    step_summary: Option<String>,
+    step_status: Option<String>,
+    step_index: Option<u32>,
+    steps_total: Option<u32>,
+    detail_text: Option<String>,
+    current_step_key: Option<String>,
+    steps: Vec<DesktopRunStepMeta>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopTimelineMessage {
+    id: String,
+    role: String,
+    kind: String,
+    source_message_type: Option<String>,
+    content: String,
+    summary: Option<String>,
+    details: Option<String>,
+    attachments: Vec<DesktopTimelineAttachment>,
+    run_meta: Option<DesktopRunCardMeta>,
+    created_at: String,
+}
+
+fn desktop_timeline_from_session_messages(messages: &[SessionMessage]) -> Vec<DesktopTimelineMessage> {
+    let run_anchor_messages = earliest_run_progress_message_by_run_id(messages);
+    let run_cards = desktop_run_cards_from_progress_messages(messages)
+        .into_iter()
+        .map(|message| {
+            (
+                message
+                    .run_meta
+                    .as_ref()
+                    .map(|meta| meta.run_id.clone())
+                    .unwrap_or_default(),
+                message,
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut inserted_run_cards = HashMap::<String, bool>::new();
+    let mut timeline = Vec::new();
+
+    for message in messages {
+        if message.message_type == "run_progress_message" {
+            let Some(run_id) = message.run_id.as_ref() else {
+                continue;
+            };
+
+            if inserted_run_cards.contains_key(run_id) {
+                continue;
+            }
+
+            if run_anchor_messages
+                .get(run_id)
+                .map(|anchor_message| anchor_message.id != message.id)
+                .unwrap_or(true)
+            {
+                continue;
+            }
+
+            if let Some(run_card) = run_cards.get(run_id) {
+                timeline.push(run_card.clone());
+                inserted_run_cards.insert(run_id.clone(), true);
+            }
+
+            continue;
+        }
+
+        if let Some(timeline_message) = desktop_message_from_session_message(message) {
+            timeline.push(timeline_message);
+        }
+    }
+
+    timeline
+}
+
+fn list_session_messages_structured_payload(
+    messages: &[SessionMessage],
+) -> Vec<DesktopTimelineMessage> {
+    desktop_timeline_from_session_messages(messages)
+}
+
+fn session_message_chronology_cmp(left: &SessionMessage, right: &SessionMessage) -> std::cmp::Ordering {
+    left.created_at
+        .cmp(&right.created_at)
+        .then(left.id.cmp(&right.id))
+}
+
+fn earliest_run_progress_message_by_run_id<'a>(
+    messages: &'a [SessionMessage],
+) -> HashMap<String, &'a SessionMessage> {
+    let mut anchors = HashMap::<String, &'a SessionMessage>::new();
+
+    for message in messages {
+        if message.message_type != "run_progress_message" {
+            continue;
+        }
+
+        let Some(run_id) = message.run_id.as_ref() else {
+            continue;
+        };
+
+        match anchors.get(run_id) {
+            Some(current_anchor)
+                if session_message_chronology_cmp(message, current_anchor)
+                    != std::cmp::Ordering::Less => {}
+            _ => {
+                anchors.insert(run_id.clone(), message);
+            }
+        }
+    }
+
+    anchors
+}
+
+fn load_session_messages_for_timeline(session_id: &str) -> Result<Vec<SessionMessage>, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    runtime::list_session_messages(&runtime, session_id).map_err(|e| e.to_string())
+}
+
+fn load_session_messages_text_for_timeline(session_id: &str) -> Result<String, String> {
+    let messages = load_session_messages_for_timeline(session_id)?;
+    Ok(format_session_messages_text(&messages))
+}
+
+fn desktop_message_from_session_message(message: &SessionMessage) -> Option<DesktopTimelineMessage> {
+    if message.message_type == "run_progress_message" {
+        return None;
+    }
+
+    if message.message_type == "tool_result_message" {
+        return Some(desktop_tool_message_from_session_message(message));
+    }
+
+    let attachments = if message.message_type == "user_message" {
+        serde_json::from_str::<serde_json::Value>(&message.data_json)
+            .ok()
+            .and_then(|value| value.get("attachments").cloned())
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|attachment| DesktopTimelineAttachment {
+                name: attachment
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                size: attachment.get("size").and_then(|value| value.as_u64()),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    Some(DesktopTimelineMessage {
+        id: message.id.clone(),
+        role: message.role.as_str().to_string(),
+        kind: "message".to_string(),
+        source_message_type: Some(message.message_type.clone()),
+        content: message.content.clone(),
+        summary: None,
+        details: None,
+        attachments,
+        run_meta: None,
+        created_at: message.created_at.clone(),
+    })
+}
+
+fn desktop_tool_message_from_session_message(message: &SessionMessage) -> DesktopTimelineMessage {
+    let data = serde_json::from_str::<serde_json::Value>(&message.data_json).ok();
+    let tool_name = data
+        .as_ref()
+        .and_then(|value| value.get("tool_name"))
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("unknown_tool");
+    let arguments = data
+        .as_ref()
+        .and_then(|value| value.get("arguments"))
+        .and_then(|value| serde_json::to_string(value).ok())
+        .unwrap_or_else(|| "{}".to_string());
+    let content_lower = message.content.to_lowercase();
+    let tool_succeeded = !content_lower.contains("error")
+        && !content_lower.contains("failed")
+        && !content_lower.contains("failure");
+    let status_label = if tool_succeeded { "success" } else { "error" };
+    let summary = Some(format!("{} · {}", tool_name, status_label));
+    let details = Some(format!(
+        "tool: {}\nstatus: {}\narguments: {}\n\nresult:\n{}",
+        tool_name, status_label, arguments, message.content
+    ));
+
+    DesktopTimelineMessage {
+        id: message.id.clone(),
+        role: message.role.as_str().to_string(),
+        kind: "tool".to_string(),
+        source_message_type: Some(message.message_type.clone()),
+        content: message.content.clone(),
+        summary,
+        details,
+        attachments: Vec::new(),
+        run_meta: None,
+        created_at: message.created_at.clone(),
+    }
+}
+
+fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<DesktopTimelineMessage> {
+    let run_anchor_messages = earliest_run_progress_message_by_run_id(messages);
+    let mut grouped_messages = HashMap::<String, Vec<&SessionMessage>>::new();
+
+    for message in messages {
+        if message.message_type != "run_progress_message" {
+            continue;
+        }
+
+        let Some(run_id) = message.run_id.as_ref() else {
+            continue;
+        };
+
+        grouped_messages.entry(run_id.clone()).or_default().push(message);
+    }
+
+    let mut run_cards = grouped_messages
+        .into_iter()
+        .filter_map(|(run_id, messages)| {
+            let anchor_message = run_anchor_messages.get(&run_id).copied()?;
+            let mut latest_progress = None;
+            let mut steps_by_key = HashMap::<String, (String, String, DesktopRunStepMeta)>::new();
+
+            for message in &messages {
+                let Some(progress) = serde_json::from_str::<serde_json::Value>(&message.data_json)
+                    .ok()
+                    .and_then(|value| value.get("runProgress").cloned())
+                else {
+                    continue;
+                };
+
+                match &latest_progress {
+                    Some((current_created_at, current_id, _))
+                        if (&message.created_at, &message.id) <= (current_created_at, current_id) => {}
+                    _ => {
+                        latest_progress =
+                            Some((message.created_at.clone(), message.id.clone(), progress.clone()));
+                    }
+                }
+
+                if let Some(step_key) = progress.get("stepKey").and_then(|value| value.as_str()) {
+                    let next_step = DesktopRunStepMeta {
+                        key: step_key.to_string(),
+                        summary: progress
+                            .get("stepSummary")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        status: progress
+                            .get("stepStatus")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        index: progress
+                            .get("stepIndex")
+                            .and_then(|value| value.as_u64())
+                            .and_then(|value| u32::try_from(value).ok()),
+                        total: progress
+                            .get("stepsTotal")
+                            .and_then(|value| value.as_u64())
+                            .and_then(|value| u32::try_from(value).ok()),
+                        detail_text: progress
+                            .get("detailText")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
+                    };
+
+                    match steps_by_key.get(step_key) {
+                        Some((current_created_at, current_id, _))
+                            if (&message.created_at, &message.id) <= (current_created_at, current_id) => {}
+                        _ => {
+                            steps_by_key.insert(
+                                step_key.to_string(),
+                                (message.created_at.clone(), message.id.clone(), next_step),
+                            );
+                        }
+                    }
+                }
+            }
+
+            let (_, _, latest_progress) = latest_progress?;
+            let mut steps = steps_by_key
+                .into_values()
+                .map(|(_, _, step)| step)
+                .collect::<Vec<_>>();
+            steps.sort_by(|left, right| left.index.cmp(&right.index).then(left.key.cmp(&right.key)));
+
+            Some(DesktopTimelineMessage {
+                id: format!("run-card-{}", run_id),
+                role: SessionMessageRole::System.as_str().to_string(),
+                kind: "run".to_string(),
+                source_message_type: Some("run_progress_message".to_string()),
+                content: anchor_message.content.clone(),
+                summary: latest_progress
+                    .get("stepSummary")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                details: latest_progress
+                    .get("detailText")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                attachments: Vec::new(),
+                run_meta: Some(DesktopRunCardMeta {
+                    run_id: run_id.clone(),
+                    state: latest_progress
+                        .get("runState")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    progress_percent: latest_progress
+                        .get("progressPercent")
+                        .and_then(|value| value.as_u64())
+                        .and_then(|value| u8::try_from(value).ok())
+                        .unwrap_or(0),
+                    run_type: latest_progress
+                        .get("runType")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                    step_key: latest_progress
+                        .get("stepKey")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                    step_summary: latest_progress
+                        .get("stepSummary")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                    step_status: latest_progress
+                        .get("stepStatus")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                    step_index: latest_progress
+                        .get("stepIndex")
+                        .and_then(|value| value.as_u64())
+                        .and_then(|value| u32::try_from(value).ok()),
+                    steps_total: latest_progress
+                        .get("stepsTotal")
+                        .and_then(|value| value.as_u64())
+                        .and_then(|value| u32::try_from(value).ok()),
+                    detail_text: latest_progress
+                        .get("detailText")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                    current_step_key: latest_progress
+                        .get("stepKey")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                    steps,
+                }),
+                created_at: anchor_message.created_at.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    run_cards.sort_by(|left, right| left.created_at.cmp(&right.created_at).then(left.id.cmp(&right.id)));
+    run_cards
+}
+
 #[cfg(test)]
 mod tests {
-    use super::format_session_messages_text;
+    use super::{
+        desktop_timeline_from_session_messages, format_session_messages_text,
+        list_session_messages_structured_payload,
+    };
     use schema::{SessionMessage, SessionMessageRole};
+
+    fn session_message(
+        id: &str,
+        run_id: Option<&str>,
+        message_type: &str,
+        role: SessionMessageRole,
+        content: &str,
+        data_json: serde_json::Value,
+        created_at: &str,
+    ) -> SessionMessage {
+        SessionMessage {
+            id: id.to_string(),
+            session_id: "session-1".to_string(),
+            run_id: run_id.map(str::to_string),
+            message_type: message_type.to_string(),
+            role,
+            content: content.to_string(),
+            data_json: data_json.to_string(),
+            created_at: created_at.to_string(),
+        }
+    }
 
     #[test]
     fn format_session_messages_text_preserves_user_attachment_metadata_for_reopen() {
@@ -409,6 +822,612 @@ mod tests {
         assert!(timeline.contains("Please review the attached notes"));
         assert!(timeline.contains("\"attachments\""));
         assert!(timeline.contains("\"name\":\"notes.md\""));
+    }
+
+    #[test]
+    fn desktop_timeline_mapper_preserves_user_attachments() {
+        let timeline = desktop_timeline_from_session_messages(&[session_message(
+            "message-user",
+            None,
+            "user_message",
+            SessionMessageRole::User,
+            "Please review the attached notes",
+            serde_json::json!({
+                "attachments": [
+                    {
+                        "name": "notes.md",
+                        "size": 2048,
+                        "mimeType": "text/markdown"
+                    }
+                ]
+            }),
+            "2026-04-05T00:00:00Z",
+        )]);
+
+        assert_eq!(timeline.len(), 1);
+        assert_eq!(timeline[0].id, "message-user");
+        assert_eq!(timeline[0].role, "user");
+        assert_eq!(timeline[0].kind, "message");
+        assert_eq!(timeline[0].source_message_type.as_deref(), Some("user_message"));
+        assert_eq!(timeline[0].content, "Please review the attached notes");
+        assert_eq!(timeline[0].attachments.len(), 1);
+        assert_eq!(timeline[0].attachments[0].name, "notes.md");
+        assert_eq!(timeline[0].attachments[0].size, Some(2048));
+        assert_eq!(timeline[0].created_at, "2026-04-05T00:00:00Z");
+    }
+
+    #[test]
+    fn desktop_timeline_mapper_converts_tool_result_messages() {
+        let timeline = desktop_timeline_from_session_messages(&[session_message(
+            "message-tool",
+            None,
+            "tool_result_message",
+            SessionMessageRole::System,
+            "Attachment excerpt: hello",
+            serde_json::json!({
+                "tool_name": "read_attachment_excerpt",
+                "arguments": {
+                    "attachment_index": 0,
+                    "max_chars": 400
+                }
+            }),
+            "2026-04-05T00:00:01Z",
+        )]);
+
+        assert_eq!(timeline.len(), 1);
+        assert_eq!(timeline[0].id, "message-tool");
+        assert_eq!(timeline[0].role, "system");
+        assert_eq!(timeline[0].kind, "tool");
+        assert_eq!(timeline[0].source_message_type.as_deref(), Some("tool_result_message"));
+        assert_eq!(timeline[0].content, "Attachment excerpt: hello");
+        let details = timeline[0].details.as_deref().expect("tool details");
+        assert_eq!(timeline[0].summary.as_deref(), Some("read_attachment_excerpt · success"));
+        assert!(details.contains("tool: read_attachment_excerpt"));
+        assert!(details.contains("status: success"));
+        assert!(details.contains("attachment_index"));
+        assert!(details.contains("max_chars"));
+        assert!(details.contains("Attachment excerpt: hello"));
+        assert!(timeline[0].details.is_some());
+        assert!(timeline[0].run_meta.is_none());
+    }
+
+    #[test]
+    fn desktop_timeline_mapper_aggregates_run_progress_into_one_run_card() {
+        let timeline = desktop_timeline_from_session_messages(&[
+            session_message(
+                "progress-1",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run created: run-123 (distill)",
+                serde_json::json!({
+                    "statusText": "run created: run-123 (distill)",
+                    "runProgress": {
+                        "phase": "created",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "queued",
+                        "progressPercent": 10,
+                        "stepKey": "gather",
+                        "stepSummary": "Gather material",
+                        "stepStatus": "started",
+                        "stepIndex": 1,
+                        "stepsTotal": 2,
+                        "detailText": "Collecting sources"
+                    }
+                }),
+                "2026-04-05T00:00:02Z",
+            ),
+            session_message(
+                "progress-2",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run step finished: run-123 [draft] (80%)",
+                serde_json::json!({
+                    "statusText": "run step finished: run-123 [draft] (80%)",
+                    "runProgress": {
+                        "phase": "step_finished",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "running",
+                        "progressPercent": 80,
+                        "stepKey": "draft",
+                        "stepSummary": "Draft answer",
+                        "stepStatus": "completed",
+                        "stepIndex": 2,
+                        "stepsTotal": 2,
+                        "detailText": "Draft complete"
+                    }
+                }),
+                "2026-04-05T00:00:03Z",
+            ),
+        ]);
+
+        assert_eq!(timeline.len(), 1);
+        assert_eq!(timeline[0].id, "run-card-run-123");
+        assert_eq!(timeline[0].kind, "run");
+        assert_eq!(timeline[0].role, "system");
+        assert_eq!(timeline[0].source_message_type.as_deref(), Some("run_progress_message"));
+        assert_eq!(timeline[0].created_at, "2026-04-05T00:00:02Z");
+
+        let run_meta = timeline[0].run_meta.as_ref().expect("run card meta");
+        assert_eq!(run_meta.run_id, "run-123");
+        assert_eq!(run_meta.state, "running");
+        assert_eq!(run_meta.progress_percent, 80);
+        assert_eq!(run_meta.run_type.as_deref(), Some("distill"));
+        assert_eq!(run_meta.current_step_key.as_deref(), Some("draft"));
+        assert_eq!(run_meta.steps.len(), 2);
+        assert_eq!(run_meta.steps[0].key, "gather");
+        assert_eq!(run_meta.steps[1].key, "draft");
+    }
+
+    #[test]
+    fn desktop_timeline_mapper_places_run_card_at_earliest_run_progress_position() {
+        let timeline = desktop_timeline_from_session_messages(&[
+            session_message(
+                "message-user",
+                None,
+                "user_message",
+                SessionMessageRole::User,
+                "Start the run",
+                serde_json::json!({}),
+                "2026-04-05T00:00:00Z",
+            ),
+            session_message(
+                "progress-2",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run step finished: run-123 [draft] (100%)",
+                serde_json::json!({
+                    "statusText": "run step finished: run-123 [draft] (100%)",
+                    "runProgress": {
+                        "phase": "step_finished",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "completed",
+                        "progressPercent": 100,
+                        "stepKey": "draft",
+                        "stepSummary": "Draft answer",
+                        "stepStatus": "completed",
+                        "stepIndex": 2,
+                        "stepsTotal": 2,
+                        "detailText": "Draft complete"
+                    }
+                }),
+                "2026-04-05T00:00:03Z",
+            ),
+            session_message(
+                "progress-1",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run created: run-123 (distill)",
+                serde_json::json!({
+                    "statusText": "run created: run-123 (distill)",
+                    "runProgress": {
+                        "phase": "created",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "queued",
+                        "progressPercent": 5,
+                        "stepKey": "gather",
+                        "stepSummary": "Gather material",
+                        "stepStatus": "started",
+                        "stepIndex": 1,
+                        "stepsTotal": 2,
+                        "detailText": "Collecting sources"
+                    }
+                }),
+                "2026-04-05T00:00:01Z",
+            ),
+            session_message(
+                "message-assistant",
+                None,
+                "assistant_message",
+                SessionMessageRole::Assistant,
+                "Run complete",
+                serde_json::json!({}),
+                "2026-04-05T00:00:02Z",
+            ),
+        ]);
+
+        assert_eq!(timeline.len(), 3);
+        assert_eq!(timeline[0].id, "message-user");
+        assert_eq!(timeline[1].id, "run-card-run-123");
+        assert_eq!(timeline[2].id, "message-assistant");
+        assert_eq!(timeline[1].created_at, "2026-04-05T00:00:01Z");
+    }
+
+    #[test]
+    fn desktop_timeline_mapper_preserves_user_handoff_run_and_completion_order() {
+        let timeline = desktop_timeline_from_session_messages(&[
+            session_message(
+                "message-user",
+                None,
+                "user_message",
+                SessionMessageRole::User,
+                "Please generate the brief",
+                serde_json::json!({}),
+                "2026-04-05T00:00:00Z",
+            ),
+            session_message(
+                "message-handoff",
+                None,
+                "assistant_message",
+                SessionMessageRole::Assistant,
+                "I will start a distill run.",
+                serde_json::json!({}),
+                "2026-04-05T00:00:01Z",
+            ),
+            session_message(
+                "progress-1",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run created: run-123 (distill)",
+                serde_json::json!({
+                    "statusText": "run created: run-123 (distill)",
+                    "runProgress": {
+                        "phase": "created",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "queued",
+                        "progressPercent": 10,
+                        "stepKey": "gather",
+                        "stepSummary": "Gather material",
+                        "stepStatus": "started",
+                        "stepIndex": 1,
+                        "stepsTotal": 2,
+                        "detailText": "Collecting sources"
+                    }
+                }),
+                "2026-04-05T00:00:02Z",
+            ),
+            session_message(
+                "message-complete",
+                None,
+                "assistant_message",
+                SessionMessageRole::Assistant,
+                "The brief is ready.",
+                serde_json::json!({}),
+                "2026-04-05T00:00:03Z",
+            ),
+        ]);
+
+        let ids = timeline.iter().map(|message| message.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![
+                "message-user",
+                "message-handoff",
+                "run-card-run-123",
+                "message-complete",
+            ]
+        );
+    }
+
+    #[test]
+    fn desktop_timeline_mapper_keeps_run_card_when_one_progress_row_is_malformed() {
+        let timeline = desktop_timeline_from_session_messages(&[
+            session_message(
+                "message-user",
+                None,
+                "user_message",
+                SessionMessageRole::User,
+                "Run it",
+                serde_json::json!({}),
+                "2026-04-05T00:00:00Z",
+            ),
+            session_message(
+                "progress-bad",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "bad progress row",
+                serde_json::json!({"statusText": "bad progress row"}),
+                "2026-04-05T00:00:01Z",
+            ),
+            session_message(
+                "progress-good",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run state: run-123 running (40%)",
+                serde_json::json!({
+                    "statusText": "run state: run-123 running (40%)",
+                    "runProgress": {
+                        "phase": "state_changed",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "running",
+                        "progressPercent": 40,
+                        "detailText": "Still working"
+                    }
+                }),
+                "2026-04-05T00:00:02Z",
+            ),
+        ]);
+
+        assert_eq!(timeline.len(), 2);
+        assert_eq!(timeline[0].id, "message-user");
+        assert_eq!(timeline[1].id, "run-card-run-123");
+        assert_eq!(timeline[1].kind, "run");
+        assert_eq!(timeline[1].created_at, "2026-04-05T00:00:01Z");
+        let run_meta = timeline[1].run_meta.as_ref().expect("run meta");
+        assert_eq!(run_meta.run_id, "run-123");
+        assert_eq!(run_meta.state, "running");
+        assert_eq!(run_meta.progress_percent, 40);
+    }
+
+    #[test]
+    fn desktop_timeline_mapper_keeps_one_evolving_step_per_step_key() {
+        let timeline = desktop_timeline_from_session_messages(&[
+            session_message(
+                "progress-1",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run step started: run-123 [draft] (20%)",
+                serde_json::json!({
+                    "statusText": "run step started: run-123 [draft] (20%)",
+                    "runProgress": {
+                        "phase": "step_started",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "running",
+                        "progressPercent": 20,
+                        "stepKey": "draft",
+                        "stepSummary": "Draft answer",
+                        "stepStatus": "started",
+                        "stepIndex": 1,
+                        "stepsTotal": 2,
+                        "detailText": "Starting draft"
+                    }
+                }),
+                "2026-04-05T00:00:01Z",
+            ),
+            session_message(
+                "progress-2",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run step finished: run-123 [draft] (60%)",
+                serde_json::json!({
+                    "statusText": "run step finished: run-123 [draft] (60%)",
+                    "runProgress": {
+                        "phase": "step_finished",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "running",
+                        "progressPercent": 60,
+                        "stepKey": "draft",
+                        "stepSummary": "Draft answer",
+                        "stepStatus": "completed",
+                        "stepIndex": 1,
+                        "stepsTotal": 2,
+                        "detailText": "Draft done"
+                    }
+                }),
+                "2026-04-05T00:00:02Z",
+            ),
+        ]);
+
+        assert_eq!(timeline.len(), 1);
+        let run_meta = timeline[0].run_meta.as_ref().expect("run meta");
+        assert_eq!(run_meta.steps.len(), 1);
+        assert_eq!(run_meta.steps[0].key, "draft");
+        assert_eq!(run_meta.steps[0].status, "completed");
+        assert_eq!(run_meta.steps[0].detail_text.as_deref(), Some("Draft done"));
+    }
+
+    #[test]
+    fn desktop_timeline_mapper_uses_latest_valid_step_row_by_persisted_chronology() {
+        let timeline = desktop_timeline_from_session_messages(&[
+            session_message(
+                "progress-late",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run step finished: run-123 [draft] (60%)",
+                serde_json::json!({
+                    "statusText": "run step finished: run-123 [draft] (60%)",
+                    "runProgress": {
+                        "phase": "step_finished",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "running",
+                        "progressPercent": 60,
+                        "stepKey": "draft",
+                        "stepSummary": "Draft answer",
+                        "stepStatus": "completed",
+                        "stepIndex": 1,
+                        "stepsTotal": 2,
+                        "detailText": "Draft done"
+                    }
+                }),
+                "2026-04-05T00:00:02Z",
+            ),
+            session_message(
+                "progress-early",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run step started: run-123 [draft] (20%)",
+                serde_json::json!({
+                    "statusText": "run step started: run-123 [draft] (20%)",
+                    "runProgress": {
+                        "phase": "step_started",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "running",
+                        "progressPercent": 20,
+                        "stepKey": "draft",
+                        "stepSummary": "Draft answer",
+                        "stepStatus": "started",
+                        "stepIndex": 1,
+                        "stepsTotal": 2,
+                        "detailText": "Starting draft"
+                    }
+                }),
+                "2026-04-05T00:00:01Z",
+            ),
+        ]);
+
+        assert_eq!(timeline.len(), 1);
+        let run_meta = timeline[0].run_meta.as_ref().expect("run meta");
+        assert_eq!(run_meta.steps.len(), 1);
+        assert_eq!(run_meta.steps[0].key, "draft");
+        assert_eq!(run_meta.steps[0].status, "completed");
+        assert_eq!(run_meta.steps[0].detail_text.as_deref(), Some("Draft done"));
+    }
+
+    #[test]
+    fn desktop_timeline_mapper_uses_latest_valid_progress_row_by_persisted_chronology() {
+        let timeline = desktop_timeline_from_session_messages(&[
+            session_message(
+                "progress-late",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run step finished: run-123 [draft] (100%)",
+                serde_json::json!({
+                    "statusText": "run step finished: run-123 [draft] (100%)",
+                    "runProgress": {
+                        "phase": "step_finished",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "completed",
+                        "progressPercent": 100,
+                        "stepKey": "draft",
+                        "stepSummary": "Draft answer",
+                        "stepStatus": "completed",
+                        "stepIndex": 2,
+                        "stepsTotal": 2,
+                        "detailText": "Draft complete"
+                    }
+                }),
+                "2026-04-05T00:00:03Z",
+            ),
+            session_message(
+                "progress-early",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run created: run-123 (distill)",
+                serde_json::json!({
+                    "statusText": "run created: run-123 (distill)",
+                    "runProgress": {
+                        "phase": "created",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "queued",
+                        "progressPercent": 10,
+                        "stepKey": "gather",
+                        "stepSummary": "Gather material",
+                        "stepStatus": "started",
+                        "stepIndex": 1,
+                        "stepsTotal": 2,
+                        "detailText": "Collecting sources"
+                    }
+                }),
+                "2026-04-05T00:00:01Z",
+            ),
+        ]);
+
+        assert_eq!(timeline.len(), 1);
+        assert_eq!(timeline[0].created_at, "2026-04-05T00:00:01Z");
+        let run_meta = timeline[0].run_meta.as_ref().expect("run meta");
+        assert_eq!(run_meta.state, "completed");
+        assert_eq!(run_meta.progress_percent, 100);
+        assert_eq!(run_meta.current_step_key.as_deref(), Some("draft"));
+        assert_eq!(run_meta.step_summary.as_deref(), Some("Draft answer"));
+    }
+
+    #[test]
+    fn structured_timeline_command_payload_contains_messages_tools_and_runs() {
+        let timeline = list_session_messages_structured_payload(&[
+            session_message(
+                "message-user",
+                None,
+                "user_message",
+                SessionMessageRole::User,
+                "Please summarize the attachment",
+                serde_json::json!({
+                    "attachments": [
+                        {
+                            "name": "notes.md",
+                            "size": 2048
+                        }
+                    ]
+                }),
+                "2026-04-05T00:00:00Z",
+            ),
+            session_message(
+                "message-tool",
+                None,
+                "tool_result_message",
+                SessionMessageRole::System,
+                "Attachment excerpt: hello",
+                serde_json::json!({
+                    "tool_name": "read_attachment_excerpt",
+                    "arguments": {
+                        "attachment_index": 0,
+                        "max_chars": 400
+                    }
+                }),
+                "2026-04-05T00:00:01Z",
+            ),
+            session_message(
+                "progress-1",
+                Some("run-123"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run created: run-123 (distill)",
+                serde_json::json!({
+                    "statusText": "run created: run-123 (distill)",
+                    "runProgress": {
+                        "phase": "created",
+                        "runId": "run-123",
+                        "runType": "distill",
+                        "runState": "queued",
+                        "progressPercent": 10,
+                        "stepKey": "gather",
+                        "stepSummary": "Gather material",
+                        "stepStatus": "started",
+                        "stepIndex": 1,
+                        "stepsTotal": 2,
+                        "detailText": "Collecting sources"
+                    }
+                }),
+                "2026-04-05T00:00:02Z",
+            ),
+        ]);
+
+        assert_eq!(timeline.len(), 3);
+        assert_eq!(timeline[0].id, "message-user");
+        assert_eq!(timeline[0].kind, "message");
+        assert_eq!(timeline[0].attachments.len(), 1);
+        assert_eq!(timeline[1].id, "message-tool");
+        assert_eq!(timeline[1].kind, "tool");
+        assert_eq!(timeline[1].summary.as_deref(), Some("read_attachment_excerpt · success"));
+        assert!(
+            timeline[1]
+                .details
+                .as_deref()
+                .expect("structured tool details")
+                .contains("Attachment excerpt: hello")
+        );
+        assert_eq!(timeline[2].id, "run-card-run-123");
+        assert_eq!(timeline[2].kind, "run");
+        assert_eq!(
+            timeline[2]
+                .run_meta
+                .as_ref()
+                .and_then(|meta| meta.run_type.as_deref()),
+            Some("distill")
+        );
     }
 }
 
@@ -1278,9 +2297,7 @@ async fn send_session_message_command(form: SessionMessageForm) -> Result<String
     .await
     .map_err(|e| e.to_string())?;
 
-    let messages = runtime::list_session_messages(&runtime, &session_id).map_err(|e| e.to_string())?;
-
-    Ok(format_session_messages_text(&messages))
+    load_session_messages_text_for_timeline(&session_id)
 }
 
 #[tauri::command]
@@ -1499,11 +2516,11 @@ async fn create_session_and_send_first_message_command(
         return Err(error.to_string());
     }
 
-    let messages = runtime::list_session_messages(&runtime, &session_id).map_err(|e| e.to_string())?;
+    let timeline_text = load_session_messages_text_for_timeline(&session_id)?;
 
     Ok(FirstSendCommandResponse {
         session_id,
-        timeline_text: format_session_messages_text(&messages),
+        timeline_text,
     })
 }
 
@@ -1838,10 +2855,16 @@ fn import_opencode_providers_command(form: Option<ImportProvidersForm>) -> Resul
 
 #[tauri::command]
 fn list_session_messages_command(session_id: String) -> Result<String, String> {
-    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
-    let messages = runtime::list_session_messages(&runtime, &session_id).map_err(|e| e.to_string())?;
+    load_session_messages_text_for_timeline(&session_id)
+}
 
-    Ok(format_session_messages_text(&messages))
+#[tauri::command]
+fn list_session_messages_structured_command(
+    session_id: String,
+) -> Result<Vec<DesktopTimelineMessage>, String> {
+    let messages = load_session_messages_for_timeline(&session_id)?;
+
+    Ok(list_session_messages_structured_payload(&messages))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1892,6 +2915,7 @@ pub fn run() {
             send_session_message_command,
             stream_session_message_command,
             list_session_messages_command,
+            list_session_messages_structured_command,
             load_llm_config_command,
             load_llm_config_json_command,
             load_desktop_ui_preferences_command,

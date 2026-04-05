@@ -33,7 +33,11 @@ export default function ChatActiveScreen({
       (message) =>
         message.kind === 'run'
         && message.runMeta
-        && (message.runMeta.state === 'running' || message.runMeta.state === 'pending'),
+        && (
+          message.runMeta.state === 'queued'
+          || message.runMeta.state === 'running'
+          || message.runMeta.state === 'pending'
+        ),
     )?.runMeta ?? null;
 
   useEffect(() => {

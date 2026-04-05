@@ -11,8 +11,8 @@ import {
 } from 'react';
 
 import { getTauriInvoke, getTauriListen, loadTauriEventApi } from './tauri';
-import { parseTimelineText } from './timeline';
-import type { ChatMessage, ChatSessionSummary, ChatState, ChatStreamEvent } from './types';
+import { desktopTimelineToChatMessages, parseTimelineText } from './timeline';
+import type { ChatMessage, ChatSessionSummary, ChatState, ChatStreamEvent, DesktopTimelineMessage } from './types';
 
 function attachmentSummariesFromPaths(paths: string[]) {
   return paths.map((path) => ({
@@ -167,39 +167,6 @@ function mergeRunSteps(
   return base;
 }
 
-function mergeTimelineWithRunCards(timelineMessages: ChatMessage[], streamMessages: ChatMessage[]) {
-  const runMessages = streamMessages.filter((message) => message.kind === 'run');
-  if (runMessages.length === 0) {
-    return timelineMessages;
-  }
-
-  const merged = [...timelineMessages];
-
-  for (const runMessage of runMessages) {
-    const existingIndex = merged.findIndex((message) => message.id === runMessage.id);
-    if (existingIndex >= 0) {
-      merged[existingIndex] = runMessage;
-      continue;
-    }
-
-    const handoffIndex = [...merged].findIndex(
-      (message) => message.id.startsWith('assistant-handoff-') || (
-        message.role === 'assistant'
-          && message.kind !== 'run'
-          && message.content.toLowerCase().includes('start a distill run')
-      ),
-    );
-
-    if (handoffIndex >= 0) {
-      merged.splice(handoffIndex + 1, 0, runMessage);
-    } else {
-      merged.push(runMessage);
-    }
-  }
-
-  return merged;
-}
-
 function sessionSummaryFromOption(option: SessionSelectorOption): ChatSessionSummary {
   return {
     sessionId: option.sessionId,
@@ -224,7 +191,35 @@ function sortSessions(sessions: ChatSessionSummary[]) {
 export default function ChatProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<ChatState>(INITIAL_STATE);
   const activeRequestRef = useRef<string | null>(null);
+  const completedSyncRef = useRef<{ requestId: string; sessionId: string } | null>(null);
   const deferredState = useDeferredValue(state);
+
+  const loadStructuredTimelineMessages = useCallback(async (sessionId: string) => {
+    const invoke = getTauriInvoke();
+    if (!invoke) {
+      throw new Error('Tauri bridge unavailable.');
+    }
+
+    const timelineMessages = await invoke<DesktopTimelineMessage[]>('list_session_messages_structured_command', {
+      sessionId,
+    });
+
+    return desktopTimelineToChatMessages(timelineMessages);
+  }, []);
+
+  const loadTimelineMessagesWithFallback = useCallback(async (sessionId: string) => {
+    const invoke = getTauriInvoke();
+    if (!invoke) {
+      throw new Error('Tauri bridge unavailable.');
+    }
+
+    try {
+      return await loadStructuredTimelineMessages(sessionId);
+    } catch {
+      const timelineText = await invoke<string>('list_session_messages_command', { sessionId });
+      return parseTimelineText(timelineText);
+    }
+  }, [loadStructuredTimelineMessages]);
 
   const refreshSessions = useCallback(async () => {
     const invoke = getTauriInvoke();
@@ -246,19 +241,15 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openSession = useCallback(async (sessionId: string) => {
-    const invoke = getTauriInvoke();
-    if (!invoke) {
-      return;
-    }
-
-    const timelineText = await invoke<string>('list_session_messages_command', { sessionId });
+    completedSyncRef.current = null;
+    const messages = await loadTimelineMessagesWithFallback(sessionId);
 
     setState((previous) => ({
       ...previous,
       sessionId,
       sessionTitle:
         previous.sessions.find((session) => session.sessionId === sessionId)?.title ?? previous.sessionTitle,
-      messages: parseTimelineText(timelineText),
+      messages,
       errorText: null,
       activeRunLabel: null,
       streamStatuses: [],
@@ -267,7 +258,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
       lastRunStatus: null,
       liveAssistantText: '',
     }));
-  }, []);
+  }, [loadTimelineMessagesWithFallback]);
 
   const renameSession = useCallback(async (sessionId: string, manualTitle: string | null) => {
     const invoke = getTauriInvoke();
@@ -418,6 +409,71 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
     if (activeRequestRef.current !== event.requestId) {
       return;
     }
+
+    if (event.phase === 'completed') {
+      const syncContext = {
+        requestId: event.requestId,
+        sessionId: event.sessionId,
+      };
+      completedSyncRef.current = syncContext;
+      activeRequestRef.current = null;
+
+      setState((previous) => ({
+        ...previous,
+        isStreaming: false,
+        errorText: null,
+        streamStatuses: [...previous.streamStatuses, 'timeline synchronizing'],
+        liveAssistantText: '',
+      }));
+
+      void loadTimelineMessagesWithFallback(event.sessionId)
+        .then((messages) => {
+          if (
+            completedSyncRef.current?.requestId !== syncContext.requestId
+            || completedSyncRef.current?.sessionId !== syncContext.sessionId
+          ) {
+            return;
+          }
+
+          setState((previous) => {
+            if (previous.sessionId !== syncContext.sessionId) {
+              return previous;
+            }
+
+            return {
+              ...previous,
+              messages,
+              activeRunLabel: event.createdRunId ?? previous.activeRunLabel,
+              streamStatuses: [...previous.streamStatuses, 'timeline synchronized'],
+            };
+          });
+        })
+        .catch((error) => {
+          if (
+            completedSyncRef.current?.requestId !== syncContext.requestId
+            || completedSyncRef.current?.sessionId !== syncContext.sessionId
+          ) {
+            return;
+          }
+
+          const errorText = error instanceof Error ? error.message : String(error);
+          setState((previous) => {
+            if (previous.sessionId !== syncContext.sessionId) {
+              return previous;
+            }
+
+            return {
+              ...previous,
+              errorText: errorText || previous.errorText,
+              streamStatuses: [...previous.streamStatuses, `timeline sync failed: ${errorText}`],
+            };
+          });
+        });
+
+      return;
+    }
+
+    completedSyncRef.current = null;
 
     setState((previous) => {
       switch (event.phase) {
@@ -709,21 +765,6 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
             liveAssistantText: '',
           };
         }
-        case 'completed': {
-          activeRequestRef.current = null;
-          const parsedTimeline = event.timelineText ? parseTimelineText(event.timelineText) : previous.messages;
-          const mergedMessages = mergeTimelineWithRunCards(parsedTimeline, previous.messages);
-
-          return {
-            ...previous,
-            isStreaming: false,
-            errorText: null,
-            messages: mergedMessages,
-            activeRunLabel: event.createdRunId ?? previous.activeRunLabel,
-            streamStatuses: [...previous.streamStatuses, 'timeline synchronized'],
-            liveAssistantText: '',
-          };
-        }
         case 'error': {
           activeRequestRef.current = null;
           return {
@@ -737,9 +778,11 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
             liveAssistantText: '',
           };
         }
+        default:
+          return previous;
       }
     });
-  }, []);
+  }, [loadTimelineMessagesWithFallback]);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -884,6 +927,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
 
   const resetDraft = useCallback(() => {
     activeRequestRef.current = null;
+    completedSyncRef.current = null;
     setState((previous) => ({
       ...previous,
       sessionId: null,

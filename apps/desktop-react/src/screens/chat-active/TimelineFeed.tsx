@@ -53,7 +53,10 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
           continue;
         }
 
-        const shouldExpandByDefault = message.runMeta.state === 'running' || message.runMeta.state === 'pending';
+        const shouldExpandByDefault =
+          message.runMeta.state === 'queued'
+          || message.runMeta.state === 'running'
+          || message.runMeta.state === 'pending';
         if (previous[message.id] == null && shouldExpandByDefault) {
           next[message.id] = true;
           changed = true;
@@ -191,7 +194,7 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
                             const isCurrent = runMeta.currentStepKey === step.key;
                             const isFailed = step.status === 'failed';
                             const isCompleted = step.status === 'completed';
-                            const isRunning = step.status === 'running';
+                            const isRunning = step.status === 'running' || step.status === 'started';
                             const statusColor =
                               isCompleted
                                 ? 'text-secondary'
