@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { useChatAppearance } from '../../chat/ChatAppearanceProvider';
+import { chatComposerTextClass } from '../../chat/font-size';
 import { useChat } from '../../chat/ChatProvider';
 import { mergePendingAttachments, pickPendingAttachments, type PendingAttachment } from '../chat/pending-attachments';
 
@@ -11,6 +13,7 @@ type DraftComposerProps = {
 
 export default function DraftComposer({ onSend, isStreaming, errorText }: DraftComposerProps) {
   const { cancelActiveRequest } = useChat();
+  const { chatFontSize } = useChatAppearance();
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
@@ -57,7 +60,7 @@ export default function DraftComposer({ onSend, isStreaming, errorText }: DraftC
 
           <textarea
             aria-label="Describe the work you want to distill into structure"
-            className="min-h-[64px] w-full resize-none border-none bg-transparent p-5 font-body text-on-surface placeholder:text-on-surface-variant/40 focus:ring-0"
+            className={`min-h-[64px] w-full resize-none border-none bg-transparent p-5 font-body text-on-surface placeholder:text-on-surface-variant/40 focus:ring-0 ${chatComposerTextClass(chatFontSize)}`}
             onChange={(event) => setMessage(event.target.value)}
             onKeyDown={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {

@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { useChatAppearance } from '../../chat/ChatAppearanceProvider';
+import { chatComposerTextClass } from '../../chat/font-size';
 import { useChat } from '../../chat/ChatProvider';
 import { mergePendingAttachments, pickPendingAttachments, type PendingAttachment } from '../chat/pending-attachments';
 
@@ -10,6 +12,7 @@ type ActiveComposerProps = {
 
 export default function ActiveComposer({ onSend, isStreaming }: ActiveComposerProps) {
   const { cancelActiveRequest } = useChat();
+  const { chatFontSize } = useChatAppearance();
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
@@ -52,7 +55,7 @@ export default function ActiveComposer({ onSend, isStreaming }: ActiveComposerPr
 
           <textarea
             aria-label="Type a command or follow-up question"
-            className="bg-transparent border-none focus:ring-0 text-on-surface placeholder:text-outline/50 resize-none font-body text-md h-12 w-full"
+            className={`bg-transparent border-none focus:ring-0 text-on-surface placeholder:text-outline/50 resize-none font-body h-12 w-full ${chatComposerTextClass(chatFontSize)}`}
             onChange={(event) => setMessage(event.target.value)}
             onKeyDown={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {

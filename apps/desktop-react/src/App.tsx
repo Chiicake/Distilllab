@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { activeChatScreen, draftScreen, type Screen } from './app-state/screen-state';
+import { ChatAppearanceProvider } from './chat/ChatAppearanceProvider';
 import { useChat } from './chat/ChatProvider';
 import AppShell from './components/shell/AppShell';
 import TopNav from './components/shell/TopNav';
@@ -119,7 +120,8 @@ export default function App() {
   }
 
   return (
-    <AppShell
+    <ChatAppearanceProvider>
+      <AppShell
       onStartResize={resizeApi ? handleStartResize : undefined}
       topNav={
         <TopNav
@@ -129,9 +131,9 @@ export default function App() {
           onOpenSettings={() => setScreen({ kind: 'settings' })}
         />
       }
-    >
-      {content}
-      <SessionRenameDialog
+      >
+        {content}
+        <SessionRenameDialog
         currentTitle={renameState?.currentTitle ?? ''}
         onClose={() => setRenameState(null)}
         onSave={(value) => {
@@ -144,8 +146,8 @@ export default function App() {
           void renameSession(sessionId, value);
         }}
         open={renameState != null}
-      />
-      <SessionDeleteDialog
+        />
+        <SessionDeleteDialog
         onClose={() => setDeleteState(null)}
         onDelete={() => {
           if (!deleteState) {
@@ -165,7 +167,8 @@ export default function App() {
         }}
         open={deleteState != null}
         sessionTitle={deleteState?.title ?? ''}
-      />
-    </AppShell>
+        />
+      </AppShell>
+    </ChatAppearanceProvider>
   );
 }

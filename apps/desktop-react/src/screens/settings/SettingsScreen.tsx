@@ -1,7 +1,14 @@
 import type { SettingsSection } from '../../app-state/screen-state';
+import { useChatAppearance, type ChatFontSize } from '../../chat/ChatAppearanceProvider';
 import { useI18n } from '../../i18n/I18nProvider';
 import DebugPanel from './DebugPanel';
 import SettingsSidebar from './SettingsSidebar';
+
+const chatFontSizeOptions: Array<{ value: ChatFontSize; label: string; description: string }> = [
+  { value: 'small', label: 'Small', description: 'Denser chat reading layout' },
+  { value: 'medium', label: 'Medium', description: 'Balanced chat reading size' },
+  { value: 'large', label: 'Large', description: 'Roomier chat reading size' },
+];
 
 type SettingsScreenProps = {
   section?: SettingsSection;
@@ -10,6 +17,7 @@ type SettingsScreenProps = {
 
 function WorkspaceSettingsView() {
   const { locale, localeOptions, setLocale, t } = useI18n();
+  const { chatFontSize, setChatFontSize } = useChatAppearance();
 
   return (
     <div className="w-full max-w-3xl space-y-16">
@@ -117,7 +125,51 @@ function WorkspaceSettingsView() {
         <section className="space-y-6">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase tracking-widest text-secondary-dim">
-              05 / {t('settings.section.language')}
+              05 / Chat Typography
+            </span>
+          </div>
+          <div className="rounded-sm border-l-2 border-primary bg-surface-container p-8">
+            <div className="flex items-center justify-between gap-8">
+              <div>
+                <h4 className="font-semibold text-on-surface">Chat font size</h4>
+                <p className="text-sm text-on-surface-variant">Adjusts message and composer text in chat screens only.</p>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
+                {chatFontSize}
+              </span>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {chatFontSizeOptions.map((option) => {
+                const isActive = option.value === chatFontSize;
+
+                return (
+                  <button
+                    key={option.value}
+                    className={`rounded-sm border px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] transition-colors ${
+                      isActive
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-outline-variant/40 text-on-surface-variant hover:border-primary/40 hover:text-on-surface'
+                    }`}
+                    onClick={() => setChatFontSize(option.value)}
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="mt-3 text-xs text-on-surface-variant/70">
+              {chatFontSizeOptions.find((option) => option.value === chatFontSize)?.description}
+            </p>
+          </div>
+        </section>
+
+        <section className="space-y-6">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-widest text-secondary-dim">
+              06 / {t('settings.section.language')}
             </span>
           </div>
           <div className="rounded-sm border-l-2 border-secondary-container bg-surface-container p-8">

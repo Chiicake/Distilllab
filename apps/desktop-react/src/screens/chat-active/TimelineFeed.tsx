@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { useChatAppearance } from '../../chat/ChatAppearanceProvider';
+import { chatBodyTextClass, chatSecondaryTextClass } from '../../chat/font-size';
 import type { ChatMessage } from '../../chat/types';
 
 function formatRunTypeLabel(runType: string | null | undefined) {
@@ -21,6 +23,9 @@ type TimelineFeedProps = {
 export default function TimelineFeed({ messages, errorText }: TimelineFeedProps) {
   const [expandedMessageIds, setExpandedMessageIds] = useState<Record<string, boolean>>({});
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const { chatFontSize } = useChatAppearance();
+  const bodyTextClass = chatBodyTextClass(chatFontSize);
+  const secondaryTextClass = chatSecondaryTextClass(chatFontSize);
 
   const toggleExpanded = (messageId: string) => {
     setExpandedMessageIds((previous) => ({
@@ -65,7 +70,7 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
   }, [messages]);
 
   return (
-    <div className="flex-1 overflow-y-auto space-y-12 px-8 py-10 no-scrollbar" ref={containerRef}>
+    <div className="flex-1 overflow-y-auto space-y-4 px-8 py-6 no-scrollbar" ref={containerRef}>
       {messages.map((message) => {
         const isUser = message.role === 'user';
         const isAssistant = message.role === 'assistant';
@@ -94,7 +99,7 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
             className={`mx-auto flex max-w-3xl flex-col ${isUser ? 'items-end' : 'items-start'} w-full`}
           >
             {isAssistant ? (
-              <div className="mb-3 flex items-center gap-2">
+              <div className="mb-2 flex items-center gap-2">
                 <div className="flex h-6 w-6 items-center justify-center rounded-full border border-primary/20 bg-surface-container-high">
                   <span className="material-symbols-outlined text-[14px] text-primary" data-icon="smart_toy">
                     smart_toy
@@ -106,13 +111,13 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
               </div>
             ) : null}
 
-            <div className={`flex items-start gap-4 ${isUser ? '' : 'w-full'}`}>
+            <div className={`flex items-start gap-3 ${isUser ? '' : 'w-full'}`}>
               <div className={isUser ? 'text-right' : ''}>
                 <div
                   className={
                     isUser
                       ? ''
-                      : `max-w-xl rounded-xl p-6 ${
+                      : `max-w-xl rounded-xl p-5 ${
                           isToolLike
                             ? 'border border-primary/15 bg-primary/5'
                             : isRunLike
@@ -244,7 +249,7 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
                     </div>
                   ) : null}
 
-                  <p className="max-w-xl whitespace-pre-wrap font-body text-md leading-relaxed text-on-surface-variant">
+                  <p className={`max-w-xl whitespace-pre-wrap font-body leading-relaxed text-on-surface-variant ${bodyTextClass}`}>
                     {displayText || (message.pending ? '...' : '')}
                   </p>
 
@@ -269,7 +274,7 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
 
                   {isSystem && isExpandable ? (
                     <button
-                      className="mt-2 text-[10px] font-bold uppercase tracking-widest text-primary"
+                      className={`mt-2 font-bold uppercase tracking-widest text-primary ${secondaryTextClass}`}
                       onClick={() => toggleExpanded(message.id)}
                       type="button"
                     >
