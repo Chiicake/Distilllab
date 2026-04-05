@@ -125,12 +125,16 @@ pub async fn decide_and_record_intake(
         )
     })?;
 
-    let user_session_message = build_session_message(
+    let user_session_message = build_session_message_with_data(
         &session.id,
         None,
         "user_message",
         SessionMessageRole::User,
         intake.user_message.clone(),
+        serde_json::json!({
+            "attachments": intake.attachments,
+        })
+        .to_string(),
     );
     insert_session_message(&conn, &user_session_message)?;
 
@@ -320,12 +324,16 @@ where
         )
     })?;
 
-    let user_session_message = build_session_message(
+    let user_session_message = build_session_message_with_data(
         &session.id,
         None,
         "user_message",
         SessionMessageRole::User,
         intake.user_message.clone(),
+        serde_json::json!({
+            "attachments": intake.attachments,
+        })
+        .to_string(),
     );
     insert_session_message(&conn, &user_session_message)?;
 

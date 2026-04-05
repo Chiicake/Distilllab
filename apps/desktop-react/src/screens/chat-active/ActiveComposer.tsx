@@ -19,7 +19,6 @@ export default function ActiveComposer({ onSend, isStreaming }: ActiveComposerPr
 
     await onSend(trimmed, attachments.map((attachment) => attachment.path));
     setMessage('');
-    setAttachments([]);
   };
 
   return (

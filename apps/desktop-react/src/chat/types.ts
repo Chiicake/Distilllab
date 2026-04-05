@@ -34,6 +34,10 @@ export type ChatMessage = {
   details?: string;
   kind?: 'tool' | 'status' | 'run' | 'message';
   runMeta?: RunCardMeta;
+  attachments?: Array<{
+    name: string;
+    size?: number | null;
+  }>;
 };
 
 export type ChatSessionSummary = {

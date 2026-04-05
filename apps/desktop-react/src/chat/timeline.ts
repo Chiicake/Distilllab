@@ -221,11 +221,42 @@ function parseToolMessage(header: string, body: string, index: number): ChatMess
 }
 
 function parseRegularMessage(header: string, body: string, index: number): ChatMessage {
+  const bodyLines = body.split('\n');
+  const lastLine = bodyLines[bodyLines.length - 1]?.trim() ?? '';
+  const maybeJson = lastLine.startsWith('{') && lastLine.endsWith('}') ? lastLine : null;
+
+  let visibleBody = body;
+  let attachments: ChatMessage['attachments'] | undefined;
+
+  if (maybeJson) {
+    try {
+      const parsed = JSON.parse(maybeJson) as {
+        attachments?: Array<{
+          name?: string;
+          size?: number;
+        }>;
+      };
+
+      if (Array.isArray(parsed.attachments) && parsed.attachments.length > 0) {
+        attachments = parsed.attachments
+          .filter((attachment) => typeof attachment.name === 'string' && attachment.name.trim().length > 0)
+          .map((attachment) => ({
+            name: attachment.name as string,
+            size: typeof attachment.size === 'number' ? attachment.size : null,
+          }));
+        visibleBody = bodyLines.slice(0, -1).join('\n').trim();
+      }
+    } catch {
+      // ignore parse failure and keep body as-is
+    }
+  }
+
   return {
     id: `timeline-${index}`,
     role: roleFromHeader(header),
     kind: 'message',
-    content: body,
+    content: visibleBody,
+    attachments,
   };
 }
 

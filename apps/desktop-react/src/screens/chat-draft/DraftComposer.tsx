@@ -20,7 +20,6 @@ export default function DraftComposer({ onSend, isStreaming, errorText }: DraftC
 
     await onSend(trimmed, attachments.map((attachment) => attachment.path));
     setMessage('');
-    setAttachments([]);
   };
 
   return (

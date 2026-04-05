@@ -86,6 +86,7 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
         const runMeta = message.runMeta;
         const runSteps = runMeta?.steps ?? [];
         const showRunDetails = isRunLike && isExpanded;
+        const attachments = message.attachments ?? [];
 
         return (
           <div
@@ -246,6 +247,25 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
                   <p className="max-w-xl whitespace-pre-wrap font-body text-md leading-relaxed text-on-surface-variant">
                     {displayText || (message.pending ? '...' : '')}
                   </p>
+
+                  {attachments.length > 0 ? (
+                    <div className="mt-3 flex max-w-xl flex-wrap gap-2">
+                      {attachments.map((attachment) => (
+                        <div
+                          key={`${message.id}-${attachment.name}`}
+                          className="flex items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container-highest px-3 py-1 text-[11px] text-on-surface"
+                        >
+                          <span className="material-symbols-outlined text-[14px] text-primary">attach_file</span>
+                          <span className="max-w-[220px] truncate">{attachment.name}</span>
+                          {attachment.size != null ? (
+                            <span className="text-[10px] text-on-surface-variant">
+                              {Math.max(1, Math.round(attachment.size / 1024))} KB
+                            </span>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
 
                   {isSystem && isExpandable ? (
                     <button
