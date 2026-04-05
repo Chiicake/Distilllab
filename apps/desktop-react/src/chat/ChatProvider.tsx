@@ -11,8 +11,17 @@ import {
 } from 'react';
 
 import { getTauriInvoke, getTauriListen, loadTauriEventApi } from './tauri';
-import { desktopTimelineToChatMessages, parseTimelineText } from './timeline';
-import type { ChatMessage, ChatSessionSummary, ChatState, ChatStreamEvent, DesktopTimelineMessage } from './types';
+import { desktopTimelineToChatMessages } from './timeline';
+import { parseTimelineText } from './timelineTextLegacy';
+import type {
+  ChatMessage,
+  ChatSessionSummary,
+  ChatState,
+  ChatStreamEvent,
+  DesktopTimelineMessage,
+  RunState,
+  RunStepStatus,
+} from './types';
 
 function attachmentSummariesFromPaths(paths: string[]) {
   return paths.map((path) => ({
@@ -70,12 +79,39 @@ function summarizeToolStatus(statusText: string): string {
   return `${compact.slice(0, 117)}...`;
 }
 
+function toolStatusFromText(statusText: string): 'success' | 'error' {
+  return /error|failed|failure/i.test(statusText) ? 'error' : 'success';
+}
+
+function toolNameFromStatusText(statusText: string, fallback: string): string {
+  const match = statusText.match(/^tool\s+(?:started|finished):\s+(.+)$/i);
+  return match?.[1]?.trim() || fallback;
+}
+
+function buildLiveToolMessage(messageId: string, statusText: string, fallbackToolName: string): ChatMessage {
+  const toolName = toolNameFromStatusText(statusText, fallbackToolName);
+  const status = toolStatusFromText(statusText);
+
+  return {
+    id: messageId,
+    role: 'system',
+    kind: 'tool',
+    expandable: true,
+    content: statusText,
+    summary: `${toolName} · ${status}`,
+    details: `tool: ${toolName}\nstatus: ${status}\n\nresult:\n${statusText}`,
+  };
+}
+
 function createRequestId() {
   return `request-${crypto.randomUUID()}`;
 }
 
-function runStateFromStatus(statusText: string): 'pending' | 'running' | 'completed' | 'failed' {
+function runStateFromStatus(statusText: string): RunState {
   const normalized = statusText.toLowerCase();
+  if (normalized.includes('queued') || normalized.includes('created')) {
+    return 'queued';
+  }
   if (normalized.includes('failed')) {
     return 'failed';
   }
@@ -88,9 +124,29 @@ function runStateFromStatus(statusText: string): 'pending' | 'running' | 'comple
   return 'pending';
 }
 
-function runProgressFromState(state: 'pending' | 'running' | 'completed' | 'failed'): number {
+function runStateFromStatusOrMeta(statusText: string, previousState: RunState | null | undefined, fallback: RunState): RunState {
+  if (!statusText.trim()) {
+    return previousState ?? fallback;
+  }
+
+  const derived = runStateFromStatus(statusText);
+  return derived === 'pending' ? previousState ?? fallback : derived;
+}
+
+function runFinishedStateFromStatusOrMeta(statusText: string, previousState: RunState | null | undefined): RunState {
+  if (previousState === 'failed') {
+    return 'failed';
+  }
+
+  return runStateFromStatusOrMeta(statusText, previousState, 'completed');
+}
+
+function runProgressFromState(state: RunState): number {
   if (state === 'completed') {
     return 100;
+  }
+  if (state === 'queued') {
+    return 10;
   }
   if (state === 'running') {
     return 55;
@@ -101,8 +157,11 @@ function runProgressFromState(state: 'pending' | 'running' | 'completed' | 'fail
   return 10;
 }
 
-function asRunState(value: string | null | undefined): 'pending' | 'running' | 'completed' | 'failed' {
+function asRunState(value: string | null | undefined): RunState {
   const normalized = (value ?? '').toLowerCase();
+  if (normalized === 'queued' || normalized === 'created') {
+    return 'queued';
+  }
   if (normalized === 'failed') {
     return 'failed';
   }
@@ -115,8 +174,11 @@ function asRunState(value: string | null | undefined): 'pending' | 'running' | '
   return 'pending';
 }
 
-function normalizeStepStatus(value: string | null | undefined): 'pending' | 'running' | 'completed' | 'failed' {
+function normalizeStepStatus(value: string | null | undefined): RunStepStatus {
   const normalized = (value ?? '').toLowerCase();
+  if (normalized === 'started') {
+    return 'started';
+  }
   if (normalized === 'failed') {
     return 'failed';
   }
@@ -134,7 +196,7 @@ function mergeRunSteps(
   nextStep: {
     key: string;
     summary: string;
-    status: 'pending' | 'running' | 'completed' | 'failed';
+    status: RunStepStatus;
     index?: number | null;
     total?: number | null;
     detailText?: string | null;
@@ -207,7 +269,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
     return desktopTimelineToChatMessages(timelineMessages);
   }, []);
 
-  const loadTimelineMessagesWithFallback = useCallback(async (sessionId: string) => {
+  const loadCompletedSyncTimelineMessages = useCallback(async (sessionId: string) => {
     const invoke = getTauriInvoke();
     if (!invoke) {
       throw new Error('Tauri bridge unavailable.');
@@ -216,6 +278,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
     try {
       return await loadStructuredTimelineMessages(sessionId);
     } catch {
+      // Keep any legacy fallback explicit and contained to post-stream resync.
       const timelineText = await invoke<string>('list_session_messages_command', { sessionId });
       return parseTimelineText(timelineText);
     }
@@ -242,7 +305,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
 
   const openSession = useCallback(async (sessionId: string) => {
     completedSyncRef.current = null;
-    const messages = await loadTimelineMessagesWithFallback(sessionId);
+    const messages = await loadStructuredTimelineMessages(sessionId);
 
     setState((previous) => ({
       ...previous,
@@ -258,7 +321,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
       lastRunStatus: null,
       liveAssistantText: '',
     }));
-  }, [loadTimelineMessagesWithFallback]);
+  }, [loadStructuredTimelineMessages]);
 
   const renameSession = useCallback(async (sessionId: string, manualTitle: string | null) => {
     const invoke = getTauriInvoke();
@@ -426,7 +489,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
         liveAssistantText: '',
       }));
 
-      void loadTimelineMessagesWithFallback(event.sessionId)
+      void loadCompletedSyncTimelineMessages(event.sessionId)
         .then((messages) => {
           if (
             completedSyncRef.current?.requestId !== syncContext.requestId
@@ -535,15 +598,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
         }
         case 'tool_started': {
           const rawStatus = event.statusText ?? 'Tool started.';
-          const toolMessage: ChatMessage = {
-            id: `system-tool-start-${event.requestId}`,
-            role: 'system',
-            kind: 'tool',
-            expandable: true,
-            summary: summarizeToolStatus(rawStatus),
-            details: rawStatus,
-            content: rawStatus,
-          };
+          const toolMessage = buildLiveToolMessage(`system-tool-start-${event.requestId}`, rawStatus, 'tool');
 
           return {
             ...previous,
@@ -556,15 +611,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
         }
         case 'tool_finished': {
           const rawStatus = event.statusText ?? 'Tool finished.';
-          const toolMessage: ChatMessage = {
-            id: `system-tool-finish-${event.requestId}`,
-            role: 'system',
-            kind: 'tool',
-            expandable: true,
-            summary: summarizeToolStatus(rawStatus),
-            details: rawStatus,
-            content: rawStatus,
-          };
+          const toolMessage = buildLiveToolMessage(`system-tool-finish-${event.requestId}`, rawStatus, 'tool');
 
           return {
             ...previous,
@@ -578,8 +625,8 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
         case 'run_started': {
           const runId = event.createdRunId ?? 'run-active';
           const statusText = event.statusText ?? 'Run started.';
-          const state = runStateFromStatus(statusText);
           const previousRunMeta = previous.messages.find((message) => message.id === `run-card-${runId}`)?.runMeta;
+          const state = runStateFromStatusOrMeta(statusText, previousRunMeta?.state, 'queued');
           const runMessage: ChatMessage = {
             id: `run-card-${runId}`,
             role: 'system',
@@ -641,11 +688,12 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
 
           const previousRunMessage = previous.messages.find((message) => message.id === `run-card-${runId}`);
           const previousRunMeta = previousRunMessage?.runMeta;
+          const normalizedStepStatus = normalizeStepStatus(update.stepStatus ?? update.phase);
           const nextStep = update.stepKey
             ? {
                 key: update.stepKey,
                 summary: update.stepSummary ?? update.stepKey,
-                status: normalizeStepStatus(update.stepStatus ?? update.phase),
+                status: normalizedStepStatus,
                 index: update.stepIndex,
                 total: update.stepsTotal,
                 detailText: update.detailText,
@@ -668,7 +716,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
               runType: update.runType,
               stepKey: update.stepKey,
               stepSummary: update.stepSummary,
-              stepStatus: update.stepStatus,
+              stepStatus: update.stepKey ? normalizedStepStatus : previousRunMeta?.stepStatus ?? null,
               stepIndex: update.stepIndex,
               stepsTotal: update.stepsTotal,
               detailText: update.detailText,
@@ -689,8 +737,8 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
         case 'run_finished': {
           const runId = event.createdRunId ?? 'run-active';
           const statusText = event.statusText ?? 'Run finished.';
-          const state = runStateFromStatus(statusText);
           const previousRunMeta = previous.messages.find((message) => message.id === `run-card-${runId}`)?.runMeta;
+          const state = runFinishedStateFromStatusOrMeta(statusText, previousRunMeta?.state);
           const runMessage: ChatMessage = {
             id: `run-card-${runId}`,
             role: 'system',
@@ -720,7 +768,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
           return {
             ...previous,
             messages: [...filteredMessages, runMessage],
-            activeRunLabel: state === 'running' || state === 'pending' ? runId : null,
+            activeRunLabel: state === 'queued' || state === 'running' || state === 'pending' ? runId : null,
             lastRunStatus: statusText,
             streamStatuses: statusText
               ? [...previous.streamStatuses, statusText]
@@ -782,7 +830,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
           return previous;
       }
     });
-  }, [loadTimelineMessagesWithFallback]);
+  }, [loadCompletedSyncTimelineMessages]);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;

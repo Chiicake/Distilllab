@@ -1,5 +1,4 @@
 import type { ChatMessage, DesktopTimelineMessage, RunCardMeta } from './types';
-import { parseTimelineText } from './timelineTextLegacy';
 
 function desktopRunMetaToRunCardMeta(runMeta: DesktopTimelineMessage['runMeta']): RunCardMeta | undefined {
   if (!runMeta) {
@@ -51,5 +50,3 @@ export function desktopTimelineMessageToChatMessage(message: DesktopTimelineMess
 export function desktopTimelineToChatMessages(messages: DesktopTimelineMessage[]): ChatMessage[] {
   return messages.map(desktopTimelineMessageToChatMessage);
 }
-
-export { parseTimelineText };
