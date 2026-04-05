@@ -28,12 +28,19 @@ type SessionDeleteState = {
   title: string;
 };
 
+type SidebarAvailability = {
+  left: boolean;
+  right: boolean;
+};
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>(draftScreen);
   const { deleteSession, renameSession, state: chatState, resetDraft } = useChat();
   const [resizeApi, setResizeApi] = useState<ResizeApi | null>(null);
   const [renameState, setRenameState] = useState<SessionRenameState | null>(null);
   const [deleteState, setDeleteState] = useState<SessionDeleteState | null>(null);
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,12 +85,26 @@ export default function App() {
     [resizeApi],
   );
 
+  const sidebarAvailability: SidebarAvailability = (() => {
+    switch (screen.kind) {
+      case 'chat-draft':
+      case 'chat-active':
+        return { left: true, right: true };
+      case 'canvas':
+        return { left: true, right: true };
+      case 'settings':
+        return { left: true, right: false };
+    }
+  })();
+
   let content: JSX.Element;
 
   switch (screen.kind) {
     case 'chat-draft':
       content = (
         <ChatDraftScreen
+          showLeftSidebar={leftSidebarOpen}
+          showRightSidebar={rightSidebarOpen}
           onRequestDeleteSession={(sessionId, title) => setDeleteState({ sessionId, title })}
           onEnterActiveRun={(sessionId) => setScreen({ kind: 'chat-active', sessionId })}
           onRequestRenameSession={(sessionId, currentTitle) => setRenameState({ sessionId, currentTitle })}
@@ -93,6 +114,8 @@ export default function App() {
     case 'chat-active':
       content = (
         <ChatActiveScreen
+          showLeftSidebar={leftSidebarOpen}
+          showRightSidebar={rightSidebarOpen}
           onRequestDeleteSession={(targetSessionId, title) => setDeleteState({ sessionId: targetSessionId, title })}
           onReturnToDraft={() => {
             resetDraft();
@@ -107,13 +130,14 @@ export default function App() {
       );
       break;
     case 'canvas':
-      content = <CanvasScreen />;
+      content = <CanvasScreen showLeftSidebar={leftSidebarOpen} showRightSidebar={rightSidebarOpen} />;
       break;
     case 'settings':
       content = (
         <SettingsScreen
           onChangeSection={(section) => setScreen({ kind: 'settings', section })}
           section={screen.section}
+          showLeftSidebar={leftSidebarOpen}
         />
       );
       break;
@@ -126,9 +150,25 @@ export default function App() {
       topNav={
         <TopNav
           currentScreen={screen}
+          canToggleLeftSidebar={sidebarAvailability.left}
+          canToggleRightSidebar={sidebarAvailability.right}
+          leftSidebarOpen={leftSidebarOpen}
+          rightSidebarOpen={rightSidebarOpen}
           onOpenCanvas={() => setScreen({ kind: 'canvas' })}
           onOpenChat={() => setScreen(chatState.sessionId ? activeChatScreen : draftScreen)}
           onOpenSettings={() => setScreen({ kind: 'settings' })}
+          onToggleLeftSidebar={() => {
+            if (!sidebarAvailability.left) {
+              return;
+            }
+            setLeftSidebarOpen((previous) => !previous);
+          }}
+          onToggleRightSidebar={() => {
+            if (!sidebarAvailability.right) {
+              return;
+            }
+            setRightSidebarOpen((previous) => !previous);
+          }}
         />
       }
       >

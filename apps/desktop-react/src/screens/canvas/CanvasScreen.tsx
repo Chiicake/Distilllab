@@ -7,7 +7,12 @@ type CanvasMockView =
   | { kind: 'global-view' }
   | { kind: 'object-detail'; objectId: 'analysis-an-402-delta' };
 
-export default function CanvasScreen() {
+type CanvasScreenProps = {
+  showLeftSidebar: boolean;
+  showRightSidebar: boolean;
+};
+
+export default function CanvasScreen({ showLeftSidebar, showRightSidebar }: CanvasScreenProps) {
   const [view, setView] = useState<CanvasMockView>({ kind: 'global-view' });
 
   const openAnalysisDetail = () => {
@@ -20,8 +25,8 @@ export default function CanvasScreen() {
 
   switch (view.kind) {
     case 'object-detail':
-      return <CanvasObjectDetail onReturnToGlobalView={returnToGlobalView} />;
+      return <CanvasObjectDetail onReturnToGlobalView={returnToGlobalView} showLeftSidebar={showLeftSidebar} showRightSidebar={showRightSidebar} />;
     case 'global-view':
-      return <CanvasGlobalView onOpenObjectDetail={openAnalysisDetail} />;
+      return <CanvasGlobalView onOpenObjectDetail={openAnalysisDetail} showLeftSidebar={showLeftSidebar} />;
   }
 }

@@ -2,12 +2,13 @@ import CanvasSidebar from './CanvasSidebar';
 
 type CanvasGlobalViewProps = {
   onOpenObjectDetail: () => void;
+  showLeftSidebar: boolean;
 };
 
-export default function CanvasGlobalView({ onOpenObjectDetail }: CanvasGlobalViewProps) {
+export default function CanvasGlobalView({ onOpenObjectDetail, showLeftSidebar }: CanvasGlobalViewProps) {
   return (
     <div className="flex min-w-0 flex-1 overflow-hidden bg-surface text-on-surface">
-      <CanvasSidebar activeView="recent-active" showInventory />
+      {showLeftSidebar ? <CanvasSidebar activeView="recent-active" showInventory /> : null}
 
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-surface">
         <header className="z-30 flex h-14 items-center border-b border-outline-variant/10 bg-surface/50 px-8 backdrop-blur-md">

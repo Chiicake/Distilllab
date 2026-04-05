@@ -13,6 +13,8 @@ type ChatActiveScreenProps = {
   onReturnToDraft: () => void;
   onSelectSession: (sessionId: string) => void;
   sessionId?: string;
+  showLeftSidebar: boolean;
+  showRightSidebar: boolean;
 };
 
 export default function ChatActiveScreen({
@@ -21,6 +23,8 @@ export default function ChatActiveScreen({
   onReturnToDraft,
   onSelectSession,
   sessionId,
+  showLeftSidebar,
+  showRightSidebar,
 }: ChatActiveScreenProps) {
   const { openSession, pinSession, sendFollowUpMessage, state } = useChat();
   const currentRun = [...state.messages]
@@ -40,6 +44,7 @@ export default function ChatActiveScreen({
 
   return (
     <div className="flex flex-1 overflow-hidden">
+      {showLeftSidebar ? (
         <ActiveLeftRail
           activeSessionId={state.sessionId}
           onDeleteSession={(nextSessionId, title) => {
@@ -58,6 +63,7 @@ export default function ChatActiveScreen({
           }}
           sessions={state.sessions}
         />
+      ) : null}
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-surface">
         <TimelineHeader activeRunLabel={state.activeRunLabel} currentRun={currentRun} sessionTitle={state.sessionTitle} />
 
@@ -72,14 +78,16 @@ export default function ChatActiveScreen({
         </div>
       </main>
 
-      <ActiveInspector
-        currentRun={currentRun}
-        decisionSummary={state.decisionSummary}
-        liveAssistantText={state.liveAssistantText}
-        lastRunStatus={state.lastRunStatus}
-        lastToolStatus={state.lastToolStatus}
-        streamStatuses={state.streamStatuses}
-      />
+      {showRightSidebar ? (
+        <ActiveInspector
+          currentRun={currentRun}
+          decisionSummary={state.decisionSummary}
+          liveAssistantText={state.liveAssistantText}
+          lastRunStatus={state.lastRunStatus}
+          lastToolStatus={state.lastToolStatus}
+          streamStatuses={state.streamStatuses}
+        />
+      ) : null}
     </div>
   );
 }

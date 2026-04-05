@@ -2,6 +2,8 @@ import CanvasSidebar from './CanvasSidebar';
 
 type CanvasObjectDetailProps = {
   onReturnToGlobalView: () => void;
+  showLeftSidebar: boolean;
+  showRightSidebar: boolean;
 };
 
 const relatedObjects = [
@@ -41,10 +43,10 @@ const recentActivity = [
   },
 ];
 
-export default function CanvasObjectDetail({ onReturnToGlobalView }: CanvasObjectDetailProps) {
+export default function CanvasObjectDetail({ onReturnToGlobalView, showLeftSidebar, showRightSidebar }: CanvasObjectDetailProps) {
   return (
     <div className="flex min-w-0 flex-1 overflow-hidden bg-surface text-on-surface">
-      <CanvasSidebar activeView="recent-active" />
+      {showLeftSidebar ? <CanvasSidebar activeView="recent-active" /> : null}
 
       <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface">
         <div className="absolute right-0 top-0 -z-0 h-[500px] w-[500px] rounded-full bg-primary/5 blur-[120px] pointer-events-none" />
@@ -182,6 +184,7 @@ export default function CanvasObjectDetail({ onReturnToGlobalView }: CanvasObjec
               </div>
             </div>
 
+            {showRightSidebar ? (
             <aside className="z-20 flex h-full w-80 shrink-0 flex-col border-l border-outline-variant/10 bg-[rgba(43,44,44,0.6)] backdrop-blur-[20px]">
               <div className="border-b border-outline-variant/10 p-6">
                 <div className="mb-1 flex items-center justify-between">
@@ -273,6 +276,7 @@ export default function CanvasObjectDetail({ onReturnToGlobalView }: CanvasObjec
                 </section>
               </div>
             </aside>
+            ) : null}
           </div>
         </div>
       </main>

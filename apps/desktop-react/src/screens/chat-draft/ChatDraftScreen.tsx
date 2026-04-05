@@ -8,17 +8,22 @@ type ChatDraftScreenProps = {
   onEnterActiveRun: (sessionId: string) => void;
   onRequestDeleteSession: (sessionId: string, title: string) => void;
   onRequestRenameSession: (sessionId: string, currentTitle: string) => void;
+  showLeftSidebar: boolean;
+  showRightSidebar: boolean;
 };
 
 export default function ChatDraftScreen({
   onEnterActiveRun,
   onRequestDeleteSession,
   onRequestRenameSession,
+  showLeftSidebar,
+  showRightSidebar,
 }: ChatDraftScreenProps) {
   const { state, openSession, pinSession, sendFirstMessage } = useChat();
 
   return (
     <div className="flex flex-1 overflow-hidden">
+      {showLeftSidebar ? (
       <LeftRail
         activeSessionId={state.sessionId}
         onDeleteSession={(sessionId, title) => {
@@ -36,6 +41,7 @@ export default function ChatDraftScreen({
         }}
         sessions={state.sessions}
       />
+      ) : null}
 
       <main className="relative flex min-w-0 flex-1 flex-col bg-surface">
         <DraftMain />
@@ -51,7 +57,7 @@ export default function ChatDraftScreen({
         />
       </main>
 
-      <RightInspector />
+      {showRightSidebar ? <RightInspector /> : null}
     </div>
   );
 }

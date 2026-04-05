@@ -20,9 +20,26 @@ type TopNavProps = {
   onOpenChat: () => void;
   onOpenCanvas: () => void;
   onOpenSettings: () => void;
+  canToggleLeftSidebar: boolean;
+  canToggleRightSidebar: boolean;
+  leftSidebarOpen: boolean;
+  rightSidebarOpen: boolean;
+  onToggleLeftSidebar: () => void;
+  onToggleRightSidebar: () => void;
 };
 
-export default function TopNav({ currentScreen, onOpenChat, onOpenCanvas, onOpenSettings }: TopNavProps) {
+export default function TopNav({
+  currentScreen,
+  onOpenChat,
+  onOpenCanvas,
+  onOpenSettings,
+  canToggleLeftSidebar,
+  canToggleRightSidebar,
+  leftSidebarOpen,
+  rightSidebarOpen,
+  onToggleLeftSidebar,
+  onToggleRightSidebar,
+}: TopNavProps) {
   const { t } = useI18n();
   const isChatActive = currentScreen.kind === 'chat-draft' || currentScreen.kind === 'chat-active';
   const isCanvasActive = currentScreen.kind === 'canvas';
@@ -181,6 +198,42 @@ export default function TopNav({ currentScreen, onOpenChat, onOpenCanvas, onOpen
       />
 
       <div className="tauri-no-drag flex items-center gap-1">
+        <button
+          aria-label={leftSidebarOpen ? 'Hide left sidebar' : 'Show left sidebar'}
+          className={`rounded-md p-1 transition-colors ${
+            canToggleLeftSidebar
+              ? leftSidebarOpen
+                ? 'bg-[#bac3ff]/15 text-[#bac3ff] hover:text-[#dbe1ff]'
+                : 'text-[#8f95bf] hover:text-[#dbe1ff]'
+              : 'cursor-not-allowed text-[#58607f]/60'
+          }`}
+          disabled={!canToggleLeftSidebar}
+          onClick={onToggleLeftSidebar}
+          type="button"
+        >
+          <span className="material-symbols-outlined text-[18px]" data-icon="left_panel_open">
+            {leftSidebarOpen ? 'left_panel_close' : 'left_panel_open'}
+          </span>
+        </button>
+
+        <button
+          aria-label={rightSidebarOpen ? 'Hide right sidebar' : 'Show right sidebar'}
+          className={`rounded-md p-1 transition-colors ${
+            canToggleRightSidebar
+              ? rightSidebarOpen
+                ? 'bg-[#bac3ff]/15 text-[#bac3ff] hover:text-[#dbe1ff]'
+                : 'text-[#8f95bf] hover:text-[#dbe1ff]'
+              : 'cursor-not-allowed text-[#58607f]/60'
+          }`}
+          disabled={!canToggleRightSidebar}
+          onClick={onToggleRightSidebar}
+          type="button"
+        >
+          <span className="material-symbols-outlined text-[18px]" data-icon="right_panel_open">
+            {rightSidebarOpen ? 'right_panel_close' : 'right_panel_open'}
+          </span>
+        </button>
+
         <button
           aria-label={t('nav.settings')}
           className={

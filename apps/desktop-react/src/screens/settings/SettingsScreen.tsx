@@ -13,6 +13,7 @@ const chatFontSizeOptions: Array<{ value: ChatFontSize; label: string; descripti
 type SettingsScreenProps = {
   section?: SettingsSection;
   onChangeSection: (section: SettingsSection) => void;
+  showLeftSidebar: boolean;
 };
 
 function WorkspaceSettingsView() {
@@ -250,12 +251,12 @@ function DebugSettingsView({ onReturnToWorkspace }: { onReturnToWorkspace: () =>
   );
 }
 
-export default function SettingsScreen({ section = 'workspace', onChangeSection }: SettingsScreenProps) {
+export default function SettingsScreen({ section = 'workspace', onChangeSection, showLeftSidebar }: SettingsScreenProps) {
   const activeSection: SettingsSection = section === 'debug' ? 'debug' : 'workspace';
 
   return (
     <div className="flex min-w-0 flex-1 overflow-hidden bg-surface text-on-surface">
-      <SettingsSidebar section={activeSection} onChangeSection={onChangeSection} />
+      {showLeftSidebar ? <SettingsSidebar section={activeSection} onChangeSection={onChangeSection} /> : null}
 
       <main className="flex min-w-0 flex-1 overflow-y-auto px-12 py-12">
         {activeSection === 'workspace' ? (
