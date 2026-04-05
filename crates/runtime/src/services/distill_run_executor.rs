@@ -6,7 +6,10 @@ use crate::contracts::{
 use crate::flows::execute_materialize_sources;
 use crate::runs::import_and_distill_step_definitions;
 use crate::services::{list_sources_for_run, read_source_text};
-use agent::{LlmProviderConfig, SessionActionType, SessionAgentDecision};
+use agent::{
+    run_work_item_extraction_agent, LlmProviderConfig, SessionActionType, SessionAgentDecision,
+    WorkItemExtractionChunkInput, WorkItemExtractionInput,
+};
 use chrono::Utc;
 use memory::chunk_store::insert_chunk;
 use memory::db::open_database;
@@ -72,12 +75,12 @@ fn persist_chunk_drafts(
     Ok(persisted)
 }
 
-pub fn create_and_execute_from_decision(
-    runtime: &AppRuntime,
-    llm_provider_config: Option<&LlmProviderConfig>,
-    decision: &SessionAgentDecision,
+pub fn create_and_execute_from_decision<'a>(
+    runtime: &'a AppRuntime,
+    llm_provider_config: Option<&'a LlmProviderConfig>,
+    decision: &'a SessionAgentDecision,
     run_input: RunInput,
-) -> Result<DistillRunExecutionOutcome, RuntimeError> {
+) -> impl std::future::Future<Output = Result<DistillRunExecutionOutcome, RuntimeError>> + 'a {
     create_and_execute_from_decision_with_progress(
         runtime,
         llm_provider_config,
@@ -87,7 +90,7 @@ pub fn create_and_execute_from_decision(
     )
 }
 
-pub fn create_and_execute_from_decision_with_progress<F>(
+pub async fn create_and_execute_from_decision_with_progress<F>(
     runtime: &AppRuntime,
     _llm_provider_config: Option<&LlmProviderConfig>,
     decision: &SessionAgentDecision,
@@ -205,12 +208,27 @@ where
         ));
 
         if result.can_continue {
-            let llm_provider_config = _llm_provider_config.ok_or_else(|| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "missing provider config for chunk_sources step",
-                )) as RuntimeError
-            })?;
+            let Some(llm_provider_config) = _llm_provider_config else {
+                let next_status = RunState::Completed;
+                update_run_status(&conn, &run.id, &next_status)?;
+                run.status = next_status;
+                on_progress(run_progress_update(
+                    RunProgressPhase::StateChanged,
+                    &run,
+                    Some(100),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some("run completed"),
+                ));
+                return Ok(DistillRunExecutionOutcome {
+                    run,
+                    materialize_result: Some(result),
+                    output: None,
+                });
+            };
 
             let chunk_step = steps
                 .iter()
@@ -236,11 +254,7 @@ where
 
             let sources = list_sources_for_run(runtime, &run.id)?;
             let client = reqwest::Client::new();
-            let runtime_handle = tokio::runtime::Handle::try_current().map_err(|error| {
-                Box::new(std::io::Error::other(format!("missing tokio runtime handle: {}", error)))
-                    as RuntimeError
-            })?;
-            let mut tasks = Vec::new();
+            let mut tasks = tokio::task::JoinSet::new();
 
             for (index, source) in sources.iter().enumerate() {
                 let source_progress_detail = format!(
@@ -270,7 +284,7 @@ where
                 let client_clone = client.clone();
                 let run_id = run.id.clone();
 
-                tasks.push(runtime_handle.spawn(async move {
+                tasks.spawn(async move {
                     let output = run_chunk_agent(
                         &client_clone,
                         &config,
@@ -286,17 +300,15 @@ where
                     .await?;
 
                     Ok::<(String, Vec<ChunkDraft>), agent::AgentError>((source_id, output.chunks))
-                }));
+                });
             }
 
             let mut total_chunks = 0usize;
-            for task in tasks {
-                let chunk_result = runtime_handle
-                    .block_on(task)
-                    .map_err(|error| {
-                        Box::new(std::io::Error::other(format!("chunk task join failed: {}", error)))
-                            as RuntimeError
-                    })?;
+            while let Some(task_result) = tasks.join_next().await {
+                let chunk_result = task_result.map_err(|error| {
+                    Box::new(std::io::Error::other(format!("chunk task join failed: {}", error)))
+                        as RuntimeError
+                })?;
                 let (source_id, drafts) = chunk_result.map_err(RuntimeError::from)?;
                 let persisted = persist_chunk_drafts(&conn, &source_id, drafts)?;
                 total_chunks += persisted.len();
@@ -314,6 +326,100 @@ where
                 Some(steps.len() as u32),
                 Some(chunk_finish_detail.as_str()),
             ));
+
+            let work_item_step = steps
+                .iter()
+                .find(|step| step.step_key == "extract_work_items")
+                .ok_or_else(|| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "missing extract_work_items step definition",
+                    )) as RuntimeError
+                })?;
+
+            on_progress(run_progress_update(
+                RunProgressPhase::StepStarted,
+                &run,
+                Some(60),
+                Some(work_item_step.step_key),
+                Some(work_item_step.summary),
+                Some("running"),
+                Some(3),
+                Some(steps.len() as u32),
+                Some("work item extraction started"),
+            ));
+
+            let chunk_inputs = sources
+                .iter()
+                .flat_map(|source| {
+                    memory::chunk_store::list_chunks_by_source(&conn, &source.id)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|chunk| WorkItemExtractionChunkInput {
+                            chunk_id: chunk.id,
+                            title: chunk.title,
+                            summary: chunk.summary,
+                            content: chunk.content,
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+
+            let work_item_output = run_work_item_extraction_agent(
+                &client,
+                llm_provider_config,
+                &WorkItemExtractionInput {
+                    run_id: run.id.clone(),
+                    distill_goal: run_input.decision_summary.clone(),
+                    chunks: chunk_inputs,
+                },
+            )
+            .await
+            .map_err(RuntimeError::from)?;
+
+            let work_item_finish_detail =
+                format!("extracted {} work item drafts", work_item_output.work_items.len());
+            on_progress(run_progress_update(
+                RunProgressPhase::StepFinished,
+                &run,
+                Some(75),
+                Some(work_item_step.step_key),
+                Some(work_item_step.summary),
+                Some("completed"),
+                Some(3),
+                Some(steps.len() as u32),
+                Some(work_item_finish_detail.as_str()),
+            ));
+
+            let next_status = RunState::Completed;
+            update_run_status(&conn, &run.id, &next_status)?;
+            run.status = next_status;
+            on_progress(run_progress_update(
+                RunProgressPhase::StateChanged,
+                &run,
+                Some(100),
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("run completed"),
+            ));
+
+            return Ok(DistillRunExecutionOutcome {
+                run,
+                materialize_result: Some(result),
+                output: Some(RunExecutionOutput {
+                    primary_asset_id: None,
+                    asset_ids: vec![],
+                    work_item_ids: vec![],
+                    execution_summary: format!(
+                        "materialized sources, created {} chunks, extracted {} work item drafts",
+                        total_chunks,
+                        work_item_output.work_items.len()
+                    ),
+                }),
+            });
         }
 
         let next_status = if result.can_continue {

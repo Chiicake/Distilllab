@@ -1,9 +1,11 @@
 pub mod definition;
 pub mod error;
 pub mod llm;
+pub mod project_resolution_agent;
 pub mod session_agent;
 pub mod skills;
 pub mod tools;
+pub mod work_item_extraction_agent;
 
 pub use definition::AgentDefinition;
 pub use error::AgentError;
@@ -22,4 +24,15 @@ pub use skills::{
 pub use tools::{
     builtin_tool_registry, ToolDefinition, ToolExecutionResult, ToolInvocation, ToolRegistry,
     ToolRegistryError,
+};
+pub use project_resolution_agent::{
+    build_project_resolution_messages, run_project_resolution_agent,
+    validate_project_resolution_decision, ProjectResolutionChunkInput,
+    ProjectResolutionDecision, ProjectResolutionInput, ProjectResolutionWorkItemInput,
+    ProjectSummaryInput,
+};
+pub use work_item_extraction_agent::{
+    build_work_item_extraction_messages, run_work_item_extraction_agent,
+    validate_work_item_extraction_output, WorkItemDraft, WorkItemExtractionChunkInput,
+    WorkItemExtractionInput, WorkItemExtractionOutput,
 };

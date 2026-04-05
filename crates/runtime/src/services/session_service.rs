@@ -309,6 +309,16 @@ fn record_run_progress_message(
     .map_err(|error| Box::new(error) as RuntimeError)
 }
 
+fn record_run_progress_message_for_runtime(
+    runtime: &AppRuntime,
+    session_id: &str,
+    update: &RunProgressUpdate,
+) -> Result<(), RuntimeError> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+    record_run_progress_message(&conn, session_id, update)
+}
+
 pub(crate) fn format_session_messages_for_debug(messages: &[SessionMessage]) -> String {
     if messages.is_empty() {
         return "no session messages found".to_string();
@@ -445,7 +455,8 @@ async fn send_session_message_with_optional_provider_config(
             provider_config.as_ref(),
             &decision,
             run_input,
-        )?)
+        )
+        .await?)
     } else {
         None
     };
@@ -520,7 +531,8 @@ async fn send_session_message_with_optional_provider_config_and_result(
             provider_config.as_ref(),
             &decision,
             run_input,
-        )?)
+        )
+        .await?)
     } else {
         None
     };
@@ -644,10 +656,11 @@ where
             &decision,
             run_input,
             |update| {
-                let _ = record_run_progress_message(&conn, &session_id_for_progress, &update);
+                let _ = record_run_progress_message_for_runtime(runtime, &session_id_for_progress, &update);
                 on_run_progress(update);
             },
-        )?)
+        )
+        .await?)
     } else {
         None
     };
@@ -1687,6 +1700,28 @@ mod tests {
             .expect("listener should have local addr");
 
         tokio::spawn(async move {
+            for response_body in [
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"chunks\":[{\"title\":\"Progress update\",\"summary\":\"A concrete work update was captured.\",\"content\":\"Please distill these work notes into Distilllab\"}]}"
+                            }
+                        }
+                    ]
+                }"#,
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"work_items\":[{\"title\":\"Finalize prototype scope\",\"summary\":\"Scope must be finalized before distillation output is shared.\",\"work_item_type\":\"note\"}]}"
+                            }
+                        }
+                    ]
+                }"#,
+            ] {
             let (mut stream, _) = listener
                 .accept()
                 .await
@@ -1696,16 +1731,6 @@ mod tests {
                 .await
                 .expect("server should read request");
 
-            let response_body = r#"{
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "{\"chunks\":[{\"title\":\"Progress update\",\"summary\":\"A concrete work update was captured.\",\"content\":\"Please distill these work notes into Distilllab\"}]}"
-                        }
-                    }
-                ]
-            }"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 response_body.len(),
@@ -1714,6 +1739,7 @@ mod tests {
             tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes())
                 .await
                 .expect("server should write response");
+            }
         });
 
         let decision = agent::SessionAgentDecision {
@@ -1758,6 +1784,7 @@ mod tests {
             &decision,
             run_input,
         )
+        .await
         .expect("executor should create and execute run");
 
         assert_eq!(outcome.run.run_type.as_str(), "import_and_distill");
@@ -1773,6 +1800,11 @@ mod tests {
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].title, "Progress update");
         assert_eq!(chunks[0].summary, "A concrete work update was captured.");
+        assert!(outcome.output.is_some());
+        assert_eq!(
+            outcome.output.as_ref().map(|value| value.execution_summary.as_str()),
+            Some("materialized sources, created 1 chunks, extracted 1 work item drafts")
+        );
     }
 
     #[tokio::test]
