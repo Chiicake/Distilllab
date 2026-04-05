@@ -3,10 +3,12 @@ use schema::{Session, SessionStatus};
 
 pub fn insert_session(conn: &Connection, session: &Session) -> Result<()> {
     conn.execute(
-        "INSERT INTO sessions (id, title, status, current_intent, current_object_type, current_object_id, summary, started_at, updated_at, last_user_message_at, last_run_at, last_compacted_at, metadata_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        "INSERT INTO sessions (id, title, manual_title, pinned, status, current_intent, current_object_type, current_object_id, summary, started_at, updated_at, last_user_message_at, last_run_at, last_compacted_at, metadata_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             session.id,
             session.title,
+            session.manual_title,
+            if session.pinned { 1 } else { 0 },
             session.status.as_str(),
             session.current_intent,
             session.current_object_type,
@@ -26,14 +28,14 @@ pub fn insert_session(conn: &Connection, session: &Session) -> Result<()> {
 
 pub fn list_sessions(conn: &Connection) -> Result<Vec<Session>> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, status, current_intent, current_object_type, current_object_id, summary, started_at, updated_at, last_user_message_at, last_run_at, last_compacted_at, metadata_json FROM sessions ORDER BY updated_at DESC",
+        "SELECT id, title, manual_title, pinned, status, current_intent, current_object_type, current_object_id, summary, started_at, updated_at, last_user_message_at, last_run_at, last_compacted_at, metadata_json FROM sessions ORDER BY pinned DESC, updated_at DESC",
     )?;
 
     let session_iter = stmt.query_map([], |row| {
-        let status_str: String = row.get(2)?;
+        let status_str: String = row.get(4)?;
         let status = SessionStatus::from_str(&status_str).ok_or_else(|| {
             Error::FromSqlConversionFailure(
-                2,
+                4,
                 Type::Text,
                 Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -45,17 +47,19 @@ pub fn list_sessions(conn: &Connection) -> Result<Vec<Session>> {
         Ok(Session {
             id: row.get(0)?,
             title: row.get(1)?,
+            manual_title: row.get(2)?,
+            pinned: row.get::<_, i64>(3)? != 0,
             status,
-            current_intent: row.get(3)?,
-            current_object_type: row.get(4)?,
-            current_object_id: row.get(5)?,
-            summary: row.get(6)?,
-            started_at: row.get(7)?,
-            updated_at: row.get(8)?,
-            last_user_message_at: row.get(9)?,
-            last_run_at: row.get(10)?,
-            last_compacted_at: row.get(11)?,
-            metadata_json: row.get(12)?,
+            current_intent: row.get(5)?,
+            current_object_type: row.get(6)?,
+            current_object_id: row.get(7)?,
+            summary: row.get(8)?,
+            started_at: row.get(9)?,
+            updated_at: row.get(10)?,
+            last_user_message_at: row.get(11)?,
+            last_run_at: row.get(12)?,
+            last_compacted_at: row.get(13)?,
+            metadata_json: row.get(14)?,
         })
     })?;
 
@@ -69,15 +73,15 @@ pub fn list_sessions(conn: &Connection) -> Result<Vec<Session>> {
 
 pub fn get_session_by_id(conn: &Connection, session_id: &str) -> Result<Option<Session>> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, status, current_intent, current_object_type, current_object_id, summary, started_at, updated_at, last_user_message_at, last_run_at, last_compacted_at, metadata_json FROM sessions WHERE id = ?1",
+        "SELECT id, title, manual_title, pinned, status, current_intent, current_object_type, current_object_id, summary, started_at, updated_at, last_user_message_at, last_run_at, last_compacted_at, metadata_json FROM sessions WHERE id = ?1",
     )?;
 
     let mut rows = stmt.query([session_id])?;
     if let Some(row) = rows.next()? {
-        let status_str: String = row.get(2)?;
+        let status_str: String = row.get(4)?;
         let status = SessionStatus::from_str(&status_str).ok_or_else(|| {
             Error::FromSqlConversionFailure(
-                2,
+                4,
                 Type::Text,
                 Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -89,17 +93,19 @@ pub fn get_session_by_id(conn: &Connection, session_id: &str) -> Result<Option<S
         return Ok(Some(Session {
             id: row.get(0)?,
             title: row.get(1)?,
+            manual_title: row.get(2)?,
+            pinned: row.get::<_, i64>(3)? != 0,
             status,
-            current_intent: row.get(3)?,
-            current_object_type: row.get(4)?,
-            current_object_id: row.get(5)?,
-            summary: row.get(6)?,
-            started_at: row.get(7)?,
-            updated_at: row.get(8)?,
-            last_user_message_at: row.get(9)?,
-            last_run_at: row.get(10)?,
-            last_compacted_at: row.get(11)?,
-            metadata_json: row.get(12)?,
+            current_intent: row.get(5)?,
+            current_object_type: row.get(6)?,
+            current_object_id: row.get(7)?,
+            summary: row.get(8)?,
+            started_at: row.get(9)?,
+            updated_at: row.get(10)?,
+            last_user_message_at: row.get(11)?,
+            last_run_at: row.get(12)?,
+            last_compacted_at: row.get(13)?,
+            metadata_json: row.get(14)?,
         }));
     }
 
@@ -108,10 +114,12 @@ pub fn get_session_by_id(conn: &Connection, session_id: &str) -> Result<Option<S
 
 pub fn update_session(conn: &Connection, session: &Session) -> Result<()> {
     conn.execute(
-        "UPDATE sessions SET title = ?2, status = ?3, current_intent = ?4, current_object_type = ?5, current_object_id = ?6, summary = ?7, started_at = ?8, updated_at = ?9, last_user_message_at = ?10, last_run_at = ?11, last_compacted_at = ?12, metadata_json = ?13 WHERE id = ?1",
+        "UPDATE sessions SET title = ?2, manual_title = ?3, pinned = ?4, status = ?5, current_intent = ?6, current_object_type = ?7, current_object_id = ?8, summary = ?9, started_at = ?10, updated_at = ?11, last_user_message_at = ?12, last_run_at = ?13, last_compacted_at = ?14, metadata_json = ?15 WHERE id = ?1",
         params![
             session.id,
             session.title,
+            session.manual_title,
+            if session.pinned { 1 } else { 0 },
             session.status.as_str(),
             session.current_intent,
             session.current_object_type,
@@ -149,6 +157,8 @@ mod tests {
         let session = Session {
             id: "session-1".to_string(),
             title: "Demo Session".to_string(),
+            manual_title: None,
+            pinned: false,
             status: SessionStatus::Active,
             current_intent: "inspect".to_string(),
             current_object_type: "source".to_string(),
@@ -179,6 +189,8 @@ mod tests {
         let session = Session {
             id: "session-lookup".to_string(),
             title: "Lookup Session".to_string(),
+            manual_title: None,
+            pinned: false,
             status: SessionStatus::Active,
             current_intent: "idle".to_string(),
             current_object_type: "none".to_string(),
@@ -210,6 +222,8 @@ mod tests {
         let mut session = Session {
             id: "session-update".to_string(),
             title: "Update Session".to_string(),
+            manual_title: None,
+            pinned: false,
             status: SessionStatus::Active,
             current_intent: "idle".to_string(),
             current_object_type: "none".to_string(),
@@ -248,6 +262,8 @@ mod tests {
         let session = Session {
             id: "session-delete".to_string(),
             title: "Delete Session".to_string(),
+            manual_title: None,
+            pinned: false,
             status: SessionStatus::Active,
             current_intent: "idle".to_string(),
             current_object_type: "none".to_string(),

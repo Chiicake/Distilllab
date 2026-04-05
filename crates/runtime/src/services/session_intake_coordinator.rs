@@ -1,7 +1,7 @@
 use crate::app::AppRuntime;
 use crate::contracts::RunInput;
 use crate::services::session_service::{
-    derive_initial_session_title, derive_refreshed_session_title,
+    derive_initial_session_title, derive_refreshed_session_title, effective_session_title,
     should_assign_initial_session_title, should_attempt_session_title_refresh,
     should_replace_session_title,
 };
@@ -257,6 +257,7 @@ pub async fn decide_and_record_intake(
         .session_summary
         .clone()
         .unwrap_or_else(|| session.summary.clone());
+    let current_effective_title = effective_session_title(&session);
     let candidate_title = if should_assign_initial_session_title(&session.title, user_message_count) {
         derive_initial_session_title(&intake.user_message)
     } else {
@@ -267,9 +268,10 @@ pub async fn decide_and_record_intake(
             .collect::<Vec<_>>();
         derive_refreshed_session_title(&recent_user_messages)
     };
-    if should_assign_initial_session_title(&session.title, user_message_count)
-        || (should_attempt_session_title_refresh(user_message_count)
-            && should_replace_session_title(&session.title, &candidate_title))
+    if session.manual_title.is_none()
+        && (should_assign_initial_session_title(&session.title, user_message_count)
+            || (should_attempt_session_title_refresh(user_message_count)
+                && should_replace_session_title(&current_effective_title, &candidate_title)))
     {
         session.title = candidate_title;
     }
@@ -455,6 +457,7 @@ where
         .session_summary
         .clone()
         .unwrap_or_else(|| session.summary.clone());
+    let current_effective_title = effective_session_title(&session);
     let candidate_title = if should_assign_initial_session_title(&session.title, user_message_count) {
         derive_initial_session_title(&intake.user_message)
     } else {
@@ -465,9 +468,10 @@ where
             .collect::<Vec<_>>();
         derive_refreshed_session_title(&recent_user_messages)
     };
-    if should_assign_initial_session_title(&session.title, user_message_count)
-        || (should_attempt_session_title_refresh(user_message_count)
-            && should_replace_session_title(&session.title, &candidate_title))
+    if session.manual_title.is_none()
+        && (should_assign_initial_session_title(&session.title, user_message_count)
+            || (should_attempt_session_title_refresh(user_message_count)
+                && should_replace_session_title(&current_effective_title, &candidate_title)))
     {
         session.title = candidate_title;
     }

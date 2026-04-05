@@ -40,6 +40,8 @@ export type ChatSessionSummary = {
   sessionId: string;
   title: string;
   statusLabel: string;
+  manualTitle?: string | null;
+  pinned?: boolean;
 };
 
 export type ChatStreamPhase =

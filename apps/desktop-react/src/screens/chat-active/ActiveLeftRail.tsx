@@ -1,8 +1,12 @@
 import type { ChatSessionSummary } from '../../chat/types';
+import SessionRailItem from '../chat/SessionRailItem';
 
 type ActiveLeftRailProps = {
   onReturnToDraft: () => void;
   onOpenSession: (sessionId: string) => Promise<void>;
+  onRenameSession: (sessionId: string, currentManualTitle: string | null, currentTitle: string) => void;
+  onDeleteSession: (sessionId: string, title: string) => void;
+  onTogglePinSession: (sessionId: string, pinned: boolean) => void;
   activeSessionId?: string | null;
   sessions: ChatSessionSummary[];
 };
@@ -10,6 +14,9 @@ type ActiveLeftRailProps = {
 export default function ActiveLeftRail({
   onReturnToDraft,
   onOpenSession,
+  onRenameSession,
+  onDeleteSession,
+  onTogglePinSession,
   activeSessionId,
   sessions,
 }: ActiveLeftRailProps) {
@@ -34,35 +41,19 @@ export default function ActiveLeftRail({
         </div>
 
         {sessions.slice(0, 6).map((session) => {
-          const isActive = session.sessionId === activeSessionId;
-
           return (
-          <button
+          <SessionRailItem
             key={session.sessionId}
-            className={`w-full rounded-md px-3 py-3 text-left transition-all duration-300 hover:bg-[#1f2020] hover:opacity-100 ${
-              isActive
-                ? 'border border-primary/10 bg-[#1f2020] text-[#f3faff]'
-                : 'text-[#acabaa] opacity-60'
-            }`}
-            onClick={() => {
-              void onOpenSession(session.sessionId);
+            active={session.sessionId === activeSessionId}
+            compact
+            onDelete={onDeleteSession}
+            onOpen={(sessionId) => {
+              void onOpenSession(sessionId);
             }}
-            type="button"
-          >
-            <div className="mb-1.5 flex items-center gap-3">
-              <span className={`material-symbols-outlined ${isActive ? 'text-primary' : ''}`} data-icon="chat_bubble">
-                chat_bubble
-              </span>
-              <span className="truncate font-semibold">{session.title}</span>
-            </div>
-            <p className="text-[11px] leading-relaxed text-on-surface-variant">{session.statusLabel}</p>
-            {isActive ? (
-              <div className="mt-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                <span>Live Session</span>
-              </div>
-            ) : null}
-          </button>
+            onRename={onRenameSession}
+            onTogglePin={onTogglePinSession}
+            session={session}
+          />
         )})}
       </div>
 

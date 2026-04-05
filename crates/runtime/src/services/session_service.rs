@@ -23,6 +23,7 @@ use memory::session_message_store::{
 };
 use memory::session_store::{
     delete_session, get_session_by_id, insert_session, list_sessions as memory_list_sessions,
+    update_session,
 };
 use schema::{Session, SessionIntake, SessionMessage, SessionMessageRole, SessionStatus};
 use uuid::Uuid;
@@ -100,12 +101,78 @@ fn is_placeholder_title_candidate(message: &str) -> bool {
         || normalized == "test"
 }
 
+pub(crate) fn effective_session_title(session: &Session) -> String {
+    session
+        .manual_title
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| session.title.clone())
+}
+
+pub fn rename_session(
+    runtime: &AppRuntime,
+    session_id: &str,
+    manual_title: Option<String>,
+) -> Result<Session, RuntimeError> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    let mut session = get_session_by_id(&conn, session_id)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("session not found: {session_id}"),
+        )
+    })?;
+
+    session.manual_title = manual_title
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    session.updated_at = Utc::now().to_string();
+    update_session(&conn, &session)?;
+
+    Ok(session)
+}
+
+pub fn pin_session(
+    runtime: &AppRuntime,
+    session_id: &str,
+    pinned: bool,
+) -> Result<Session, RuntimeError> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    let mut session = get_session_by_id(&conn, session_id)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("session not found: {session_id}"),
+        )
+    })?;
+
+    session.pinned = pinned;
+    session.updated_at = Utc::now().to_string();
+    update_session(&conn, &session)?;
+
+    Ok(session)
+}
+
+pub fn delete_session_and_related(runtime: &AppRuntime, session_id: &str) -> Result<(), RuntimeError> {
+    let conn = open_database(&runtime.database_path)?;
+    run_migrations(&conn)?;
+
+    delete_session_messages_for_session(&conn, session_id)?;
+    delete_session(&conn, session_id)?;
+
+    Ok(())
+}
+
 fn build_demo_agent_session(session_id: &str, title: &str, summary: &str) -> Session {
     let now = Utc::now().to_string();
 
     Session {
         id: session_id.to_string(),
         title: title.to_string(),
+        manual_title: None,
+        pinned: false,
         status: SessionStatus::Active,
         current_intent: "idle".to_string(),
         current_object_type: "none".to_string(),
@@ -860,6 +927,8 @@ pub fn create_demo_session(runtime: &AppRuntime) -> Result<Session, RuntimeError
     let session = Session {
         id: format!("session-{}", Uuid::new_v4()),
         title: "Demo Session".to_string(),
+        manual_title: None,
+        pinned: false,
         status: SessionStatus::Active,
         current_intent: "idle".to_string(),
         current_object_type: "none".to_string(),
@@ -885,6 +954,8 @@ pub fn create_session(runtime: &AppRuntime) -> Result<Session, RuntimeError> {
     let session = Session {
         id: format!("session-{}", Uuid::new_v4()),
         title: "Untitled Session".to_string(),
+        manual_title: None,
+        pinned: false,
         status: SessionStatus::Active,
         current_intent: "idle".to_string(),
         current_object_type: "none".to_string(),

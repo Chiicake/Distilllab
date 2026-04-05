@@ -30,6 +30,8 @@ impl SessionStatus {
 pub struct Session {
     pub id: String,
     pub title: String,
+    pub manual_title: Option<String>,
+    pub pinned: bool,
     pub status: SessionStatus,
     pub current_intent: String,
     pub current_object_type: String,

@@ -46,8 +46,24 @@ struct SessionMessageForm {
 struct SessionSelectorOption {
     session_id: String,
     title: String,
+    manual_title: Option<String>,
+    pinned: bool,
     status: String,
     label: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RenameSessionForm {
+    session_id: String,
+    manual_title: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PinSessionForm {
+    session_id: String,
+    pinned: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -809,13 +825,73 @@ fn list_session_selector_options() -> Result<String, String> {
         .iter()
         .map(|session| SessionSelectorOption {
             session_id: session.id.clone(),
-            title: session.title.clone(),
+            title: session
+                .manual_title
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| session.title.clone()),
+            manual_title: session.manual_title.clone(),
+            pinned: session.pinned,
             status: session.status.as_str().to_string(),
             label: format_session_selector_label(session),
         })
         .collect::<Vec<_>>();
 
     serde_json::to_string(&options).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn rename_session_command(payload: RenameSessionForm) -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let session = runtime::rename_session(&runtime, &payload.session_id, payload.manual_title)
+        .map_err(|e| e.to_string())?;
+    let manual_title = session.manual_title.clone();
+
+    serde_json::to_string(&SessionSelectorOption {
+        session_id: session.id.clone(),
+        title: session
+            .manual_title
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| session.title.clone()),
+        manual_title,
+        pinned: session.pinned,
+        status: session.status.as_str().to_string(),
+        label: format_session_selector_label(&session),
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn pin_session_command(payload: PinSessionForm) -> Result<String, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let session = runtime::pin_session(&runtime, &payload.session_id, payload.pinned)
+        .map_err(|e| e.to_string())?;
+    let manual_title = session.manual_title.clone();
+
+    serde_json::to_string(&SessionSelectorOption {
+        session_id: session.id.clone(),
+        title: session
+            .manual_title
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| session.title.clone()),
+        manual_title,
+        pinned: session.pinned,
+        status: session.status.as_str().to_string(),
+        label: format_session_selector_label(&session),
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_session_command(session_id: String) -> Result<(), String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    runtime::delete_session_and_related(&runtime, &session_id).map_err(|e| e.to_string())?;
+
+    let storage_root = std::path::PathBuf::from("distilllab-storage");
+    remove_session_attachment_storage(&storage_root, &session_id).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1623,6 +1699,9 @@ pub fn run() {
             list_runs,
             list_sessions,
             list_session_selector_options,
+            rename_session_command,
+            pin_session_command,
+            delete_session_command,
             list_sources,
             chunk_demo_source,
             list_chunks_for_source,
@@ -1790,6 +1869,8 @@ mod tests {
         let label = format_session_selector_label(&schema::Session {
             id: "session-123".to_string(),
             title: "Attachment Tooling Debug".to_string(),
+            manual_title: None,
+            pinned: false,
             status: schema::SessionStatus::Active,
             current_intent: "idle".to_string(),
             current_object_type: "none".to_string(),

@@ -18,7 +18,7 @@ export default function ChatActiveScreen({
   onSelectSession,
   sessionId,
 }: ChatActiveScreenProps) {
-  const { openSession, sendFollowUpMessage, state } = useChat();
+  const { deleteSession, openSession, pinSession, renameSession, sendFollowUpMessage, state } = useChat();
 
   useEffect(() => {
     if (sessionId && sessionId !== state.sessionId) {
@@ -30,11 +30,35 @@ export default function ChatActiveScreen({
     <div className="flex flex-1 overflow-hidden">
         <ActiveLeftRail
           activeSessionId={state.sessionId}
+          onDeleteSession={(nextSessionId, title) => {
+            const confirmed = window.confirm(`Delete session "${title}"?`);
+            if (!confirmed) {
+              return;
+            }
+
+            void (async () => {
+              await deleteSession(nextSessionId);
+              if (state.sessionId === nextSessionId) {
+                onReturnToDraft();
+              }
+            })();
+          }}
           onOpenSession={async (nextSessionId) => {
             onSelectSession(nextSessionId);
             await openSession(nextSessionId);
           }}
+          onRenameSession={(nextSessionId, currentManualTitle, currentTitle) => {
+            const nextTitle = window.prompt('Rename session', currentManualTitle ?? currentTitle);
+            if (nextTitle === null) {
+              return;
+            }
+
+            void renameSession(nextSessionId, nextTitle.trim() ? nextTitle : null);
+          }}
           onReturnToDraft={onReturnToDraft}
+          onTogglePinSession={(nextSessionId, pinned) => {
+            void pinSession(nextSessionId, pinned);
+          }}
           sessions={state.sessions}
         />
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-surface">

@@ -1074,7 +1074,8 @@ mod tests {
                 session: Session {
                     id: "session-1".to_string(),
                     title: "Distill Session".to_string(),
-                    status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                    status: SessionStatus::Active,
                     current_intent: "idle".to_string(),
                     current_object_type: "none".to_string(),
                     current_object_id: "none".to_string(),
@@ -1115,7 +1116,8 @@ mod tests {
                 session: Session {
                     id: "session-1".to_string(),
                     title: "Attachment Session".to_string(),
-                    status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                    status: SessionStatus::Active,
                     current_intent: "idle".to_string(),
                     current_object_type: "none".to_string(),
                     current_object_id: "none".to_string(),
@@ -1163,7 +1165,8 @@ mod tests {
                 session: Session {
                     id: "session-1".to_string(),
                     title: "Attachment Session".to_string(),
-                    status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                    status: SessionStatus::Active,
                     current_intent: "idle".to_string(),
                     current_object_type: "none".to_string(),
                     current_object_id: "none".to_string(),
@@ -1209,7 +1212,8 @@ mod tests {
                 session: Session {
                     id: "session-1".to_string(),
                     title: "Local File Session".to_string(),
-                    status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                    status: SessionStatus::Active,
                     current_intent: "idle".to_string(),
                     current_object_type: "none".to_string(),
                     current_object_id: "none".to_string(),
@@ -1255,7 +1259,8 @@ mod tests {
                 session: Session {
                     id: "session-1".to_string(),
                     title: "Web Session".to_string(),
-                    status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                    status: SessionStatus::Active,
                     current_intent: "idle".to_string(),
                     current_object_type: "none".to_string(),
                     current_object_id: "none".to_string(),
@@ -1301,7 +1306,8 @@ mod tests {
                 session: Session {
                     id: "session-1".to_string(),
                     title: "Distill URL Session".to_string(),
-                    status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                    status: SessionStatus::Active,
                     current_intent: "idle".to_string(),
                     current_object_type: "none".to_string(),
                     current_object_id: "none".to_string(),
@@ -1335,7 +1341,8 @@ mod tests {
         let session = Session {
             id: "session-1".to_string(),
             title: "Test Session".to_string(),
-            status: SessionStatus::Active,
+manual_title: None,
+pinned: false,            status: SessionStatus::Active,
             current_intent: "idle".to_string(),
             current_object_type: "none".to_string(),
             current_object_id: "none".to_string(),
@@ -1384,7 +1391,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Test Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -1430,7 +1438,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Import Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -1474,7 +1483,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Notes Intake Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -1515,7 +1525,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "File Intake Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -1564,7 +1575,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Attachment Intake Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -1612,7 +1624,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Deepening Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "asset".to_string(),
                 current_object_id: "asset-1".to_string(),
@@ -1654,7 +1667,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Compose Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "project".to_string(),
                 current_object_id: "project-1".to_string(),
@@ -1706,7 +1720,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "LLM Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -1755,7 +1770,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "LLM Context Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -1833,7 +1849,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Few Shot Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -1902,7 +1919,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Source Review Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "review_source".to_string(),
                 current_object_type: "source".to_string(),
                 current_object_id: "source-1".to_string(),
@@ -1944,7 +1962,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Attachment Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -2004,7 +2023,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Attachment Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -2056,7 +2076,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Duplicate Turn Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -2150,7 +2171,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "LLM Reply Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -2233,7 +2255,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Safe fallback session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -2378,7 +2401,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Structured LLM Reply Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -2457,7 +2481,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Debug Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -2543,7 +2568,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Normalization Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -2674,7 +2700,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Streaming Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -2757,7 +2784,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Streaming Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),
@@ -2903,7 +2931,8 @@ mod tests {
             session: Session {
                 id: "session-1".to_string(),
                 title: "Streaming Session".to_string(),
-                status: SessionStatus::Active,
+manual_title: None,
+pinned: false,                status: SessionStatus::Active,
                 current_intent: "idle".to_string(),
                 current_object_type: "none".to_string(),
                 current_object_id: "none".to_string(),

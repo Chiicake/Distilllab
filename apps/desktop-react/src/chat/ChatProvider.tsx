@@ -17,6 +17,8 @@ import type { ChatMessage, ChatSessionSummary, ChatState, ChatStreamEvent } from
 type SessionSelectorOption = {
   sessionId: string;
   title: string;
+  manualTitle?: string | null;
+  pinned?: boolean;
   status: string;
   label: string;
 };
@@ -25,6 +27,9 @@ type ChatContextValue = {
   state: ChatState;
   refreshSessions: () => Promise<void>;
   openSession: (sessionId: string) => Promise<void>;
+  renameSession: (sessionId: string, manualTitle: string | null) => Promise<void>;
+  pinSession: (sessionId: string, pinned: boolean) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
   sendFirstMessage: (message: string) => Promise<string | null>;
   sendFollowUpMessage: (message: string) => Promise<void>;
   resetDraft: () => void;
@@ -158,6 +163,8 @@ function sessionSummaryFromOption(option: SessionSelectorOption): ChatSessionSum
     sessionId: option.sessionId,
     title: option.title,
     statusLabel: option.status,
+    manualTitle: option.manualTitle ?? null,
+    pinned: option.pinned ?? false,
   };
 }
 
@@ -208,6 +215,76 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
       liveAssistantText: '',
     }));
   }, []);
+
+  const renameSession = useCallback(async (sessionId: string, manualTitle: string | null) => {
+    const invoke = getTauriInvoke();
+    if (!invoke) {
+      return;
+    }
+
+    await invoke<string>('rename_session_command', {
+      payload: {
+        sessionId,
+        manualTitle,
+      },
+    });
+
+    await refreshSessions();
+
+    if (state.sessionId === sessionId) {
+      setState((previous) => ({
+        ...previous,
+        sessionTitle:
+          (manualTitle ?? '').trim().length > 0
+            ? (manualTitle ?? '').trim()
+            : previous.sessions.find((session) => session.sessionId === sessionId)?.title ?? previous.sessionTitle,
+      }));
+    }
+  }, [refreshSessions, state.sessionId]);
+
+  const pinSession = useCallback(async (sessionId: string, pinned: boolean) => {
+    const invoke = getTauriInvoke();
+    if (!invoke) {
+      return;
+    }
+
+    await invoke<string>('pin_session_command', {
+      payload: {
+        sessionId,
+        pinned,
+      },
+    });
+
+    await refreshSessions();
+  }, [refreshSessions]);
+
+  const deleteSession = useCallback(async (sessionId: string) => {
+    const invoke = getTauriInvoke();
+    if (!invoke) {
+      return;
+    }
+
+    await invoke('delete_session_command', { sessionId });
+
+    setState((previous) => {
+      const deletingActive = previous.sessionId === sessionId;
+      return {
+        ...previous,
+        sessionId: deletingActive ? null : previous.sessionId,
+        sessionTitle: deletingActive ? 'New Session' : previous.sessionTitle,
+        messages: deletingActive ? [] : previous.messages,
+        errorText: deletingActive ? null : previous.errorText,
+        activeRunLabel: deletingActive ? null : previous.activeRunLabel,
+        streamStatuses: deletingActive ? [] : previous.streamStatuses,
+        decisionSummary: deletingActive ? null : previous.decisionSummary,
+        lastToolStatus: deletingActive ? null : previous.lastToolStatus,
+        lastRunStatus: deletingActive ? null : previous.lastRunStatus,
+        liveAssistantText: deletingActive ? '' : previous.liveAssistantText,
+      };
+    });
+
+    await refreshSessions();
+  }, [refreshSessions]);
 
   const applyStreamEvent = useCallback((event: ChatStreamEvent) => {
     if (activeRequestRef.current !== event.requestId) {
@@ -653,11 +730,14 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
       state: deferredState,
       refreshSessions,
       openSession,
+      renameSession,
+      pinSession,
+      deleteSession,
       sendFirstMessage,
       sendFollowUpMessage,
       resetDraft,
     }),
-    [deferredState, openSession, refreshSessions, resetDraft, sendFirstMessage, sendFollowUpMessage],
+    [deferredState, deleteSession, openSession, pinSession, refreshSessions, renameSession, resetDraft, sendFirstMessage, sendFollowUpMessage],
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

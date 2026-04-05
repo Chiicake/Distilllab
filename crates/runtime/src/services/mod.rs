@@ -19,8 +19,9 @@ pub use session_intake_coordinator::{
 };
 pub use session_service::{
     create_demo_session, create_session, create_session_and_send_first_message_with_config,
-    delete_failed_first_send_session,
+    delete_failed_first_send_session, delete_session_and_related,
     decide_llm_session_message_with_config, list_session_messages, list_sessions,
+    pin_session, rename_session,
     preview_session_intake, preview_session_intake_with_config, send_session_message,
     send_session_message_with_config, send_session_message_with_config_and_result,
     send_session_message_with_config_and_result_streaming,

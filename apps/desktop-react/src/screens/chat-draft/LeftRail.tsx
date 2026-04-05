@@ -1,12 +1,23 @@
 import type { ChatSessionSummary } from '../../chat/types';
+import SessionRailItem from '../chat/SessionRailItem';
 
 type LeftRailProps = {
   activeSessionId?: string | null;
   sessions: ChatSessionSummary[];
   onOpenSession: (sessionId: string) => Promise<void>;
+  onRenameSession: (sessionId: string, currentManualTitle: string | null, currentTitle: string) => void;
+  onDeleteSession: (sessionId: string, title: string) => void;
+  onTogglePinSession: (sessionId: string, pinned: boolean) => void;
 };
 
-export default function LeftRail({ activeSessionId, sessions, onOpenSession }: LeftRailProps) {
+export default function LeftRail({
+  activeSessionId,
+  sessions,
+  onOpenSession,
+  onRenameSession,
+  onDeleteSession,
+  onTogglePinSession,
+}: LeftRailProps) {
   return (
     <aside className="bg-[#191a1a] text-[#bac3ff] font-['Inter'] text-sm docked h-full left-0 w-64 no-border bg-[#191a1a] flat no shadows flex flex-col h-full py-6 px-4 gap-4 border-r border-outline-variant/10">
       <div className="mb-4">
@@ -33,26 +44,17 @@ export default function LeftRail({ activeSessionId, sessions, onOpenSession }: L
         ) : null}
 
         {sessions.map((session) => (
-          <button
+          <SessionRailItem
             key={session.sessionId}
-            className={`rounded-md flex items-center gap-3 px-3 py-2.5 transition-all duration-300 w-full text-left hover:bg-[#1f2020] hover:opacity-100 ${
-              session.sessionId === activeSessionId
-                ? 'border border-primary/10 bg-[#1f2020] text-[#f3faff] opacity-100'
-                : 'text-[#acabaa] opacity-60'
-            }`}
-            onClick={() => {
-              void onOpenSession(session.sessionId);
+            active={session.sessionId === activeSessionId}
+            onDelete={onDeleteSession}
+            onOpen={(sessionId) => {
+              void onOpenSession(sessionId);
             }}
-            type="button"
-          >
-            <span
-              className={`material-symbols-outlined ${session.sessionId === activeSessionId ? 'text-primary' : ''}`}
-              data-icon="chat_bubble"
-            >
-              chat_bubble
-            </span>
-            <span className="truncate">{session.title}</span>
-          </button>
+            onRename={onRenameSession}
+            onTogglePin={onTogglePinSession}
+            session={session}
+          />
         ))}
       </div>
 

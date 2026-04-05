@@ -17,6 +17,8 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
+            manual_title TEXT,
+            pinned INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL,
             current_intent TEXT NOT NULL,
             current_object_type TEXT NOT NULL,
@@ -91,6 +93,8 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_sources_run_id_origin_key ON sources (run_id, origin_key)",
         [],
     )?;
+    add_column_if_missing(conn, "sessions", "manual_title", "TEXT")?;
+    add_column_if_missing(conn, "sessions", "pinned", "INTEGER NOT NULL DEFAULT 0")?;
 
     Ok(())
 }
