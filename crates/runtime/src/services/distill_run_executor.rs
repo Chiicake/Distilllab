@@ -1,16 +1,19 @@
+use crate::agents::{run_chunk_agent, ChunkAgentInput, ChunkDraft};
 use crate::app::AppRuntime;
 use crate::contracts::{
     MaterializeSourcesResult, RunExecutionOutput, RunInput, RunProgressPhase, RunProgressUpdate,
 };
 use crate::flows::execute_materialize_sources;
 use crate::runs::import_and_distill_step_definitions;
-use agent::{SessionActionType, SessionAgentDecision};
+use crate::services::{list_sources_for_run, read_source_text};
+use agent::{LlmProviderConfig, SessionActionType, SessionAgentDecision};
 use chrono::Utc;
+use memory::chunk_store::insert_chunk;
 use memory::db::open_database;
 use memory::migrations::run_migrations;
 use memory::run_store::{insert_run, update_run_status};
 use schema::run::RunType;
-use schema::{Run, RunState};
+use schema::{Chunk, Run, RunState};
 use uuid::Uuid;
 
 type RuntimeError = Box<dyn std::error::Error + Send + Sync>;
@@ -48,16 +51,45 @@ fn run_progress_update(
     }
 }
 
+fn persist_chunk_drafts(
+    conn: &rusqlite::Connection,
+    source_id: &str,
+    drafts: Vec<ChunkDraft>,
+) -> Result<Vec<Chunk>, RuntimeError> {
+    let mut persisted = Vec::new();
+    for (index, draft) in drafts.into_iter().enumerate() {
+        let chunk = Chunk {
+            id: format!("chunk-{}", Uuid::new_v4()),
+            source_id: source_id.to_string(),
+            sequence: index as i64,
+            title: draft.title,
+            summary: draft.summary,
+            content: draft.content,
+        };
+        insert_chunk(conn, &chunk)?;
+        persisted.push(chunk);
+    }
+    Ok(persisted)
+}
+
 pub fn create_and_execute_from_decision(
     runtime: &AppRuntime,
+    llm_provider_config: Option<&LlmProviderConfig>,
     decision: &SessionAgentDecision,
     run_input: RunInput,
 ) -> Result<DistillRunExecutionOutcome, RuntimeError> {
-    create_and_execute_from_decision_with_progress(runtime, decision, run_input, |_| {})
+    create_and_execute_from_decision_with_progress(
+        runtime,
+        llm_provider_config,
+        decision,
+        run_input,
+        |_| {},
+    )
 }
 
 pub fn create_and_execute_from_decision_with_progress<F>(
     runtime: &AppRuntime,
+    _llm_provider_config: Option<&LlmProviderConfig>,
     decision: &SessionAgentDecision,
     run_input: RunInput,
     mut on_progress: F,
@@ -154,12 +186,12 @@ where
             Some("materialize step started"),
         ));
 
-        let result = execute_materialize_sources(runtime, &run.id, run_input)?;
+        let result = execute_materialize_sources(runtime, &run.id, run_input.clone())?;
 
         on_progress(run_progress_update(
             RunProgressPhase::StepFinished,
             &run,
-            Some(90),
+            Some(25),
             Some(materialize_step.step_key),
             Some(materialize_step.summary),
             Some(if result.can_continue {
@@ -171,6 +203,118 @@ where
             Some(steps.len() as u32),
             Some(result.summary.as_str()),
         ));
+
+        if result.can_continue {
+            let llm_provider_config = _llm_provider_config.ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "missing provider config for chunk_sources step",
+                )) as RuntimeError
+            })?;
+
+            let chunk_step = steps
+                .iter()
+                .find(|step| step.step_key == "chunk_sources")
+                .ok_or_else(|| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "missing chunk_sources step definition",
+                    )) as RuntimeError
+                })?;
+
+            on_progress(run_progress_update(
+                RunProgressPhase::StepStarted,
+                &run,
+                Some(35),
+                Some(chunk_step.step_key),
+                Some(chunk_step.summary),
+                Some("running"),
+                Some(2),
+                Some(steps.len() as u32),
+                Some("chunk step started"),
+            ));
+
+            let sources = list_sources_for_run(runtime, &run.id)?;
+            let client = reqwest::Client::new();
+            let runtime_handle = tokio::runtime::Handle::try_current().map_err(|error| {
+                Box::new(std::io::Error::other(format!("missing tokio runtime handle: {}", error)))
+                    as RuntimeError
+            })?;
+            let mut tasks = Vec::new();
+
+            for (index, source) in sources.iter().enumerate() {
+                let source_progress_detail = format!(
+                    "processing source {}/{}: {}",
+                    index + 1,
+                    sources.len(),
+                    source.title
+                );
+                on_progress(run_progress_update(
+                    RunProgressPhase::StateChanged,
+                    &run,
+                    Some(35),
+                    Some(chunk_step.step_key),
+                    Some(chunk_step.summary),
+                    Some("running"),
+                    Some(2),
+                    Some(steps.len() as u32),
+                    Some(source_progress_detail.as_str()),
+                ));
+
+                let source_id = source.id.clone();
+                let source_title = source.title.clone();
+                let source_type = source.source_type.as_str().to_string();
+                let distill_goal = run_input.decision_summary.clone();
+                let source_text = read_source_text(runtime, &source_id)?;
+                let config = llm_provider_config.clone();
+                let client_clone = client.clone();
+                let run_id = run.id.clone();
+
+                tasks.push(runtime_handle.spawn(async move {
+                    let output = run_chunk_agent(
+                        &client_clone,
+                        &config,
+                        &ChunkAgentInput {
+                            run_id,
+                            source_id: source_id.clone(),
+                            source_type,
+                            source_title,
+                            source_text,
+                            distill_goal,
+                        },
+                    )
+                    .await?;
+
+                    Ok::<(String, Vec<ChunkDraft>), agent::AgentError>((source_id, output.chunks))
+                }));
+            }
+
+            let mut total_chunks = 0usize;
+            for task in tasks {
+                let chunk_result = runtime_handle
+                    .block_on(task)
+                    .map_err(|error| {
+                        Box::new(std::io::Error::other(format!("chunk task join failed: {}", error)))
+                            as RuntimeError
+                    })?;
+                let (source_id, drafts) = chunk_result.map_err(RuntimeError::from)?;
+                let persisted = persist_chunk_drafts(&conn, &source_id, drafts)?;
+                total_chunks += persisted.len();
+            }
+
+            let chunk_finish_detail = format!("created {} chunks", total_chunks);
+            on_progress(run_progress_update(
+                RunProgressPhase::StepFinished,
+                &run,
+                Some(50),
+                Some(chunk_step.step_key),
+                Some(chunk_step.summary),
+                Some("completed"),
+                Some(2),
+                Some(steps.len() as u32),
+                Some(chunk_finish_detail.as_str()),
+            ));
+        }
 
         let next_status = if result.can_continue {
             RunState::Completed

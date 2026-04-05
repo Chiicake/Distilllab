@@ -424,7 +424,7 @@ async fn send_session_message_with_optional_provider_config(
                 other => Some(other.to_string()),
             },
         },
-        provider_config,
+        provider_config.clone(),
     )
     .await?;
 
@@ -440,7 +440,12 @@ async fn send_session_message_with_optional_provider_config(
             )
         })?;
 
-        Some(create_and_execute_from_decision(runtime, &decision, run_input)?)
+        Some(create_and_execute_from_decision(
+            runtime,
+            provider_config.as_ref(),
+            &decision,
+            run_input,
+        )?)
     } else {
         None
     };
@@ -494,7 +499,7 @@ async fn send_session_message_with_optional_provider_config_and_result(
                 other => Some(other.to_string()),
             },
         },
-        provider_config,
+        provider_config.clone(),
     )
     .await?;
 
@@ -510,7 +515,12 @@ async fn send_session_message_with_optional_provider_config_and_result(
             )
         })?;
 
-        Some(create_and_execute_from_decision(runtime, &decision, run_input)?)
+        Some(create_and_execute_from_decision(
+            runtime,
+            provider_config.as_ref(),
+            &decision,
+            run_input,
+        )?)
     } else {
         None
     };
@@ -611,7 +621,7 @@ where
                 other => Some(other.to_string()),
             },
         },
-        Some(provider_config),
+        Some(provider_config.clone()),
         |chunk| on_reply_chunk(chunk),
     )
     .await?;
@@ -630,6 +640,7 @@ where
 
         Some(create_and_execute_from_decision_with_progress(
             runtime,
+            Some(&provider_config),
             &decision,
             run_input,
             |update| {
@@ -1668,6 +1679,43 @@ mod tests {
             Uuid::new_v4()
         ));
 
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("server should accept connection");
+            let mut buffer = [0_u8; 8192];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buffer)
+                .await
+                .expect("server should read request");
+
+            let response_body = r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"chunks\":[{\"title\":\"Progress update\",\"summary\":\"A concrete work update was captured.\",\"content\":\"Please distill these work notes into Distilllab\"}]}"
+                        }
+                    }
+                ]
+            }"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes())
+                .await
+                .expect("server should write response");
+        });
+
         let decision = agent::SessionAgentDecision {
             intent: SessionIntent::DistillMaterial,
             primary_object_type: Some("material".to_string()),
@@ -1701,6 +1749,12 @@ mod tests {
 
         let outcome = crate::services::distill_run_executor::create_and_execute_from_decision(
             &runtime,
+            Some(&LlmProviderConfig {
+                provider_kind: "openai_compatible".to_string(),
+                base_url: format!("http://{}", address),
+                model: "gpt-test".to_string(),
+                api_key: None,
+            }),
             &decision,
             run_input,
         )
@@ -1709,6 +1763,16 @@ mod tests {
         assert_eq!(outcome.run.run_type.as_str(), "import_and_distill");
         assert_eq!(outcome.run.status.as_str(), "completed");
         assert!(outcome.materialize_result.is_some());
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let sources = memory::source_store::list_sources(&conn).expect("sources should load");
+        assert_eq!(sources.len(), 1);
+
+        let chunks = memory::chunk_store::list_chunks_by_source(&conn, &sources[0].id)
+            .expect("chunks should load");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].title, "Progress update");
+        assert_eq!(chunks[0].summary, "A concrete work update was captured.");
     }
 
     #[tokio::test]

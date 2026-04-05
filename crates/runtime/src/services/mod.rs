@@ -29,7 +29,7 @@ pub use session_service::{
 };
 pub use source_service::{
     create_attachment_source, create_demo_source, create_message_source,
-    find_source_for_run_origin, list_sources, list_sources_for_run,
+    find_source_for_run_origin, list_sources, list_sources_for_run, read_source_text,
 };
 pub use tool_executor::{ToolExecutionError, ToolExecutor};
 pub use work_item_service::{extract_demo_work_items, list_work_items};

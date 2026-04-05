@@ -34,12 +34,16 @@ pub fn chunk_demo_source(
             id: format!("chunk-{}", Uuid::new_v4()),
             source_id: source.id.clone(),
             sequence: 0,
+            title: "First chunk".to_string(),
+            summary: "First demo summary".to_string(),
             content: "First chunk".to_string(),
         },
         Chunk {
             id: format!("chunk-{}", Uuid::new_v4()),
             source_id: source.id.clone(),
             sequence: 1,
+            title: "Second chunk".to_string(),
+            summary: "Second demo summary".to_string(),
             content: "Second chunk".to_string(),
         },
     ];
