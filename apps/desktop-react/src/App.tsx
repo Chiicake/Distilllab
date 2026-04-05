@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { activeChatScreen, draftScreen, type Screen } from './app-state/screen-state';
 import { useChat } from './chat/ChatProvider';
@@ -9,9 +9,59 @@ import ChatDraftScreen from './screens/chat-draft/ChatDraftScreen';
 import CanvasScreen from './screens/canvas/CanvasScreen';
 import SettingsScreen from './screens/settings/SettingsScreen';
 
+type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West';
+
+type ResizeApi = {
+  startResizeDragging: (direction: ResizeDirection) => Promise<void>;
+};
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>(draftScreen);
   const { state: chatState, resetDraft } = useChat();
+  const [resizeApi, setResizeApi] = useState<ResizeApi | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const setupResizeApi = async () => {
+      try {
+        const module = await import('@tauri-apps/api/window');
+        const appWindow = module.getCurrentWindow();
+        if (cancelled) {
+          return;
+        }
+
+        setResizeApi({
+          startResizeDragging: (direction) => appWindow.startResizeDragging(direction),
+        });
+      } catch {
+        if (!cancelled) {
+          setResizeApi(null);
+        }
+      }
+    };
+
+    void setupResizeApi();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleStartResize = useCallback(
+    (direction: ResizeDirection) => {
+      if (!resizeApi) {
+        return;
+      }
+
+      void resizeApi.startResizeDragging(direction).catch((error) => {
+        if (typeof window !== 'undefined') {
+          window.console.error('[App] start resize dragging failed', error);
+        }
+      });
+    },
+    [resizeApi],
+  );
 
   let content: JSX.Element;
 
@@ -49,6 +99,7 @@ export default function App() {
 
   return (
     <AppShell
+      onStartResize={resizeApi ? handleStartResize : undefined}
       topNav={
         <TopNav
           currentScreen={screen}

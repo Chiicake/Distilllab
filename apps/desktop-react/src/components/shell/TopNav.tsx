@@ -11,6 +11,7 @@ type WindowControlsApi = {
   toggleMaximize: () => Promise<void>;
   isMaximized: () => Promise<boolean>;
   startDragging: () => Promise<void>;
+  startResizeDragging: (direction: 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West') => Promise<void>;
   close: () => Promise<void>;
 };
 
@@ -47,6 +48,7 @@ export default function TopNav({ currentScreen, onOpenChat, onOpenCanvas, onOpen
           toggleMaximize: () => appWindow.toggleMaximize(),
           isMaximized: () => appWindow.isMaximized(),
           startDragging: () => appWindow.startDragging(),
+          startResizeDragging: (direction) => appWindow.startResizeDragging(direction),
           close: () => appWindow.close(),
         });
 
