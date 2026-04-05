@@ -22,6 +22,7 @@ pub fn chunk_demo_source(
         run_id: None,
         origin_key: None,
         locator: None,
+        content: Some("Demo chunk source content".to_string()),
         metadata_json: "{}".to_string(),
         created_at: Utc::now().to_string(),
     };

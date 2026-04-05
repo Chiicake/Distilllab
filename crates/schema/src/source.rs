@@ -31,6 +31,7 @@ pub struct Source {
     pub run_id: Option<String>,
     pub origin_key: Option<String>,
     pub locator: Option<String>,
+    pub content: Option<String>,
     pub metadata_json: String,
     pub created_at: String,
 }

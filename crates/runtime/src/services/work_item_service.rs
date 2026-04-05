@@ -23,6 +23,7 @@ pub fn extract_demo_work_items(
         run_id: None,
         origin_key: None,
         locator: None,
+        content: Some("Demo work item source content".to_string()),
         metadata_json: "{}".to_string(),
         created_at: Utc::now().to_string(),
     };
