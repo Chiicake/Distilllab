@@ -1,11 +1,12 @@
 import type { ChatSessionSummary } from '../../chat/types';
 
 type LeftRailProps = {
+  activeSessionId?: string | null;
   sessions: ChatSessionSummary[];
   onOpenSession: (sessionId: string) => Promise<void>;
 };
 
-export default function LeftRail({ sessions, onOpenSession }: LeftRailProps) {
+export default function LeftRail({ activeSessionId, sessions, onOpenSession }: LeftRailProps) {
   return (
     <aside className="bg-[#191a1a] text-[#bac3ff] font-['Inter'] text-sm docked h-full left-0 w-64 no-border bg-[#191a1a] flat no shadows flex flex-col h-full py-6 px-4 gap-4 border-r border-outline-variant/10">
       <div className="mb-4">
@@ -34,13 +35,20 @@ export default function LeftRail({ sessions, onOpenSession }: LeftRailProps) {
         {sessions.map((session) => (
           <button
             key={session.sessionId}
-            className="text-[#acabaa] opacity-60 hover:bg-[#1f2020] hover:opacity-100 rounded-md flex items-center gap-3 px-3 py-2.5 transition-all duration-300"
+            className={`rounded-md flex items-center gap-3 px-3 py-2.5 transition-all duration-300 w-full text-left hover:bg-[#1f2020] hover:opacity-100 ${
+              session.sessionId === activeSessionId
+                ? 'border border-primary/10 bg-[#1f2020] text-[#f3faff] opacity-100'
+                : 'text-[#acabaa] opacity-60'
+            }`}
             onClick={() => {
               void onOpenSession(session.sessionId);
             }}
             type="button"
           >
-            <span className="material-symbols-outlined" data-icon="chat_bubble">
+            <span
+              className={`material-symbols-outlined ${session.sessionId === activeSessionId ? 'text-primary' : ''}`}
+              data-icon="chat_bubble"
+            >
               chat_bubble
             </span>
             <span className="truncate">{session.title}</span>

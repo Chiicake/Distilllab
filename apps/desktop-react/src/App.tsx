@@ -80,6 +80,7 @@ export default function App() {
             resetDraft();
             setScreen(draftScreen);
           }}
+          onSelectSession={(sessionId) => setScreen({ kind: 'chat-active', sessionId })}
           sessionId={screen.sessionId ?? chatState.sessionId ?? undefined}
         />
       );

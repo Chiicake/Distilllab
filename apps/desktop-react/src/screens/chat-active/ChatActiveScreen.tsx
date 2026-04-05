@@ -9,10 +9,15 @@ import TimelineHeader from './TimelineHeader';
 
 type ChatActiveScreenProps = {
   onReturnToDraft: () => void;
+  onSelectSession: (sessionId: string) => void;
   sessionId?: string;
 };
 
-export default function ChatActiveScreen({ onReturnToDraft, sessionId }: ChatActiveScreenProps) {
+export default function ChatActiveScreen({
+  onReturnToDraft,
+  onSelectSession,
+  sessionId,
+}: ChatActiveScreenProps) {
   const { openSession, sendFollowUpMessage, state } = useChat();
 
   useEffect(() => {
@@ -23,8 +28,15 @@ export default function ChatActiveScreen({ onReturnToDraft, sessionId }: ChatAct
 
   return (
     <div className="flex flex-1 overflow-hidden">
-      <ActiveLeftRail onReturnToDraft={onReturnToDraft} sessions={state.sessions} />
-
+        <ActiveLeftRail
+          activeSessionId={state.sessionId}
+          onOpenSession={async (nextSessionId) => {
+            onSelectSession(nextSessionId);
+            await openSession(nextSessionId);
+          }}
+          onReturnToDraft={onReturnToDraft}
+          sessions={state.sessions}
+        />
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-surface">
         <TimelineHeader activeRunLabel={state.activeRunLabel} sessionTitle={state.sessionTitle} />
 

@@ -14,6 +14,7 @@ export default function ChatDraftScreen({ onEnterActiveRun }: ChatDraftScreenPro
   return (
     <div className="flex flex-1 overflow-hidden">
       <LeftRail
+        activeSessionId={state.sessionId}
         onOpenSession={async (sessionId) => {
           await openSession(sessionId);
           onEnterActiveRun(sessionId);
