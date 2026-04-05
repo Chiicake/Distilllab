@@ -25,6 +25,21 @@ pub fn update_run_status(conn: &Connection, run_id: &str, status: &RunState) -> 
     Ok(())
 }
 
+pub fn update_run(conn: &Connection, run: &Run) -> Result<()> {
+    conn.execute(
+        "UPDATE runs SET run_type = ?1, status = ?2, primary_object_type = ?3, primary_object_id = ?4, created_at = ?5 WHERE id = ?6",
+        params![
+            run.run_type.as_str(),
+            run.status.as_str(),
+            run.primary_object_type,
+            run.primary_object_id,
+            run.created_at,
+            run.id,
+        ],
+    )?;
+    Ok(())
+}
+
 pub fn list_runs(conn: &Connection) -> Result<Vec<Run>> {
     let mut stmt = conn.prepare(
         "SELECT id, run_type, status, primary_object_type, primary_object_id, created_at FROM runs ORDER BY created_at DESC",

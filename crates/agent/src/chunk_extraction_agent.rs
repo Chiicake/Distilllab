@@ -1,11 +1,11 @@
-use agent::{
+use crate::{
     send_chat_completion_request, AgentError, LlmProviderConfig, OpenAiCompatibleChatMessage,
     OpenAiCompatibleChatRequest,
 };
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChunkAgentInput {
+pub struct ChunkExtractionInput {
     pub run_id: String,
     pub source_id: String,
     pub source_type: String,
@@ -22,12 +22,12 @@ pub struct ChunkDraft {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ChunkAgentOutput {
+pub struct ChunkExtractionOutput {
     pub chunks: Vec<ChunkDraft>,
 }
 
-pub fn chunk_agent_system_prompt() -> &'static str {
-    r#"You are ChunkAgent for Distilllab.
+pub fn chunk_extraction_system_prompt() -> &'static str {
+    r#"You are ChunkExtractionAgent for Distilllab.
 
 Your job is to transform one source document into a small set of high-quality semantic chunks for downstream distillation.
 
@@ -81,11 +81,11 @@ Rules:
 18. The goal is not complete coverage. The goal is high-value semantic preservation for distillation."#
 }
 
-pub fn build_chunk_agent_messages(input: &ChunkAgentInput) -> Vec<OpenAiCompatibleChatMessage> {
+pub fn build_chunk_extraction_messages(input: &ChunkExtractionInput) -> Vec<OpenAiCompatibleChatMessage> {
     vec![
         OpenAiCompatibleChatMessage {
             role: "system".to_string(),
-            content: chunk_agent_system_prompt().to_string(),
+            content: chunk_extraction_system_prompt().to_string(),
         },
         OpenAiCompatibleChatMessage {
             role: "user".to_string(),
@@ -102,7 +102,9 @@ pub fn build_chunk_agent_messages(input: &ChunkAgentInput) -> Vec<OpenAiCompatib
     ]
 }
 
-pub fn validate_chunk_agent_output(output: ChunkAgentOutput) -> Result<ChunkAgentOutput, AgentError> {
+pub fn validate_chunk_extraction_output(
+    output: ChunkExtractionOutput,
+) -> Result<ChunkExtractionOutput, AgentError> {
     if output.chunks.is_empty() {
         return Err(AgentError::Response("chunk agent returned no chunks".to_string()));
     }
@@ -126,14 +128,14 @@ pub fn validate_chunk_agent_output(output: ChunkAgentOutput) -> Result<ChunkAgen
     Ok(output)
 }
 
-pub async fn run_chunk_agent(
+pub async fn run_chunk_extraction_agent(
     client: &reqwest::Client,
     config: &LlmProviderConfig,
-    input: &ChunkAgentInput,
-) -> Result<ChunkAgentOutput, AgentError> {
+    input: &ChunkExtractionInput,
+) -> Result<ChunkExtractionOutput, AgentError> {
     let request = OpenAiCompatibleChatRequest {
         model: config.model.clone(),
-        messages: build_chunk_agent_messages(input),
+        messages: build_chunk_extraction_messages(input),
         stream: None,
     };
 
@@ -142,21 +144,21 @@ pub async fn run_chunk_agent(
         .first_message_content()
         .ok_or_else(|| AgentError::Response("chunk agent response missing assistant content".to_string()))?;
 
-    let parsed = serde_json::from_str::<ChunkAgentOutput>(body)
+    let parsed = serde_json::from_str::<ChunkExtractionOutput>(body)
         .map_err(|error| AgentError::Response(format!("invalid chunk agent json: {}", error)))?;
 
-    validate_chunk_agent_output(parsed)
+    validate_chunk_extraction_output(parsed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_chunk_agent_messages, validate_chunk_agent_output, ChunkAgentInput, ChunkAgentOutput,
-        ChunkDraft,
+        build_chunk_extraction_messages, validate_chunk_extraction_output, ChunkDraft,
+        ChunkExtractionInput, ChunkExtractionOutput,
     };
 
-    fn fixture_input() -> ChunkAgentInput {
-        ChunkAgentInput {
+    fn fixture_input() -> ChunkExtractionInput {
+        ChunkExtractionInput {
             run_id: "run-1".to_string(),
             source_id: "source-1".to_string(),
             source_type: "document".to_string(),
@@ -167,8 +169,8 @@ mod tests {
     }
 
     #[test]
-    fn chunk_agent_messages_include_source_context() {
-        let messages = build_chunk_agent_messages(&fixture_input());
+    fn chunk_extraction_messages_include_source_context() {
+        let messages = build_chunk_extraction_messages(&fixture_input());
 
         assert_eq!(messages.len(), 2);
         assert!(messages[1].content.contains("run_id: run-1"));
@@ -177,8 +179,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_chunk_agent_output_accepts_non_empty_unique_chunks() {
-        let output = ChunkAgentOutput {
+    fn validate_chunk_extraction_output_accepts_non_empty_unique_chunks() {
+        let output = ChunkExtractionOutput {
             chunks: vec![ChunkDraft {
                 title: "Prototype decision".to_string(),
                 summary: "A launch decision was made.".to_string(),
@@ -186,13 +188,13 @@ mod tests {
             }],
         };
 
-        let validated = validate_chunk_agent_output(output.clone()).expect("output should validate");
+        let validated = validate_chunk_extraction_output(output.clone()).expect("output should validate");
         assert_eq!(validated, output);
     }
 
     #[test]
-    fn validate_chunk_agent_output_rejects_empty_chunk_content() {
-        let output = ChunkAgentOutput {
+    fn validate_chunk_extraction_output_rejects_empty_chunk_content() {
+        let output = ChunkExtractionOutput {
             chunks: vec![ChunkDraft {
                 title: "Prototype decision".to_string(),
                 summary: "A launch decision was made.".to_string(),
@@ -200,13 +202,13 @@ mod tests {
             }],
         };
 
-        let error = validate_chunk_agent_output(output).expect_err("empty chunk content should fail");
+        let error = validate_chunk_extraction_output(output).expect_err("empty chunk content should fail");
         assert!(error.to_string().contains("content cannot be empty"));
     }
 
     #[test]
-    fn validate_chunk_agent_output_rejects_duplicate_content() {
-        let output = ChunkAgentOutput {
+    fn validate_chunk_extraction_output_rejects_duplicate_content() {
+        let output = ChunkExtractionOutput {
             chunks: vec![
                 ChunkDraft {
                     title: "Chunk A".to_string(),
@@ -221,7 +223,7 @@ mod tests {
             ],
         };
 
-        let error = validate_chunk_agent_output(output).expect_err("duplicate chunk content should fail");
+        let error = validate_chunk_extraction_output(output).expect_err("duplicate chunk content should fail");
         assert!(error.to_string().contains("content must be unique"));
     }
 }

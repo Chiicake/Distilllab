@@ -1,4 +1,3 @@
-use crate::agents::{run_chunk_agent, ChunkAgentInput, ChunkDraft};
 use crate::app::AppRuntime;
 use crate::contracts::{
     MaterializeSourcesResult, RunExecutionOutput, RunInput, RunProgressPhase, RunProgressUpdate,
@@ -7,19 +6,24 @@ use crate::flows::execute_materialize_sources;
 use crate::runs::import_and_distill_step_definitions;
 use crate::services::{list_sources_for_run, read_source_text};
 use agent::{
+    run_asset_extraction_agent,
+    run_chunk_extraction_agent,
     run_project_resolution_agent, run_work_item_extraction_agent, LlmProviderConfig,
+    AssetExtractionChunkInput, AssetExtractionInput, AssetExtractionWorkItemInput,
+    ChunkDraft, ChunkExtractionInput,
     ProjectResolutionChunkInput, ProjectResolutionInput, ProjectResolutionWorkItemInput,
     ProjectSummaryInput, SessionActionType, SessionAgentDecision, WorkItemExtractionChunkInput,
     WorkItemExtractionInput,
 };
 use chrono::Utc;
+use memory::asset_store::insert_asset;
 use memory::chunk_store::insert_chunk;
 use memory::db::open_database;
 use memory::migrations::run_migrations;
 use memory::project_store::insert_project;
-use memory::run_store::{insert_run, update_run_status};
+use memory::run_store::{insert_run, update_run, update_run_status};
 use schema::run::RunType;
-use schema::{Chunk, Project, Run, RunState};
+use schema::{Asset, AssetType, Chunk, Project, Run, RunState};
 use uuid::Uuid;
 
 type RuntimeError = Box<dyn std::error::Error + Send + Sync>;
@@ -211,27 +215,12 @@ where
         ));
 
         if result.can_continue {
-            let Some(llm_provider_config) = _llm_provider_config else {
-                let next_status = RunState::Completed;
-                update_run_status(&conn, &run.id, &next_status)?;
-                run.status = next_status;
-                on_progress(run_progress_update(
-                    RunProgressPhase::StateChanged,
-                    &run,
-                    Some(100),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    Some("run completed"),
-                ));
-                return Ok(DistillRunExecutionOutcome {
-                    run,
-                    materialize_result: Some(result),
-                    output: None,
-                });
-            };
+            let llm_provider_config = _llm_provider_config.ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "missing provider config for import_and_distill pipeline",
+                )) as RuntimeError
+            })?;
 
             let chunk_step = steps
                 .iter()
@@ -288,10 +277,10 @@ where
                 let run_id = run.id.clone();
 
                 tasks.spawn(async move {
-                    let output = run_chunk_agent(
+                    let output = run_chunk_extraction_agent(
                         &client_clone,
                         &config,
-                        &ChunkAgentInput {
+                        &ChunkExtractionInput {
                             run_id,
                             source_id: source_id.clone(),
                             source_type,
@@ -433,16 +422,14 @@ where
                     distill_goal: run_input.decision_summary.clone(),
                     chunks: sources
                         .iter()
-                        .flat_map(|source| {
-                            memory::chunk_store::list_chunks_by_source(&conn, &source.id)
-                                .unwrap_or_default()
-                                .into_iter()
-                                .map(|chunk| ProjectResolutionChunkInput {
-                                    chunk_id: chunk.id,
-                                    title: chunk.title,
-                                    summary: chunk.summary,
-                                })
-                                .collect::<Vec<_>>()
+                        .map(|source| memory::chunk_store::list_chunks_by_source(&conn, &source.id))
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_iter()
+                        .flatten()
+                        .map(|chunk| ProjectResolutionChunkInput {
+                            chunk_id: chunk.id,
+                            title: chunk.title,
+                            summary: chunk.summary,
                         })
                         .collect(),
                     work_items: work_item_output
@@ -475,7 +462,7 @@ where
                     ..
                 } => {
                     let project = Project {
-                        id: "project-1".to_string(),
+                        id: format!("project-{}", Uuid::new_v4()),
                         name: title,
                         summary,
                     };
@@ -486,6 +473,7 @@ where
 
             run.primary_object_type = "project".to_string();
             run.primary_object_id = resolved_project.id.clone();
+            update_run(&conn, &run)?;
 
             let project_finish_detail = format!("resolved project: {}", resolved_project.name);
             on_progress(run_progress_update(
@@ -498,6 +486,98 @@ where
                 Some(4),
                 Some(steps.len() as u32),
                 Some(project_finish_detail.as_str()),
+            ));
+
+            let asset_step = steps
+                .iter()
+                .find(|step| step.step_key == "extract_assets")
+                .ok_or_else(|| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "missing extract_assets step definition",
+                    )) as RuntimeError
+                })?;
+
+            on_progress(run_progress_update(
+                RunProgressPhase::StepStarted,
+                &run,
+                Some(95),
+                Some(asset_step.step_key),
+                Some(asset_step.summary),
+                Some("running"),
+                Some(5),
+                Some(steps.len() as u32),
+                Some("asset extraction started"),
+            ));
+
+            let chunk_inputs = sources
+                .iter()
+                .map(|source| memory::chunk_store::list_chunks_by_source(&conn, &source.id))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .map(|chunk| AssetExtractionChunkInput {
+                    chunk_id: chunk.id,
+                    title: chunk.title,
+                    summary: chunk.summary,
+                    content: chunk.content,
+                })
+                .collect::<Vec<_>>();
+
+            let asset_output = run_asset_extraction_agent(
+                &client,
+                llm_provider_config,
+                &AssetExtractionInput {
+                    run_id: run.id.clone(),
+                    distill_goal: run_input.decision_summary.clone(),
+                    project_id: resolved_project.id.clone(),
+                    project_name: resolved_project.name.clone(),
+                    project_summary: resolved_project.summary.clone(),
+                    chunks: chunk_inputs,
+                    work_items: work_item_output
+                        .work_items
+                        .iter()
+                        .map(|item| AssetExtractionWorkItemInput {
+                            title: item.title.clone(),
+                            summary: item.summary.clone(),
+                        })
+                        .collect(),
+                },
+            )
+            .await
+            .map_err(RuntimeError::from)?;
+
+            let mut persisted_assets = Vec::new();
+            for draft in asset_output.assets {
+                let asset = Asset {
+                    id: format!("asset-{}", Uuid::new_v4()),
+                    project_id: resolved_project.id.clone(),
+                    asset_type: AssetType::Insight,
+                    title: draft.title,
+                    summary: draft.summary,
+                };
+                insert_asset(&conn, &asset)?;
+                persisted_assets.push(asset);
+            }
+
+            let primary_asset_id = persisted_assets.first().map(|asset| asset.id.clone());
+            if let Some(primary_asset_id) = primary_asset_id.clone() {
+                run.primary_object_type = "asset".to_string();
+                run.primary_object_id = primary_asset_id;
+                update_run(&conn, &run)?;
+            }
+
+            let asset_finish_detail = format!("created {} assets", persisted_assets.len());
+            on_progress(run_progress_update(
+                RunProgressPhase::StepFinished,
+                &run,
+                Some(98),
+                Some(asset_step.step_key),
+                Some(asset_step.summary),
+                Some("completed"),
+                Some(5),
+                Some(steps.len() as u32),
+                Some(asset_finish_detail.as_str()),
             ));
 
             let next_status = RunState::Completed;
@@ -519,14 +599,15 @@ where
                 run,
                 materialize_result: Some(result),
                 output: Some(RunExecutionOutput {
-                    primary_asset_id: None,
-                    asset_ids: vec![],
+                    primary_asset_id: primary_asset_id.clone(),
+                    asset_ids: persisted_assets.iter().map(|asset| asset.id.clone()).collect(),
                     work_item_ids: vec![],
                     execution_summary: format!(
-                        "materialized sources, created {} chunks, extracted {} work item drafts, resolved project {}",
+                        "materialized sources, created {} chunks, extracted {} work item drafts, resolved project {}, created {} assets",
                         total_chunks,
                         work_item_output.work_items.len(),
-                        resolved_project.name
+                        resolved_project.name,
+                        persisted_assets.len(),
                     ),
                 }),
             });
