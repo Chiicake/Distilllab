@@ -5,6 +5,8 @@ import { useChat } from './chat/ChatProvider';
 import AppShell from './components/shell/AppShell';
 import TopNav from './components/shell/TopNav';
 import ChatActiveScreen from './screens/chat-active/ChatActiveScreen';
+import SessionDeleteDialog from './screens/chat/SessionDeleteDialog';
+import SessionRenameDialog from './screens/chat/SessionRenameDialog';
 import ChatDraftScreen from './screens/chat-draft/ChatDraftScreen';
 import CanvasScreen from './screens/canvas/CanvasScreen';
 import SettingsScreen from './screens/settings/SettingsScreen';
@@ -15,10 +17,22 @@ type ResizeApi = {
   startResizeDragging: (direction: ResizeDirection) => Promise<void>;
 };
 
+type SessionRenameState = {
+  sessionId: string;
+  currentTitle: string;
+};
+
+type SessionDeleteState = {
+  sessionId: string;
+  title: string;
+};
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>(draftScreen);
-  const { state: chatState, resetDraft } = useChat();
+  const { deleteSession, renameSession, state: chatState, resetDraft } = useChat();
   const [resizeApi, setResizeApi] = useState<ResizeApi | null>(null);
+  const [renameState, setRenameState] = useState<SessionRenameState | null>(null);
+  const [deleteState, setDeleteState] = useState<SessionDeleteState | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,17 +83,23 @@ export default function App() {
     case 'chat-draft':
       content = (
         <ChatDraftScreen
+          onRequestDeleteSession={(sessionId, title) => setDeleteState({ sessionId, title })}
           onEnterActiveRun={(sessionId) => setScreen({ kind: 'chat-active', sessionId })}
+          onRequestRenameSession={(sessionId, currentTitle) => setRenameState({ sessionId, currentTitle })}
         />
       );
       break;
     case 'chat-active':
       content = (
         <ChatActiveScreen
+          onRequestDeleteSession={(targetSessionId, title) => setDeleteState({ sessionId: targetSessionId, title })}
           onReturnToDraft={() => {
             resetDraft();
             setScreen(draftScreen);
           }}
+          onRequestRenameSession={(targetSessionId, currentTitle) =>
+            setRenameState({ sessionId: targetSessionId, currentTitle })
+          }
           onSelectSession={(sessionId) => setScreen({ kind: 'chat-active', sessionId })}
           sessionId={screen.sessionId ?? chatState.sessionId ?? undefined}
         />
@@ -111,6 +131,41 @@ export default function App() {
       }
     >
       {content}
+      <SessionRenameDialog
+        currentTitle={renameState?.currentTitle ?? ''}
+        onClose={() => setRenameState(null)}
+        onSave={(value) => {
+          if (!renameState) {
+            return;
+          }
+
+          const sessionId = renameState.sessionId;
+          setRenameState(null);
+          void renameSession(sessionId, value);
+        }}
+        open={renameState != null}
+      />
+      <SessionDeleteDialog
+        onClose={() => setDeleteState(null)}
+        onDelete={() => {
+          if (!deleteState) {
+            return;
+          }
+
+          const deletingCurrent = chatState.sessionId === deleteState.sessionId;
+          const sessionId = deleteState.sessionId;
+          setDeleteState(null);
+          void (async () => {
+            await deleteSession(sessionId);
+            if (deletingCurrent) {
+              resetDraft();
+              setScreen(draftScreen);
+            }
+          })();
+        }}
+        open={deleteState != null}
+        sessionTitle={deleteState?.title ?? ''}
+      />
     </AppShell>
   );
 }

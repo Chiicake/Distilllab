@@ -19,6 +19,7 @@ type SessionSelectorOption = {
   title: string;
   manualTitle?: string | null;
   pinned?: boolean;
+  updatedAt: string;
   status: string;
   label: string;
 };
@@ -165,7 +166,18 @@ function sessionSummaryFromOption(option: SessionSelectorOption): ChatSessionSum
     statusLabel: option.status,
     manualTitle: option.manualTitle ?? null,
     pinned: option.pinned ?? false,
+    updatedAt: option.updatedAt,
   };
+}
+
+function sortSessions(sessions: ChatSessionSummary[]) {
+  return [...sessions].sort((left, right) => {
+    if (Boolean(left.pinned) !== Boolean(right.pinned)) {
+      return left.pinned ? -1 : 1;
+    }
+
+    return (right.updatedAt ?? '').localeCompare(left.updatedAt ?? '');
+  });
 }
 
 export default function ChatProvider({ children }: { children: ReactNode }) {
@@ -184,7 +196,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
 
     setState((previous) => ({
       ...previous,
-      sessions: options.map(sessionSummaryFromOption),
+      sessions: sortSessions(options.map(sessionSummaryFromOption)),
       sessionTitle:
         previous.sessionId != null
           ? options.find((option) => option.sessionId === previous.sessionId)?.title ?? previous.sessionTitle
@@ -222,23 +234,42 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    await invoke<string>('rename_session_command', {
-      payload: {
-        sessionId,
-        manualTitle,
-      },
+    const previousState = state;
+    setState((previous) => {
+      const nextSessions = previous.sessions.map((session) =>
+        session.sessionId === sessionId
+          ? {
+              ...session,
+              manualTitle,
+              title: manualTitle && manualTitle.trim().length > 0 ? manualTitle.trim() : session.title,
+            }
+          : session,
+      );
+
+      const nextTitle = nextSessions.find((session) => session.sessionId === sessionId)?.title ?? previous.sessionTitle;
+
+      return {
+        ...previous,
+        sessions: sortSessions(nextSessions),
+        sessionTitle: previous.sessionId === sessionId ? nextTitle : previous.sessionTitle,
+      };
     });
 
-    await refreshSessions();
+    try {
+      await invoke<string>('rename_session_command', {
+        payload: {
+          sessionId,
+          manualTitle,
+        },
+      });
 
-    if (state.sessionId === sessionId) {
-      setState((previous) => ({
-        ...previous,
-        sessionTitle:
-          (manualTitle ?? '').trim().length > 0
-            ? (manualTitle ?? '').trim()
-            : previous.sessions.find((session) => session.sessionId === sessionId)?.title ?? previous.sessionTitle,
-      }));
+      await refreshSessions();
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error);
+      setState({
+        ...previousState,
+        errorText,
+      });
     }
   }, [refreshSessions, state.sessionId]);
 
@@ -248,14 +279,37 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    await invoke<string>('pin_session_command', {
-      payload: {
-        sessionId,
-        pinned,
-      },
-    });
+    const previousState = state;
+    setState((previous) => ({
+      ...previous,
+      sessions: sortSessions(
+        previous.sessions.map((session) =>
+          session.sessionId === sessionId
+            ? {
+                ...session,
+                pinned,
+              }
+            : session,
+        ),
+      ),
+    }));
 
-    await refreshSessions();
+    try {
+      await invoke<string>('pin_session_command', {
+        payload: {
+          sessionId,
+          pinned,
+        },
+      });
+
+      await refreshSessions();
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error);
+      setState({
+        ...previousState,
+        errorText,
+      });
+    }
   }, [refreshSessions]);
 
   const deleteSession = useCallback(async (sessionId: string) => {
@@ -264,12 +318,12 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    await invoke('delete_session_command', { sessionId });
-
+    const previousState = state;
     setState((previous) => {
       const deletingActive = previous.sessionId === sessionId;
       return {
         ...previous,
+        sessions: previous.sessions.filter((session) => session.sessionId !== sessionId),
         sessionId: deletingActive ? null : previous.sessionId,
         sessionTitle: deletingActive ? 'New Session' : previous.sessionTitle,
         messages: deletingActive ? [] : previous.messages,
@@ -283,8 +337,17 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
       };
     });
 
-    await refreshSessions();
-  }, [refreshSessions]);
+    try {
+      await invoke('delete_session_command', { sessionId });
+      await refreshSessions();
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error);
+      setState({
+        ...previousState,
+        errorText,
+      });
+    }
+  }, [refreshSessions, state]);
 
   const applyStreamEvent = useCallback((event: ChatStreamEvent) => {
     if (activeRequestRef.current !== event.requestId) {
@@ -521,10 +584,11 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
           return {
             ...previous,
             messages: [...filteredMessages, runMessage],
+            activeRunLabel: state === 'running' || state === 'pending' ? runId : null,
             lastRunStatus: statusText,
             streamStatuses: statusText
               ? [...previous.streamStatuses, statusText]
-              : previous.streamStatuses,
+                : previous.streamStatuses,
           };
         }
         case 'assistant_chunk': {

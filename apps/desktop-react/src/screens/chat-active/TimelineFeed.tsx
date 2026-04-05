@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { ChatMessage } from '../../chat/types';
 
+function formatRunTypeLabel(runType: string | null | undefined) {
+  if (!runType) {
+    return 'Run';
+  }
+
+  return runType
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 type TimelineFeedProps = {
   messages: ChatMessage[];
   errorText: string | null;
@@ -27,6 +38,32 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
     container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
+  useEffect(() => {
+    setExpandedMessageIds((previous) => {
+      const next = { ...previous };
+      let changed = false;
+
+      for (const message of messages) {
+        if (message.kind !== 'run' || !message.runMeta) {
+          continue;
+        }
+
+        const shouldExpandByDefault = message.runMeta.state === 'running' || message.runMeta.state === 'pending';
+        if (previous[message.id] == null && shouldExpandByDefault) {
+          next[message.id] = true;
+          changed = true;
+        }
+
+        if (previous[message.id] === true && message.runMeta.state === 'completed') {
+          next[message.id] = false;
+          changed = true;
+        }
+      }
+
+      return changed ? next : previous;
+    });
+  }, [messages]);
+
   return (
     <div className="flex-1 overflow-y-auto space-y-12 px-8 py-10 no-scrollbar" ref={containerRef}>
       {messages.map((message) => {
@@ -48,6 +85,7 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
         const isRunLike = message.kind === 'run';
         const runMeta = message.runMeta;
         const runSteps = runMeta?.steps ?? [];
+        const showRunDetails = isRunLike && isExpanded;
 
         return (
           <div
@@ -99,7 +137,7 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
                         play_circle
                       </span>
                       <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-secondary">
-                        Run
+                        {formatRunTypeLabel(runMeta?.runType)}
                       </span>
                       {runMeta ? (
                         <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.12em] text-secondary">
@@ -121,12 +159,18 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
                         <span>{runMeta.runId}</span>
                         <span>{runMeta.progressPercent}%</span>
                       </div>
+                      {runSteps.length > 0 && !showRunDetails ? (
+                        <div className="mt-2 text-[10px] uppercase tracking-[0.12em] text-on-surface-variant">
+                          {runSteps.length} tracked step{runSteps.length === 1 ? '' : 's'}
+                        </div>
+                      ) : null}
                       {(runMeta.stepSummary || runMeta.stepKey || runMeta.detailText) ? (
                         <div className="mt-2 rounded-lg border border-secondary/15 bg-surface-container-low px-3 py-2 text-[11px] text-on-surface-variant">
+                          <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-secondary">Current Step</p>
                           <p className="font-medium text-on-surface">
                             {runMeta.stepSummary ?? runMeta.stepKey ?? 'run step'}
                           </p>
-                          {runMeta.detailText ? <p className="mt-1">{runMeta.detailText}</p> : null}
+                          {showRunDetails && runMeta.detailText ? <p className="mt-1">{runMeta.detailText}</p> : null}
                           {runMeta.stepIndex != null && runMeta.stepsTotal != null ? (
                             <p className="mt-1 text-[10px] uppercase tracking-[0.12em]">
                               Step {runMeta.stepIndex}/{runMeta.stepsTotal}
@@ -135,35 +179,61 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
                         </div>
                       ) : null}
 
-                      {runSteps.length > 0 ? (
+                      {showRunDetails && runSteps.length > 0 ? (
                         <div className="mt-2 space-y-1">
                           {runSteps.map((step) => {
                             const isCurrent = runMeta.currentStepKey === step.key;
+                            const isFailed = step.status === 'failed';
+                            const isCompleted = step.status === 'completed';
+                            const isRunning = step.status === 'running';
                             const statusColor =
-                              step.status === 'completed'
+                              isCompleted
                                 ? 'text-secondary'
-                                : step.status === 'failed'
+                                : isFailed
                                   ? 'text-[#ff8d8d]'
-                                  : step.status === 'running'
+                                  : isRunning
                                     ? 'text-primary'
                                     : 'text-on-surface-variant';
                             return (
                               <div
                                 key={step.key}
-                                className={`flex items-start justify-between rounded-md border px-2 py-1 text-[11px] ${
-                                  isCurrent
-                                    ? 'border-primary/25 bg-primary/5'
-                                    : 'border-outline-variant/20 bg-surface-container'
-                                }`}
+                                className="relative pl-5"
                               >
-                                <div className="min-w-0">
-                                  <p className="truncate text-on-surface">{step.summary}</p>
-                                  {step.detailText ? (
-                                    <p className="truncate text-[10px] text-on-surface-variant">{step.detailText}</p>
-                                  ) : null}
-                                </div>
-                                <div className={`ml-2 shrink-0 text-[10px] uppercase tracking-[0.1em] ${statusColor}`}>
-                                  {step.status}
+                                <div className="absolute left-[6px] top-0 bottom-0 w-px bg-outline-variant/25" />
+                                <div
+                                  className={`absolute left-0 top-1.5 h-3 w-3 rounded-full border ${
+                                    isCompleted
+                                      ? 'border-secondary/30 bg-secondary'
+                                      : isFailed
+                                        ? 'border-[#ff8d8d]/30 bg-[#ff8d8d]'
+                                        : isRunning
+                                          ? 'border-primary/30 bg-primary'
+                                          : 'border-outline-variant/30 bg-surface-container-highest'
+                                  }`}
+                                />
+                                <div
+                                  className={`flex items-start justify-between rounded-md border px-2 py-1 text-[11px] ${
+                                    isCurrent
+                                      ? 'border-primary/25 bg-primary/5'
+                                      : isFailed
+                                        ? 'border-[#ff8d8d]/20 bg-[#2a1b1b]'
+                                        : 'border-outline-variant/20 bg-surface-container'
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <p className="truncate text-on-surface">{step.summary}</p>
+                                    {!isFailed && step.detailText ? (
+                                      <p className="truncate text-[10px] text-on-surface-variant">{step.detailText}</p>
+                                    ) : null}
+                                    {isFailed && step.detailText ? (
+                                      <div className="mt-1 rounded-md border border-[#ff8d8d]/20 bg-[#221515] px-2 py-1.5 text-[10px] leading-relaxed text-[#ffb4b4]">
+                                        {step.detailText}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                  <div className={`ml-2 shrink-0 text-[10px] uppercase tracking-[0.1em] ${statusColor}`}>
+                                    {step.status}
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -183,7 +253,7 @@ export default function TimelineFeed({ messages, errorText }: TimelineFeedProps)
                       onClick={() => toggleExpanded(message.id)}
                       type="button"
                     >
-                      {isExpanded ? 'Collapse' : 'Expand'}
+                      {isRunLike ? (isExpanded ? 'Hide Details' : 'Show Details') : isExpanded ? 'Collapse' : 'Expand'}
                     </button>
                   ) : null}
                 </div>

@@ -48,6 +48,7 @@ struct SessionSelectorOption {
     title: String,
     manual_title: Option<String>,
     pinned: bool,
+    updated_at: String,
     status: String,
     label: String,
 }
@@ -832,6 +833,7 @@ fn list_session_selector_options() -> Result<String, String> {
                 .unwrap_or_else(|| session.title.clone()),
             manual_title: session.manual_title.clone(),
             pinned: session.pinned,
+            updated_at: session.updated_at.clone(),
             status: session.status.as_str().to_string(),
             label: format_session_selector_label(session),
         })
@@ -856,6 +858,7 @@ fn rename_session_command(payload: RenameSessionForm) -> Result<String, String> 
             .unwrap_or_else(|| session.title.clone()),
         manual_title,
         pinned: session.pinned,
+        updated_at: session.updated_at.clone(),
         status: session.status.as_str().to_string(),
         label: format_session_selector_label(&session),
     })
@@ -878,6 +881,7 @@ fn pin_session_command(payload: PinSessionForm) -> Result<String, String> {
             .unwrap_or_else(|| session.title.clone()),
         manual_title,
         pinned: session.pinned,
+        updated_at: session.updated_at.clone(),
         status: session.status.as_str().to_string(),
         label: format_session_selector_label(&session),
     })

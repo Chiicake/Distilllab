@@ -6,32 +6,30 @@ import RightInspector from './RightInspector';
 
 type ChatDraftScreenProps = {
   onEnterActiveRun: (sessionId: string) => void;
+  onRequestDeleteSession: (sessionId: string, title: string) => void;
+  onRequestRenameSession: (sessionId: string, currentTitle: string) => void;
 };
 
-export default function ChatDraftScreen({ onEnterActiveRun }: ChatDraftScreenProps) {
-  const { state, deleteSession, openSession, pinSession, renameSession, sendFirstMessage } = useChat();
+export default function ChatDraftScreen({
+  onEnterActiveRun,
+  onRequestDeleteSession,
+  onRequestRenameSession,
+}: ChatDraftScreenProps) {
+  const { state, openSession, pinSession, sendFirstMessage } = useChat();
 
   return (
     <div className="flex flex-1 overflow-hidden">
       <LeftRail
         activeSessionId={state.sessionId}
         onDeleteSession={(sessionId, title) => {
-          const confirmed = window.confirm(`Delete session "${title}"?`);
-          if (!confirmed) {
-            return;
-          }
-          void deleteSession(sessionId);
+          onRequestDeleteSession(sessionId, title);
         }}
         onOpenSession={async (sessionId) => {
           await openSession(sessionId);
           onEnterActiveRun(sessionId);
         }}
         onRenameSession={(sessionId, currentManualTitle, currentTitle) => {
-          const nextTitle = window.prompt('Rename session', currentManualTitle ?? currentTitle);
-          if (nextTitle === null) {
-            return;
-          }
-          void renameSession(sessionId, nextTitle.trim() ? nextTitle : null);
+          onRequestRenameSession(sessionId, currentManualTitle ?? currentTitle);
         }}
         onTogglePinSession={(sessionId, pinned) => {
           void pinSession(sessionId, pinned);

@@ -8,17 +8,29 @@ import TimelineFeed from './TimelineFeed';
 import TimelineHeader from './TimelineHeader';
 
 type ChatActiveScreenProps = {
+  onRequestDeleteSession: (sessionId: string, title: string) => void;
+  onRequestRenameSession: (sessionId: string, currentTitle: string) => void;
   onReturnToDraft: () => void;
   onSelectSession: (sessionId: string) => void;
   sessionId?: string;
 };
 
 export default function ChatActiveScreen({
+  onRequestDeleteSession,
+  onRequestRenameSession,
   onReturnToDraft,
   onSelectSession,
   sessionId,
 }: ChatActiveScreenProps) {
-  const { deleteSession, openSession, pinSession, renameSession, sendFollowUpMessage, state } = useChat();
+  const { openSession, pinSession, sendFollowUpMessage, state } = useChat();
+  const currentRun = [...state.messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.kind === 'run'
+        && message.runMeta
+        && (message.runMeta.state === 'running' || message.runMeta.state === 'pending'),
+    )?.runMeta ?? null;
 
   useEffect(() => {
     if (sessionId && sessionId !== state.sessionId) {
@@ -31,29 +43,14 @@ export default function ChatActiveScreen({
         <ActiveLeftRail
           activeSessionId={state.sessionId}
           onDeleteSession={(nextSessionId, title) => {
-            const confirmed = window.confirm(`Delete session "${title}"?`);
-            if (!confirmed) {
-              return;
-            }
-
-            void (async () => {
-              await deleteSession(nextSessionId);
-              if (state.sessionId === nextSessionId) {
-                onReturnToDraft();
-              }
-            })();
+            onRequestDeleteSession(nextSessionId, title);
           }}
           onOpenSession={async (nextSessionId) => {
             onSelectSession(nextSessionId);
             await openSession(nextSessionId);
           }}
           onRenameSession={(nextSessionId, currentManualTitle, currentTitle) => {
-            const nextTitle = window.prompt('Rename session', currentManualTitle ?? currentTitle);
-            if (nextTitle === null) {
-              return;
-            }
-
-            void renameSession(nextSessionId, nextTitle.trim() ? nextTitle : null);
+            onRequestRenameSession(nextSessionId, currentManualTitle ?? currentTitle);
           }}
           onReturnToDraft={onReturnToDraft}
           onTogglePinSession={(nextSessionId, pinned) => {
@@ -62,7 +59,7 @@ export default function ChatActiveScreen({
           sessions={state.sessions}
         />
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-surface">
-        <TimelineHeader activeRunLabel={state.activeRunLabel} sessionTitle={state.sessionTitle} />
+        <TimelineHeader activeRunLabel={state.activeRunLabel} currentRun={currentRun} sessionTitle={state.sessionTitle} />
 
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           <TimelineFeed errorText={state.errorText} messages={state.messages} />
@@ -76,6 +73,7 @@ export default function ChatActiveScreen({
       </main>
 
       <ActiveInspector
+        currentRun={currentRun}
         decisionSummary={state.decisionSummary}
         liveAssistantText={state.liveAssistantText}
         lastRunStatus={state.lastRunStatus}

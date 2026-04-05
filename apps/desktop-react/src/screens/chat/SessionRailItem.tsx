@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-
 import type { ChatSessionSummary } from '../../chat/types';
+import SessionActionMenu from './SessionActionMenu';
 
 type SessionRailItemProps = {
   session: ChatSessionSummary;
@@ -21,28 +20,8 @@ export default function SessionRailItem({
   onDelete,
   onTogglePin,
 }: SessionRailItemProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!menuOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-
-    window.addEventListener('mousedown', handlePointerDown);
-    return () => {
-      window.removeEventListener('mousedown', handlePointerDown);
-    };
-  }, [menuOpen]);
-
   return (
-    <div className="relative" ref={containerRef}>
+    <div className="relative">
       <div
         className={`group flex w-full items-start gap-2 rounded-md transition-all duration-300 hover:bg-[#1f2020] hover:opacity-100 ${
           active
@@ -71,61 +50,13 @@ export default function SessionRailItem({
           ) : null}
         </button>
 
-        <div className="relative tauri-no-drag shrink-0">
-          <button
-            aria-label="Session actions"
-            className={`rounded-md p-1 transition-colors ${
-              menuOpen || active ? 'text-[#dbe1ff]' : 'text-[#8f95bf] opacity-0 group-hover:opacity-100'
-            } hover:bg-[#2a2b2b] hover:text-[#f3faff]`}
-            onClick={(event) => {
-              event.stopPropagation();
-              setMenuOpen((previous) => !previous);
-            }}
-            type="button"
-          >
-            <span className="material-symbols-outlined text-[18px]" data-icon="more_horiz">
-              more_horiz
-            </span>
-          </button>
-
-          {menuOpen ? (
-            <div className="absolute right-0 top-9 z-50 min-w-[160px] rounded-lg border border-outline-variant/20 bg-[#171818] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.35)]">
-              <button
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-on-surface hover:bg-[#232424]"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onRename(session.sessionId, session.manualTitle ?? null, session.title);
-                }}
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[16px]">edit</span>
-                <span>Rename</span>
-              </button>
-              <button
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-on-surface hover:bg-[#232424]"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onTogglePin(session.sessionId, !(session.pinned ?? false));
-                }}
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[16px]">keep</span>
-                <span>{session.pinned ? 'Unpin' : 'Pin to top'}</span>
-              </button>
-              <button
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-[#ffb4b4] hover:bg-[#2b2020]"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onDelete(session.sessionId, session.title);
-                }}
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[16px]">delete</span>
-                <span>Delete</span>
-              </button>
-            </div>
-          ) : null}
-        </div>
+        <SessionActionMenu
+          active={active}
+          onDelete={() => onDelete(session.sessionId, session.title)}
+          onRename={() => onRename(session.sessionId, session.manualTitle ?? null, session.title)}
+          onTogglePin={() => onTogglePin(session.sessionId, !(session.pinned ?? false))}
+          pinned={Boolean(session.pinned)}
+        />
       </div>
     </div>
   );

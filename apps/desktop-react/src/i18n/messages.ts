@@ -76,6 +76,23 @@ const enMessages = {
   'settings.debug.output.errorPrefix': 'Error: ',
   'settings.debug.output.bridgeMissing':
     'Tauri bridge is unavailable. Open this screen from the Tauri app instead of plain Vite browser mode.',
+
+  'session.menu.rename': 'Rename',
+  'session.menu.pin': 'Pin to top',
+  'session.menu.unpin': 'Unpin',
+  'session.menu.delete': 'Delete',
+  'session.menu.actions': 'Session actions',
+  'session.dialog.rename.badge': 'Session',
+  'session.dialog.rename.title': 'Rename Session',
+  'session.dialog.rename.description': 'Leave the field empty to restore automatic naming.',
+  'session.dialog.rename.field': 'Session name',
+  'session.dialog.rename.placeholder': 'Enter a custom title',
+  'session.dialog.delete.badge': 'Danger',
+  'session.dialog.delete.title': 'Delete Session?',
+  'session.dialog.delete.descriptionPrefix': 'This will permanently remove',
+  'session.dialog.delete.descriptionSuffix': 'and its timeline. This action cannot be undone.',
+  'common.cancel': 'Cancel',
+  'common.save': 'Save',
 } as const;
 
 export type MessageKey = keyof typeof enMessages;
@@ -138,6 +155,23 @@ const zhCnMessages: Record<MessageKey, string> = {
   'settings.debug.output.running': '执行中',
   'settings.debug.output.errorPrefix': '错误：',
   'settings.debug.output.bridgeMissing': '当前没有 Tauri 桥接，请在 Tauri 应用中打开此页面，而不是纯 Vite 浏览器模式。',
+
+  'session.menu.rename': '重命名',
+  'session.menu.pin': '置顶',
+  'session.menu.unpin': '取消置顶',
+  'session.menu.delete': '删除',
+  'session.menu.actions': 'Session 操作',
+  'session.dialog.rename.badge': 'Session',
+  'session.dialog.rename.title': '重命名 Session',
+  'session.dialog.rename.description': '如果留空，将恢复自动命名。',
+  'session.dialog.rename.field': 'Session 名称',
+  'session.dialog.rename.placeholder': '输入自定义标题',
+  'session.dialog.delete.badge': '危险操作',
+  'session.dialog.delete.title': '删除 Session？',
+  'session.dialog.delete.descriptionPrefix': '这会永久删除',
+  'session.dialog.delete.descriptionSuffix': '及其时间线，此操作无法撤销。',
+  'common.cancel': '取消',
+  'common.save': '保存',
 };
 
 export const messages: Record<Locale, Record<MessageKey, string>> = {
