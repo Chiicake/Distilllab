@@ -350,11 +350,66 @@ fn format_session_messages_text(messages: &[SessionMessage]) -> String {
                     SessionMessageRole::System => "[System]",
                 };
 
-                format!("{}\n{}", role_header, indent_block(&message.content))
+                let formatted_content = if message.message_type == "user_message" {
+                    let attachment_json = serde_json::from_str::<serde_json::Value>(&message.data_json)
+                        .ok()
+                        .and_then(|value| value.get("attachments").cloned())
+                        .filter(|value| value.is_array() && !value.as_array().unwrap_or(&vec![]).is_empty())
+                        .map(|attachments| {
+                            serde_json::json!({ "attachments": attachments }).to_string()
+                        });
+
+                    match attachment_json {
+                        Some(json) if !message.content.trim().is_empty() => {
+                            format!("{}\n{}", message.content, json)
+                        }
+                        Some(json) => json,
+                        None => message.content.clone(),
+                    }
+                } else {
+                    message.content.clone()
+                };
+
+                format!("{}\n{}", role_header, indent_block(&formatted_content))
             }
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_session_messages_text;
+    use schema::{SessionMessage, SessionMessageRole};
+
+    #[test]
+    fn format_session_messages_text_preserves_user_attachment_metadata_for_reopen() {
+        let timeline = format_session_messages_text(&[
+            SessionMessage {
+                id: "message-user".to_string(),
+                session_id: "session-1".to_string(),
+                run_id: None,
+                message_type: "user_message".to_string(),
+                role: SessionMessageRole::User,
+                content: "Please review the attached notes".to_string(),
+                data_json: serde_json::json!({
+                    "attachments": [
+                        {
+                            "name": "notes.md",
+                            "size": 2048
+                        }
+                    ]
+                })
+                .to_string(),
+                created_at: "2026-04-05T00:00:00Z".to_string(),
+            },
+        ]);
+
+        assert!(timeline.contains("[User]"));
+        assert!(timeline.contains("Please review the attached notes"));
+        assert!(timeline.contains("\"attachments\""));
+        assert!(timeline.contains("\"name\":\"notes.md\""));
+    }
 }
 
 fn indent_block(text: &str) -> String {
