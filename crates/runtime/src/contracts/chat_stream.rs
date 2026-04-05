@@ -15,6 +15,7 @@ pub enum ChatStreamPhase {
     RunFinished,
     AssistantStarted,
     AssistantChunk,
+    Stopped,
     Completed,
     Error,
 }

@@ -2,6 +2,7 @@ pub mod app;
 pub mod config;
 pub mod contracts;
 pub mod flows;
+pub mod runs;
 pub mod services;
 
 pub use app::AppRuntime;
@@ -15,7 +16,8 @@ pub use config::{
 pub use contracts::{
     ChatStreamEvent, ChatStreamPhase, DistillRunStepPreview, LlmSessionDebugRequest,
     MaterializeDedupePolicy, MaterializeFailure, MaterializeSkip, MaterializeSourcesInput,
-    MaterializeSourcesResult, MaterializedSourceRef, RunHandoffPreview,
+    MaterializeSourcesResult, MaterializedSourceRef, RunExecutionOutput,
+    RunHandoffPreview, RunResultContext,
     RunProgressPhase, RunProgressUpdate, SessionIntakePreview,
     SessionMessageExecutionResult, SessionMessageRequest, SourceOriginKind,
 };

@@ -3,6 +3,7 @@ use crate::contracts::{
     DistillRunStepPreview, MaterializeFailure, MaterializeSkip, MaterializeSourcesResult,
     MaterializedSourceRef, RunHandoffPreview, RunInput, SourceOriginKind,
 };
+use crate::runs::import_and_distill_step_definitions;
 use crate::services::{
     create_attachment_source, create_message_source, find_source_for_run_origin,
 };
@@ -20,22 +21,13 @@ pub fn build_import_and_distill_handoff_preview(
         primary_object_type,
         primary_object_id,
         summary: "Previewing the import-and-distill workflow for this work material.".to_string(),
-        planned_steps: vec![
-            DistillRunStepPreview {
-                step_key: "materialize_sources".to_string(),
-                summary: "Materialize the current work material into one or more sources."
-                    .to_string(),
-            },
-            DistillRunStepPreview {
-                step_key: "chunk_sources".to_string(),
-                summary: "Chunk the source material into retrieval and extraction units."
-                    .to_string(),
-            },
-            DistillRunStepPreview {
-                step_key: "extract_work_items".to_string(),
-                summary: "Extract structured work items from the chunked material.".to_string(),
-            },
-        ],
+        planned_steps: import_and_distill_step_definitions()
+            .iter()
+            .map(|step| DistillRunStepPreview {
+                step_key: step.step_key.to_string(),
+                summary: step.summary.to_string(),
+            })
+            .collect(),
     }
 }
 

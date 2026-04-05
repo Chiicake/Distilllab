@@ -1,6 +1,9 @@
 use crate::app::AppRuntime;
-use crate::contracts::{MaterializeSourcesResult, RunInput, RunProgressPhase, RunProgressUpdate};
+use crate::contracts::{
+    MaterializeSourcesResult, RunExecutionOutput, RunInput, RunProgressPhase, RunProgressUpdate,
+};
 use crate::flows::execute_materialize_sources;
+use crate::runs::import_and_distill_step_definitions;
 use agent::{SessionActionType, SessionAgentDecision};
 use chrono::Utc;
 use memory::db::open_database;
@@ -16,6 +19,7 @@ type RuntimeError = Box<dyn std::error::Error + Send + Sync>;
 pub struct DistillRunExecutionOutcome {
     pub run: Run,
     pub materialize_result: Option<MaterializeSourcesResult>,
+    pub output: Option<RunExecutionOutput>,
 }
 
 fn run_progress_update(
@@ -127,15 +131,26 @@ where
     ));
 
     let materialize_result = if run.run_type.as_str() == "import_and_distill" {
+        let steps = import_and_distill_step_definitions();
+        let materialize_step = steps
+            .iter()
+            .find(|step| step.step_key == "materialize_sources")
+            .ok_or_else(|| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "missing materialize_sources step definition",
+                )) as RuntimeError
+            })?;
+
         on_progress(run_progress_update(
             RunProgressPhase::StepStarted,
             &run,
             Some(10),
-            Some("materialize_sources"),
-            Some("Materialize message and attachment sources for the run"),
+            Some(materialize_step.step_key),
+            Some(materialize_step.summary),
             Some("running"),
             Some(1),
-            Some(1),
+            Some(steps.len() as u32),
             Some("materialize step started"),
         ));
 
@@ -145,15 +160,15 @@ where
             RunProgressPhase::StepFinished,
             &run,
             Some(90),
-            Some("materialize_sources"),
-            Some("Materialize message and attachment sources for the run"),
+            Some(materialize_step.step_key),
+            Some(materialize_step.summary),
             Some(if result.can_continue {
                 "completed"
             } else {
                 "failed"
             }),
             Some(1),
-            Some(1),
+            Some(steps.len() as u32),
             Some(result.summary.as_str()),
         ));
 
@@ -232,5 +247,6 @@ where
     Ok(DistillRunExecutionOutcome {
         run,
         materialize_result,
+        output: None,
     })
 }

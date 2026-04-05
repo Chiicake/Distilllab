@@ -2603,10 +2603,11 @@ mod tests {
             .expect("distill intake should produce a handoff preview");
 
         assert_eq!(handoff.run_type, "import_and_distill");
-        assert_eq!(handoff.planned_steps.len(), 3);
+        assert_eq!(handoff.planned_steps.len(), 4);
         assert_eq!(handoff.planned_steps[0].step_key, "materialize_sources");
         assert_eq!(handoff.planned_steps[1].step_key, "chunk_sources");
         assert_eq!(handoff.planned_steps[2].step_key, "extract_work_items");
+        assert_eq!(handoff.planned_steps[3].step_key, "extract_assets");
     }
 
     #[tokio::test]

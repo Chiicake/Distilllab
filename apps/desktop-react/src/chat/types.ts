@@ -62,6 +62,7 @@ export type ChatStreamPhase =
   | 'run_finished'
   | 'assistant_started'
   | 'assistant_chunk'
+  | 'stopped'
   | 'completed'
   | 'error';
 
