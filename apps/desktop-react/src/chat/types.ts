@@ -1,8 +1,41 @@
 export type ChatMessageRole = 'user' | 'assistant' | 'system';
 
+export type RunState = 'queued' | 'pending' | 'running' | 'completed' | 'failed';
+
+export type RunStepStatus = 'started' | 'pending' | 'running' | 'completed' | 'failed';
+
+export type DesktopTimelineAttachment = {
+  name: string;
+  size?: number | null;
+};
+
+export type DesktopRunStepMeta = {
+  key: string;
+  summary: string;
+  status: RunStepStatus;
+  index?: number | null;
+  total?: number | null;
+  detailText?: string | null;
+};
+
+export type DesktopRunCardMeta = {
+  runId: string;
+  state: RunState;
+  progressPercent: number;
+  runType?: string | null;
+  stepKey?: string | null;
+  stepSummary?: string | null;
+  stepStatus?: string | null;
+  stepIndex?: number | null;
+  stepsTotal?: number | null;
+  detailText?: string | null;
+  currentStepKey?: string | null;
+  steps?: DesktopRunStepMeta[];
+};
+
 export type RunCardMeta = {
   runId: string;
-  state: 'pending' | 'running' | 'completed' | 'failed';
+  state: RunState;
   progressPercent: number;
   runType?: string | null;
   stepKey?: string | null;
@@ -18,7 +51,7 @@ export type RunCardMeta = {
 export type RunStepMeta = {
   key: string;
   summary: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | string;
+  status: RunStepStatus;
   index?: number | null;
   total?: number | null;
   detailText?: string | null;
@@ -38,6 +71,19 @@ export type ChatMessage = {
     name: string;
     size?: number | null;
   }>;
+};
+
+export type DesktopTimelineMessage = {
+  id: string;
+  role: ChatMessageRole;
+  kind: 'message' | 'tool' | 'run';
+  sourceMessageType?: string | null;
+  content: string;
+  summary?: string | null;
+  details?: string | null;
+  attachments?: DesktopTimelineAttachment[];
+  runMeta?: DesktopRunCardMeta | null;
+  createdAt: string;
 };
 
 export type ChatSessionSummary = {
@@ -72,7 +118,7 @@ export type RunProgressUpdate = {
   phase: RunProgressPhase;
   runId: string;
   runType: string;
-  runState: 'pending' | 'running' | 'completed' | 'failed' | string;
+  runState: RunState;
   progressPercent?: number | null;
   stepKey?: string | null;
   stepSummary?: string | null;
