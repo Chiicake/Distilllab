@@ -4,6 +4,8 @@
 *.db
 /.claude
 CLAUDE.md
+.impeccable.md
+
 # Added by cargo
 
 /target
