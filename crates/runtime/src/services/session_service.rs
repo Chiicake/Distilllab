@@ -1721,6 +1721,16 @@ mod tests {
                         }
                     ]
                 }"#,
+                r#"{
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "{\"decision\":\"create_new_project\",\"title\":\"Prototype Program\",\"summary\":\"Prototype planning, scope, and delivery work.\",\"reasoning_summary\":\"The extracted work belongs to a distinct prototype-focused body of work.\"}"
+                            }
+                        }
+                    ]
+                }"#,
             ] {
             let (mut stream, _) = listener
                 .accept()
@@ -1801,10 +1811,16 @@ mod tests {
         assert_eq!(chunks[0].title, "Progress update");
         assert_eq!(chunks[0].summary, "A concrete work update was captured.");
         assert!(outcome.output.is_some());
+        assert_eq!(outcome.run.primary_object_type, "project");
+        assert_eq!(outcome.run.primary_object_id, "project-1");
         assert_eq!(
             outcome.output.as_ref().map(|value| value.execution_summary.as_str()),
-            Some("materialized sources, created 1 chunks, extracted 1 work item drafts")
+            Some("materialized sources, created 1 chunks, extracted 1 work item drafts, resolved project Prototype Program")
         );
+
+        let projects = memory::project_store::list_projects(&conn).expect("projects should load");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].name, "Prototype Program");
     }
 
     #[tokio::test]
@@ -2699,11 +2715,12 @@ mod tests {
             .expect("distill intake should produce a handoff preview");
 
         assert_eq!(handoff.run_type, "import_and_distill");
-        assert_eq!(handoff.planned_steps.len(), 4);
+        assert_eq!(handoff.planned_steps.len(), 5);
         assert_eq!(handoff.planned_steps[0].step_key, "materialize_sources");
         assert_eq!(handoff.planned_steps[1].step_key, "chunk_sources");
         assert_eq!(handoff.planned_steps[2].step_key, "extract_work_items");
-        assert_eq!(handoff.planned_steps[3].step_key, "extract_assets");
+        assert_eq!(handoff.planned_steps[3].step_key, "resolve_project_context");
+        assert_eq!(handoff.planned_steps[4].step_key, "extract_assets");
     }
 
     #[tokio::test]

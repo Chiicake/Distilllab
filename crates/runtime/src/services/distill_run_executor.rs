@@ -7,16 +7,19 @@ use crate::flows::execute_materialize_sources;
 use crate::runs::import_and_distill_step_definitions;
 use crate::services::{list_sources_for_run, read_source_text};
 use agent::{
-    run_work_item_extraction_agent, LlmProviderConfig, SessionActionType, SessionAgentDecision,
-    WorkItemExtractionChunkInput, WorkItemExtractionInput,
+    run_project_resolution_agent, run_work_item_extraction_agent, LlmProviderConfig,
+    ProjectResolutionChunkInput, ProjectResolutionInput, ProjectResolutionWorkItemInput,
+    ProjectSummaryInput, SessionActionType, SessionAgentDecision, WorkItemExtractionChunkInput,
+    WorkItemExtractionInput,
 };
 use chrono::Utc;
 use memory::chunk_store::insert_chunk;
 use memory::db::open_database;
 use memory::migrations::run_migrations;
+use memory::project_store::insert_project;
 use memory::run_store::{insert_run, update_run_status};
 use schema::run::RunType;
-use schema::{Chunk, Run, RunState};
+use schema::{Chunk, Project, Run, RunState};
 use uuid::Uuid;
 
 type RuntimeError = Box<dyn std::error::Error + Send + Sync>;
@@ -391,6 +394,112 @@ where
                 Some(work_item_finish_detail.as_str()),
             ));
 
+            let project_step = steps
+                .iter()
+                .find(|step| step.step_key == "resolve_project_context")
+                .ok_or_else(|| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "missing resolve_project_context step definition",
+                    )) as RuntimeError
+                })?;
+
+            on_progress(run_progress_update(
+                RunProgressPhase::StepStarted,
+                &run,
+                Some(85),
+                Some(project_step.step_key),
+                Some(project_step.summary),
+                Some("running"),
+                Some(4),
+                Some(steps.len() as u32),
+                Some("project resolution started"),
+            ));
+
+            let existing_projects = memory::project_store::list_projects(&conn)?
+                .into_iter()
+                .map(|project| ProjectSummaryInput {
+                    project_id: project.id,
+                    name: project.name,
+                    summary: project.summary,
+                })
+                .collect::<Vec<_>>();
+
+            let project_decision = run_project_resolution_agent(
+                &client,
+                llm_provider_config,
+                &ProjectResolutionInput {
+                    run_id: run.id.clone(),
+                    distill_goal: run_input.decision_summary.clone(),
+                    chunks: sources
+                        .iter()
+                        .flat_map(|source| {
+                            memory::chunk_store::list_chunks_by_source(&conn, &source.id)
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|chunk| ProjectResolutionChunkInput {
+                                    chunk_id: chunk.id,
+                                    title: chunk.title,
+                                    summary: chunk.summary,
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .collect(),
+                    work_items: work_item_output
+                        .work_items
+                        .iter()
+                        .map(|item| ProjectResolutionWorkItemInput {
+                            title: item.title.clone(),
+                            summary: item.summary.clone(),
+                        })
+                        .collect(),
+                    existing_projects,
+                },
+            )
+            .await
+            .map_err(RuntimeError::from)?;
+
+            let resolved_project = match project_decision {
+                agent::ProjectResolutionDecision::UseExistingProject { project_id, .. } => {
+                    memory::project_store::get_project_by_id(&conn, &project_id)?
+                        .ok_or_else(|| {
+                            Box::new(std::io::Error::new(
+                                std::io::ErrorKind::NotFound,
+                                format!("resolved project not found: {project_id}"),
+                            )) as RuntimeError
+                        })?
+                }
+                agent::ProjectResolutionDecision::CreateNewProject {
+                    title,
+                    summary,
+                    ..
+                } => {
+                    let project = Project {
+                        id: "project-1".to_string(),
+                        name: title,
+                        summary,
+                    };
+                    insert_project(&conn, &project)?;
+                    project
+                }
+            };
+
+            run.primary_object_type = "project".to_string();
+            run.primary_object_id = resolved_project.id.clone();
+
+            let project_finish_detail = format!("resolved project: {}", resolved_project.name);
+            on_progress(run_progress_update(
+                RunProgressPhase::StepFinished,
+                &run,
+                Some(90),
+                Some(project_step.step_key),
+                Some(project_step.summary),
+                Some("completed"),
+                Some(4),
+                Some(steps.len() as u32),
+                Some(project_finish_detail.as_str()),
+            ));
+
             let next_status = RunState::Completed;
             update_run_status(&conn, &run.id, &next_status)?;
             run.status = next_status;
@@ -414,9 +523,10 @@ where
                     asset_ids: vec![],
                     work_item_ids: vec![],
                     execution_summary: format!(
-                        "materialized sources, created {} chunks, extracted {} work item drafts",
+                        "materialized sources, created {} chunks, extracted {} work item drafts, resolved project {}",
                         total_chunks,
-                        work_item_output.work_items.len()
+                        work_item_output.work_items.len(),
+                        resolved_project.name
                     ),
                 }),
             });

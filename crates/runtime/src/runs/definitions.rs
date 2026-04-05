@@ -12,7 +12,7 @@ pub struct RunDefinition {
     pub steps: &'static [RunStepDefinition],
 }
 
-const IMPORT_AND_DISTILL_STEPS: [RunStepDefinition; 4] = [
+const IMPORT_AND_DISTILL_STEPS: [RunStepDefinition; 5] = [
     RunStepDefinition {
         step_key: "materialize_sources",
         summary: "Materialize the current work material into one or more sources.",
@@ -24,6 +24,10 @@ const IMPORT_AND_DISTILL_STEPS: [RunStepDefinition; 4] = [
     RunStepDefinition {
         step_key: "extract_work_items",
         summary: "Extract structured work items from the chunked material.",
+    },
+    RunStepDefinition {
+        step_key: "resolve_project_context",
+        summary: "Decide whether outputs belong to an existing project or require a new one.",
     },
     RunStepDefinition {
         step_key: "extract_assets",
