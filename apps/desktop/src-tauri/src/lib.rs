@@ -69,6 +69,13 @@ struct PinSessionForm {
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+struct PendingAttachmentOption {
+    path: String,
+    name: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct FirstSendCommandResponse {
     session_id: String,
     timeline_text: String,
@@ -899,6 +906,34 @@ fn delete_session_command(session_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn pick_attachments_command(app: tauri::AppHandle) -> Result<String, String> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<Option<Vec<tauri_plugin_dialog::FilePath>>>(1);
+    tauri_plugin_dialog::DialogExt::dialog(&app).file().pick_files(move |files| {
+        let _ = sender.send(files);
+    });
+
+    let files = tauri::async_runtime::spawn_blocking(move || receiver.recv().ok())
+        .await
+        .map_err(|e| e.to_string())?
+        .unwrap_or(None);
+
+    let attachments = files
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|file_path: tauri_plugin_dialog::FilePath| {
+            let path = file_path.into_path().ok()?;
+            let name = path.file_name()?.to_str()?.to_string();
+            Some(PendingAttachmentOption {
+                path: path.to_string_lossy().to_string(),
+                name,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    serde_json::to_string(&attachments).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn list_runs() -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
     let runs = runtime::list_runs(&runtime).map_err(|e| e.to_string())?;
@@ -1691,6 +1726,7 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            app.handle().plugin(tauri_plugin_dialog::init())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1703,6 +1739,7 @@ pub fn run() {
             list_runs,
             list_sessions,
             list_session_selector_options,
+            pick_attachments_command,
             rename_session_command,
             pin_session_command,
             delete_session_command,

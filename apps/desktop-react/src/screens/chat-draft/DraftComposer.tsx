@@ -1,13 +1,16 @@
 import { useState } from 'react';
 
+import { mergePendingAttachments, pickPendingAttachments, type PendingAttachment } from '../chat/pending-attachments';
+
 type DraftComposerProps = {
-  onSend: (message: string) => Promise<void>;
+  onSend: (message: string, attachmentPaths: string[]) => Promise<void>;
   isStreaming: boolean;
   errorText: string | null;
 };
 
 export default function DraftComposer({ onSend, isStreaming, errorText }: DraftComposerProps) {
   const [message, setMessage] = useState('');
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
   const submit = async () => {
     const trimmed = message.trim();
@@ -15,14 +18,42 @@ export default function DraftComposer({ onSend, isStreaming, errorText }: DraftC
       return;
     }
 
-    await onSend(trimmed);
+    await onSend(trimmed, attachments.map((attachment) => attachment.path));
     setMessage('');
+    setAttachments([]);
   };
 
   return (
     <div className="bg-gradient-to-t from-surface to-transparent p-6">
       <div className="relative mx-auto max-w-4xl">
         <div className="overflow-hidden rounded-2xl bg-surface-container-high shadow-2xl transition-all focus-within:ring-1 focus-within:ring-primary/30">
+          {attachments.length > 0 ? (
+            <div className="flex flex-wrap gap-2 border-b border-outline-variant/10 px-5 py-3">
+              {attachments.map((attachment) => (
+                <div
+                  key={attachment.path}
+                  className="flex items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container-highest px-3 py-1 text-[11px] text-on-surface"
+                >
+                  <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-primary" data-icon="attach_file">
+                    attach_file
+                  </span>
+                  <span className="max-w-[220px] truncate">{attachment.name}</span>
+                  <button
+                    className="text-on-surface-variant transition-colors hover:text-on-surface"
+                    onClick={() => {
+                      setAttachments((previous) => previous.filter((item) => item.path !== attachment.path));
+                    }}
+                    type="button"
+                  >
+                    <span aria-hidden="true" className="material-symbols-outlined text-[14px]" data-icon="close">
+                      close
+                    </span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <textarea
             aria-label="Describe the work you want to distill into structure"
             className="min-h-[64px] w-full resize-none border-none bg-transparent p-5 font-body text-on-surface placeholder:text-on-surface-variant/40 focus:ring-0"
@@ -42,6 +73,12 @@ export default function DraftComposer({ onSend, isStreaming, errorText }: DraftC
             <div className="flex gap-4">
               <button
                 className="flex items-center gap-1 text-xs text-on-surface-variant transition-colors hover:text-on-surface"
+                onClick={() => {
+                  void (async () => {
+                    const picked = await pickPendingAttachments();
+                    setAttachments((previous) => mergePendingAttachments(previous, picked));
+                  })();
+                }}
                 type="button"
               >
                 <span aria-hidden="true" className="material-symbols-outlined" data-icon="attach_file">

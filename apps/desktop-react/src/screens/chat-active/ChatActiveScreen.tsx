@@ -65,8 +65,8 @@ export default function ChatActiveScreen({
           <TimelineFeed errorText={state.errorText} messages={state.messages} />
           <ActiveComposer
             isStreaming={state.isStreaming}
-            onSend={async (message) => {
-              await sendFollowUpMessage(message);
+            onSend={async (message, attachmentPaths) => {
+              await sendFollowUpMessage(message, attachmentPaths);
             }}
           />
         </div>

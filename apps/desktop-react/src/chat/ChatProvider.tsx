@@ -31,8 +31,8 @@ type ChatContextValue = {
   renameSession: (sessionId: string, manualTitle: string | null) => Promise<void>;
   pinSession: (sessionId: string, pinned: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
-  sendFirstMessage: (message: string) => Promise<string | null>;
-  sendFollowUpMessage: (message: string) => Promise<void>;
+  sendFirstMessage: (message: string, attachmentPaths?: string[]) => Promise<string | null>;
+  sendFollowUpMessage: (message: string, attachmentPaths?: string[]) => Promise<void>;
   resetDraft: () => void;
 };
 
@@ -676,7 +676,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
     void refreshSessions();
   }, [refreshSessions]);
 
-  const sendFirstMessage = useCallback(async (message: string) => {
+  const sendFirstMessage = useCallback(async (message: string, attachmentPaths: string[] = []) => {
     const invoke = getTauriInvoke();
     if (!invoke) {
       setState((previous) => ({ ...previous, errorText: 'Tauri bridge unavailable.' }));
@@ -707,7 +707,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
           form: {
             sessionId: 'draft',
             userMessage: message,
-            attachmentPaths: [],
+            attachmentPaths,
           },
         },
       });
@@ -725,7 +725,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
     return sessionId;
   }, [refreshSessions]);
 
-  const sendFollowUpMessage = useCallback(async (message: string) => {
+  const sendFollowUpMessage = useCallback(async (message: string, attachmentPaths: string[] = []) => {
     const invoke = getTauriInvoke();
     if (!invoke || !state.sessionId) {
       setState((previous) => ({ ...previous, errorText: 'Active session required.' }));
@@ -754,7 +754,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
           form: {
             sessionId: state.sessionId,
             userMessage: message,
-            attachmentPaths: [],
+            attachmentPaths,
           },
         },
       });

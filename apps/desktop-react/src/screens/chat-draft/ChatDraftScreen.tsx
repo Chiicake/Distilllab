@@ -42,8 +42,8 @@ export default function ChatDraftScreen({
         <DraftComposer
           errorText={state.errorText}
           isStreaming={state.isStreaming}
-          onSend={async (message) => {
-            const sessionId = await sendFirstMessage(message);
+          onSend={async (message, attachmentPaths) => {
+            const sessionId = await sendFirstMessage(message, attachmentPaths);
             if (sessionId) {
               onEnterActiveRun(sessionId);
             }

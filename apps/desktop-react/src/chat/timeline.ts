@@ -266,10 +266,13 @@ export function parseTimelineText(timelineText: string): ChatMessage[] {
     if (activeHeader.startsWith('[Tool]')) {
       messages.push(parseToolMessage(activeHeader, normalizedBody, messages.length));
     } else if (activeHeader.startsWith('[Run]')) {
-      const firstLine = normalizedBody.split('\n')[0] ?? '';
-      const payloadMatch = firstLine.match(/\{.*\}$/);
-      const dataJson = payloadMatch ? payloadMatch[0] : '{}';
-      const runMessage = parseRunMessage(activeHeader, normalizedBody, dataJson);
+      const bodyLines = normalizedBody.split('\n');
+      const lastLine = bodyLines[bodyLines.length - 1]?.trim() ?? '';
+      const dataJson = lastLine.startsWith('{') && lastLine.endsWith('}') ? lastLine : '{}';
+      const visibleBody = dataJson === '{}'
+        ? normalizedBody
+        : bodyLines.slice(0, -1).join('\n').trim();
+      const runMessage = parseRunMessage(activeHeader, visibleBody, dataJson);
       const existingIndex = messages.findIndex((message) => message.id === runMessage.id);
       if (existingIndex >= 0) {
         messages[existingIndex] = runMessage;
