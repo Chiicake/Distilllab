@@ -609,6 +609,26 @@ fn desktop_tool_message_from_session_message(message: &SessionMessage) -> Deskto
     }
 }
 
+fn normalize_structured_run_state(value: Option<&str>) -> String {
+    match value.unwrap_or_default().trim().to_lowercase().as_str() {
+        "queued" | "created" => "queued".to_string(),
+        "running" => "running".to_string(),
+        "completed" | "finished" => "completed".to_string(),
+        "failed" | "error" => "failed".to_string(),
+        _ => "pending".to_string(),
+    }
+}
+
+fn normalize_structured_step_status(value: Option<&str>) -> String {
+    match value.unwrap_or_default().trim().to_lowercase().as_str() {
+        "started" => "started".to_string(),
+        "running" => "running".to_string(),
+        "completed" | "finished" => "completed".to_string(),
+        "failed" | "error" => "failed".to_string(),
+        _ => "pending".to_string(),
+    }
+}
+
 fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<DesktopTimelineMessage> {
     let run_anchor_messages = earliest_run_progress_message_by_run_id(messages);
     let mut grouped_messages = HashMap::<String, Vec<&SessionMessage>>::new();
@@ -657,11 +677,9 @@ fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<
                             .and_then(|value| value.as_str())
                             .unwrap_or_default()
                             .to_string(),
-                        status: progress
-                            .get("stepStatus")
-                            .and_then(|value| value.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
+                        status: normalize_structured_step_status(
+                            progress.get("stepStatus").and_then(|value| value.as_str()),
+                        ),
                         index: progress
                             .get("stepIndex")
                             .and_then(|value| value.as_u64())
@@ -713,11 +731,9 @@ fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<
                 attachments: Vec::new(),
                 run_meta: Some(DesktopRunCardMeta {
                     run_id: run_id.clone(),
-                    state: latest_progress
-                        .get("runState")
-                        .and_then(|value| value.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
+                    state: normalize_structured_run_state(
+                        latest_progress.get("runState").and_then(|value| value.as_str()),
+                    ),
                     progress_percent: latest_progress
                         .get("progressPercent")
                         .and_then(|value| value.as_u64())
@@ -735,10 +751,9 @@ fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<
                         .get("stepSummary")
                         .and_then(|value| value.as_str())
                         .map(str::to_string),
-                    step_status: latest_progress
-                        .get("stepStatus")
-                        .and_then(|value| value.as_str())
-                        .map(str::to_string),
+                    step_status: Some(normalize_structured_step_status(
+                        latest_progress.get("stepStatus").and_then(|value| value.as_str()),
+                    )),
                     step_index: latest_progress
                         .get("stepIndex")
                         .and_then(|value| value.as_u64())
@@ -770,8 +785,9 @@ fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<
 mod tests {
     use super::{
         desktop_timeline_from_session_messages, format_session_messages_text,
-        list_session_messages_structured_payload,
+        list_session_messages_structured_payload, normalize_live_run_progress_update,
     };
+    use runtime::{RunProgressPhase, RunProgressUpdate};
     use schema::{SessionMessage, SessionMessageRole};
 
     fn session_message(
@@ -1429,6 +1445,173 @@ mod tests {
             Some("distill")
         );
     }
+
+    #[test]
+    fn structured_tool_card_contains_status_arguments_and_result_body() {
+        let timeline = desktop_timeline_from_session_messages(&[session_message(
+            "message-tool-error",
+            None,
+            "tool_result_message",
+            SessionMessageRole::System,
+            "Tool failed: file missing",
+            serde_json::json!({
+                "tool_name": "read_file",
+                "arguments": {
+                    "path": "missing.txt"
+                }
+            }),
+            "2026-04-05T00:00:03Z",
+        )]);
+
+        assert_eq!(timeline.len(), 1);
+        assert_eq!(timeline[0].content, "Tool failed: file missing");
+        assert_eq!(timeline[0].summary.as_deref(), Some("read_file · error"));
+        let details = timeline[0].details.as_deref().expect("tool details");
+        assert!(details.contains("tool: read_file"));
+        assert!(details.contains("status: error"));
+        assert!(details.contains("missing.txt"));
+        assert!(details.contains("Tool failed: file missing"));
+    }
+
+    #[test]
+    fn structured_run_card_uses_only_supported_run_states() {
+        let timeline = desktop_timeline_from_session_messages(&[session_message(
+            "progress-unsupported-state",
+            Some("run-unsupported-state"),
+            "run_progress_message",
+            SessionMessageRole::System,
+            "run state changed",
+            serde_json::json!({
+                "statusText": "run state changed",
+                "runProgress": {
+                    "phase": "state_changed",
+                    "runId": "run-unsupported-state",
+                    "runType": "distill",
+                    "runState": "created",
+                    "progressPercent": 5
+                }
+            }),
+            "2026-04-05T00:00:04Z",
+        )]);
+
+        let run_state = timeline[0]
+            .run_meta
+            .as_ref()
+            .map(|meta| meta.state.as_str())
+            .expect("run state");
+        assert_eq!(run_state, "queued");
+    }
+
+    #[test]
+    fn structured_step_meta_uses_only_supported_step_statuses() {
+        let timeline = desktop_timeline_from_session_messages(&[
+            session_message(
+                "progress-step-status",
+                Some("run-step-status"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run step finished",
+                serde_json::json!({
+                    "statusText": "run step finished",
+                    "runProgress": {
+                        "phase": "step_finished",
+                        "runId": "run-step-status",
+                        "runType": "distill",
+                        "runState": "running",
+                        "progressPercent": 80,
+                        "stepKey": "draft",
+                        "stepSummary": "Draft answer",
+                        "stepStatus": "finished",
+                        "stepIndex": 2,
+                        "stepsTotal": 3,
+                        "detailText": "Draft complete"
+                    }
+                }),
+                "2026-04-05T00:00:05Z",
+            ),
+        ]);
+
+        let run_meta = timeline[0].run_meta.as_ref().expect("run meta");
+        assert_eq!(run_meta.step_status.as_deref(), Some("completed"));
+        assert_eq!(run_meta.steps[0].status, "completed");
+    }
+
+    #[test]
+    fn live_and_structured_run_states_share_the_same_supported_values() {
+        let timeline = desktop_timeline_from_session_messages(&[
+            session_message(
+                "progress-queued",
+                Some("run-queued"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run queued",
+                serde_json::json!({
+                    "statusText": "run queued",
+                    "runProgress": {
+                        "phase": "created",
+                        "runId": "run-queued",
+                        "runType": "distill",
+                        "runState": "queued",
+                        "progressPercent": 10,
+                        "stepKey": "gather",
+                        "stepSummary": "Gather material",
+                        "stepStatus": "started",
+                        "stepIndex": 1,
+                        "stepsTotal": 2
+                    }
+                }),
+                "2026-04-05T00:00:06Z",
+            ),
+        ]);
+
+        let run_meta = timeline[0].run_meta.as_ref().expect("run meta");
+        assert!(matches!(run_meta.state.as_str(), "queued" | "pending" | "running" | "completed" | "failed"));
+        assert!(matches!(
+            run_meta.step_status.as_deref().expect("step status"),
+            "started" | "pending" | "running" | "completed" | "failed"
+        ));
+        assert!(matches!(run_meta.steps[0].status.as_str(), "started" | "pending" | "running" | "completed" | "failed"));
+    }
+
+    #[test]
+    fn emitted_live_run_progress_uses_supported_run_and_step_states() {
+        let normalized = normalize_live_run_progress_update(&RunProgressUpdate {
+            phase: RunProgressPhase::StepFinished,
+            run_id: "run-live".to_string(),
+            run_type: "distill".to_string(),
+            run_state: "created".to_string(),
+            progress_percent: Some(80),
+            step_key: Some("draft".to_string()),
+            step_summary: Some("Draft answer".to_string()),
+            step_status: Some("finished".to_string()),
+            step_index: Some(2),
+            steps_total: Some(3),
+            detail_text: Some("Draft complete".to_string()),
+        });
+
+        assert_eq!(normalized.run_state, "queued");
+        assert_eq!(normalized.step_status.as_deref(), Some("completed"));
+    }
+
+    #[test]
+    fn emitted_live_run_progress_preserves_started_step_status() {
+        let normalized = normalize_live_run_progress_update(&RunProgressUpdate {
+            phase: RunProgressPhase::StepStarted,
+            run_id: "run-live-started".to_string(),
+            run_type: "distill".to_string(),
+            run_state: "running".to_string(),
+            progress_percent: Some(25),
+            step_key: Some("gather".to_string()),
+            step_summary: Some("Gather material".to_string()),
+            step_status: Some("started".to_string()),
+            step_index: Some(1),
+            steps_total: Some(3),
+            detail_text: Some("Collecting sources".to_string()),
+        });
+
+        assert_eq!(normalized.run_state, "running");
+        assert_eq!(normalized.step_status.as_deref(), Some("started"));
+    }
 }
 
 fn indent_block(text: &str) -> String {
@@ -1551,6 +1734,22 @@ fn stream_phase_from_progress(update: &RunProgressUpdate) -> ChatStreamPhase {
         RunProgressPhase::StateChanged => ChatStreamPhase::RunProgress,
         RunProgressPhase::StepStarted => ChatStreamPhase::RunStepStarted,
         RunProgressPhase::StepFinished => ChatStreamPhase::RunStepFinished,
+    }
+}
+
+fn normalize_live_run_progress_update(update: &RunProgressUpdate) -> RunProgressUpdate {
+    RunProgressUpdate {
+        phase: update.phase.clone(),
+        run_id: update.run_id.clone(),
+        run_type: update.run_type.clone(),
+        run_state: normalize_structured_run_state(Some(update.run_state.as_str())),
+        progress_percent: update.progress_percent,
+        step_key: update.step_key.clone(),
+        step_summary: update.step_summary.clone(),
+        step_status: Some(normalize_structured_step_status(update.step_status.as_deref())),
+        step_index: update.step_index,
+        steps_total: update.steps_total,
+        detail_text: update.detail_text.clone(),
     }
 }
 
@@ -1711,8 +1910,9 @@ fn emit_run_progress_stream(
     session_id: &str,
     update: &RunProgressUpdate,
 ) -> Result<(), String> {
-    let phase = stream_phase_from_progress(update);
-    let status_text = progress_status_text(update);
+    let normalized_update = normalize_live_run_progress_update(update);
+    let phase = stream_phase_from_progress(&normalized_update);
+    let status_text = progress_status_text(&normalized_update);
 
     emit_chat_stream_event(
         app,
@@ -1727,8 +1927,8 @@ fn emit_run_progress_stream(
             None,
             None,
             None,
-            Some(update.run_id.clone()),
-            update.clone(),
+            Some(normalized_update.run_id.clone()),
+            normalized_update,
         ),
     )
 }

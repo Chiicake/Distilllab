@@ -25,7 +25,7 @@ export type DesktopRunCardMeta = {
   runType?: string | null;
   stepKey?: string | null;
   stepSummary?: string | null;
-  stepStatus?: string | null;
+  stepStatus?: RunStepStatus | null;
   stepIndex?: number | null;
   stepsTotal?: number | null;
   detailText?: string | null;
@@ -40,7 +40,7 @@ export type RunCardMeta = {
   runType?: string | null;
   stepKey?: string | null;
   stepSummary?: string | null;
-  stepStatus?: string | null;
+  stepStatus?: RunStepStatus | null;
   stepIndex?: number | null;
   stepsTotal?: number | null;
   detailText?: string | null;
@@ -122,7 +122,7 @@ export type RunProgressUpdate = {
   progressPercent?: number | null;
   stepKey?: string | null;
   stepSummary?: string | null;
-  stepStatus?: string | null;
+  stepStatus?: RunStepStatus | null;
   stepIndex?: number | null;
   stepsTotal?: number | null;
   detailText?: string | null;
