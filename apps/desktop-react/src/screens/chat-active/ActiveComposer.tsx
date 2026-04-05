@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { useChat } from '../../chat/ChatProvider';
 import { mergePendingAttachments, pickPendingAttachments, type PendingAttachment } from '../chat/pending-attachments';
 
 type ActiveComposerProps = {
@@ -8,6 +9,7 @@ type ActiveComposerProps = {
 };
 
 export default function ActiveComposer({ onSend, isStreaming }: ActiveComposerProps) {
+  const { cancelActiveRequest } = useChat();
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
@@ -87,14 +89,22 @@ export default function ActiveComposer({ onSend, isStreaming }: ActiveComposerPr
             </div>
 
             <button
-              className="gradient-primary px-5 py-2 rounded-lg font-label font-bold text-xs uppercase tracking-widest text-on-primary-container hover:opacity-90 transition-opacity"
-              disabled={isStreaming}
+              className={`px-5 py-2 rounded-lg font-label font-bold text-xs uppercase tracking-widest transition-opacity ${
+                isStreaming
+                  ? 'bg-[#ff8d8d] text-[#2f1212] hover:opacity-90'
+                  : 'gradient-primary text-on-primary-container hover:opacity-90'
+              }`}
               onClick={() => {
+                if (isStreaming) {
+                  void cancelActiveRequest();
+                  return;
+                }
+
                 void submit();
               }}
               type="button"
             >
-              {isStreaming ? 'Sending' : 'Send'}
+              {isStreaming ? 'Stop' : 'Send'}
             </button>
           </div>
         </div>

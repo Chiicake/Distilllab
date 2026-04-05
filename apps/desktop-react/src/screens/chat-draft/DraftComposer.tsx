@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { useChat } from '../../chat/ChatProvider';
 import { mergePendingAttachments, pickPendingAttachments, type PendingAttachment } from '../chat/pending-attachments';
 
 type DraftComposerProps = {
@@ -9,6 +10,7 @@ type DraftComposerProps = {
 };
 
 export default function DraftComposer({ onSend, isStreaming, errorText }: DraftComposerProps) {
+  const { cancelActiveRequest } = useChat();
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
@@ -98,16 +100,24 @@ export default function DraftComposer({ onSend, isStreaming, errorText }: DraftC
             </div>
 
             <button
-              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-on-primary transition-all hover:brightness-110"
-              disabled={isStreaming}
+              className={`flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-bold uppercase tracking-widest transition-all ${
+                isStreaming
+                  ? 'bg-[#ff8d8d] text-[#2f1212] hover:opacity-90'
+                  : 'bg-primary text-on-primary hover:brightness-110'
+              }`}
               onClick={() => {
+                if (isStreaming) {
+                  void cancelActiveRequest();
+                  return;
+                }
+
                 void submit();
               }}
               type="button"
             >
-              {isStreaming ? 'Sending' : 'Send'}
+              {isStreaming ? 'Stop' : 'Send'}
               <span aria-hidden="true" className="material-symbols-outlined" data-icon="arrow_forward">
-                arrow_forward
+                {isStreaming ? 'stop' : 'arrow_forward'}
               </span>
             </button>
           </div>

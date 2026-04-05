@@ -14,6 +14,13 @@ import { getTauriInvoke, getTauriListen, loadTauriEventApi } from './tauri';
 import { parseTimelineText } from './timeline';
 import type { ChatMessage, ChatSessionSummary, ChatState, ChatStreamEvent } from './types';
 
+function attachmentSummariesFromPaths(paths: string[]) {
+  return paths.map((path) => ({
+    name: path.split(/[\\/]/).pop() ?? path,
+    size: null,
+  }));
+}
+
 type SessionSelectorOption = {
   sessionId: string;
   title: string;
@@ -31,6 +38,7 @@ type ChatContextValue = {
   renameSession: (sessionId: string, manualTitle: string | null) => Promise<void>;
   pinSession: (sessionId: string, pinned: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
+  cancelActiveRequest: () => Promise<void>;
   sendFirstMessage: (message: string, attachmentPaths?: string[]) => Promise<string | null>;
   sendFollowUpMessage: (message: string, attachmentPaths?: string[]) => Promise<void>;
   resetDraft: () => void;
@@ -349,6 +357,30 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshSessions, state]);
 
+  const cancelActiveRequest = useCallback(async () => {
+    const invoke = getTauriInvoke();
+    const requestId = activeRequestRef.current;
+    const sessionId = state.sessionId;
+    if (!invoke || !requestId || !sessionId) {
+      return;
+    }
+
+    try {
+      await invoke('cancel_stream_request_command', {
+        payload: {
+          sessionId,
+          requestId,
+        },
+      });
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error);
+      setState((previous) => ({
+        ...previous,
+        errorText,
+      }));
+    }
+  }, [state.sessionId]);
+
   const applyStreamEvent = useCallback((event: ChatStreamEvent) => {
     if (activeRequestRef.current !== event.requestId) {
       return;
@@ -605,7 +637,32 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
             liveAssistantText: `${previous.liveAssistantText}${event.chunkText ?? ''}`,
           };
         }
+        case 'stopped': {
+          activeRequestRef.current = null;
+          return {
+            ...previous,
+            isStreaming: false,
+            messages: previous.messages.map((message) =>
+              message.id === 'assistant-pending'
+                ? {
+                    ...message,
+                    pending: false,
+                    content: message.content
+                      ? `${message.content}
+
+[generation stopped]`
+                      : '[generation stopped]',
+                  }
+                : message,
+            ),
+            streamStatuses: event.statusText
+              ? [...previous.streamStatuses, event.statusText]
+              : [...previous.streamStatuses, 'request stopped'],
+            liveAssistantText: '',
+          };
+        }
         case 'completed': {
+          activeRequestRef.current = null;
           const parsedTimeline = event.timelineText ? parseTimelineText(event.timelineText) : previous.messages;
           const streamRunMessages = previous.messages.filter((message) => message.kind === 'run');
           const timelineIds = new Set(parsedTimeline.map((message) => message.id));
@@ -625,6 +682,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
           };
         }
         case 'error': {
+          activeRequestRef.current = null;
           return {
             ...previous,
             isStreaming: false,
@@ -688,7 +746,12 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
 
     setState((previous) => ({
       ...previous,
-      messages: [{ id: `user-${requestId}`, role: 'user', content: message }],
+      messages: [{
+        id: `user-${requestId}`,
+        role: 'user',
+        content: message,
+        attachments: attachmentSummariesFromPaths(attachmentPaths),
+      }],
       isStreaming: true,
       errorText: null,
       streamStatuses: [],
@@ -737,7 +800,12 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
 
     setState((previous) => ({
       ...previous,
-      messages: [...previous.messages, { id: `user-${requestId}`, role: 'user', content: message }],
+      messages: [...previous.messages, {
+        id: `user-${requestId}`,
+        role: 'user',
+        content: message,
+        attachments: attachmentSummariesFromPaths(attachmentPaths),
+      }],
       isStreaming: true,
       errorText: null,
       streamStatuses: [],
@@ -797,11 +865,12 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
       renameSession,
       pinSession,
       deleteSession,
+      cancelActiveRequest,
       sendFirstMessage,
       sendFollowUpMessage,
       resetDraft,
     }),
-    [deferredState, deleteSession, openSession, pinSession, refreshSessions, renameSession, resetDraft, sendFirstMessage, sendFollowUpMessage],
+    [cancelActiveRequest, deferredState, deleteSession, openSession, pinSession, refreshSessions, renameSession, resetDraft, sendFirstMessage, sendFollowUpMessage],
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

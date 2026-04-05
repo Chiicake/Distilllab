@@ -13,7 +13,28 @@ use runtime::{
 };
 use runtime::flows::attachment_storage::{remove_session_attachment_storage, store_attachment_copy};
 use schema::{SessionIntake, SessionMessage, SessionMessageRole};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use tauri::Emitter;
+
+static STREAM_REQUEST_TASKS: OnceLock<Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>> =
+    OnceLock::new();
+
+fn stream_request_tasks() -> &'static Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>> {
+    STREAM_REQUEST_TASKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn register_stream_request_task(request_id: String, handle: tauri::async_runtime::JoinHandle<()>) {
+    if let Ok(mut tasks) = stream_request_tasks().lock() {
+        tasks.insert(request_id, handle);
+    }
+}
+
+fn remove_stream_request_task(request_id: &str) {
+    if let Ok(mut tasks) = stream_request_tasks().lock() {
+        tasks.remove(request_id);
+    }
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +107,13 @@ struct FirstSendCommandResponse {
 struct StreamSessionMessageForm {
     request_id: String,
     form: SessionMessageForm,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CancelStreamRequestForm {
+    session_id: String,
+    request_id: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -906,6 +934,36 @@ fn delete_session_command(session_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn cancel_stream_request_command(app: tauri::AppHandle, payload: CancelStreamRequestForm) -> Result<(), String> {
+    let mut tasks = stream_request_tasks()
+        .lock()
+        .map_err(|_| "failed to lock stream request tasks".to_string())?;
+
+    if let Some(handle) = tasks.remove(&payload.request_id) {
+        handle.abort();
+    }
+
+    emit_chat_stream_event(
+        &app,
+        &build_chat_stream_event(
+            &payload.request_id,
+            &payload.session_id,
+            ChatStreamPhase::Stopped,
+            None,
+            None,
+            None,
+            Some("request stopped".to_string()),
+            None,
+            None,
+            None,
+            None,
+        ),
+    )?;
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn pick_attachments_command(app: tauri::AppHandle) -> Result<String, String> {
     let (sender, receiver) = std::sync::mpsc::sync_channel::<Option<Vec<tauri_plugin_dialog::FilePath>>>(1);
     tauri_plugin_dialog::DialogExt::dialog(&app).file().pick_files(move |files| {
@@ -1175,7 +1233,9 @@ async fn stream_session_message_command(
     let form = payload.form.clone();
     let app_handle = app.clone();
 
-    tauri::async_runtime::spawn(async move {
+    let request_id_for_task = request_id.clone();
+    let request_id_for_cleanup = request_id.clone();
+    let handle = tauri::async_runtime::spawn(async move {
         let task = async {
             let runtime = AppRuntime::new("distilllab-dev.db".to_string());
             let (config_path, config) = load_or_create_app_config()?;
@@ -1188,7 +1248,7 @@ async fn stream_session_message_command(
             emit_chat_stream_event(
                 &app_handle,
                 &build_chat_stream_event(
-                    &request_id,
+                    &request_id_for_task,
                     &form.session_id,
                     ChatStreamPhase::Started,
                     None,
@@ -1214,7 +1274,7 @@ async fn stream_session_message_command(
                     emit_chat_stream_event(
                         &app_handle,
                         &build_chat_stream_event(
-                            &request_id,
+                            &request_id_for_task,
                             &form.session_id,
                             ChatStreamPhase::Error,
                             None,
@@ -1249,7 +1309,7 @@ async fn stream_session_message_command(
                         let _ = emit_chat_stream_event(
                             &app_handle,
                             &build_chat_stream_event(
-                                &request_id,
+                                &request_id_for_task,
                                 &form.session_id,
                                 ChatStreamPhase::AssistantStarted,
                                 None,
@@ -1267,7 +1327,7 @@ async fn stream_session_message_command(
                     let _ = emit_chat_stream_event(
                         &app_handle,
                         &build_chat_stream_event(
-                            &request_id,
+                            &request_id_for_task,
                             &form.session_id,
                             ChatStreamPhase::AssistantChunk,
                             None,
@@ -1284,7 +1344,7 @@ async fn stream_session_message_command(
                 |update| {
                     let _ = emit_run_progress_stream(
                         &app_handle,
-                        &request_id,
+                        &request_id_for_task,
                         &form.session_id,
                         &update,
                     );
@@ -1293,13 +1353,13 @@ async fn stream_session_message_command(
             .await;
 
             match result {
-                Ok(execution) => emit_execution_result_stream(&app_handle, &request_id, &execution),
+                Ok(execution) => emit_execution_result_stream(&app_handle, &request_id_for_task, &execution),
                 Err(error) => {
                     let error_text = error.to_string();
                     emit_chat_stream_event(
                         &app_handle,
                         &build_chat_stream_event(
-                            &request_id,
+                            &request_id_for_task,
                             &form.session_id,
                             ChatStreamPhase::Error,
                             None,
@@ -1321,7 +1381,9 @@ async fn stream_session_message_command(
         if let Err(error) = task {
             log::error!("stream_session_message_command failed: {}", error);
         }
+        remove_stream_request_task(&request_id_for_cleanup);
     });
+    register_stream_request_task(request_id, handle);
 
     Ok(())
 }
@@ -1406,12 +1468,14 @@ async fn stream_first_session_message_command(
     let first_form = form.clone();
     let first_session_id = session_id.clone();
 
-    tauri::async_runtime::spawn(async move {
+    let request_id_for_task = request_id.clone();
+    let request_id_for_cleanup = request_id.clone();
+    let handle = tauri::async_runtime::spawn(async move {
         let task = async {
             emit_chat_stream_event(
                 &app_handle,
                 &build_chat_stream_event(
-                    &request_id,
+                    &request_id_for_task,
                     &first_session_id,
                     ChatStreamPhase::Started,
                     None,
@@ -1439,7 +1503,7 @@ async fn stream_first_session_message_command(
                     emit_chat_stream_event(
                         &app_handle,
                         &build_chat_stream_event(
-                            &request_id,
+                            &request_id_for_task,
                             &first_session_id,
                             ChatStreamPhase::Error,
                             None,
@@ -1474,7 +1538,7 @@ async fn stream_first_session_message_command(
                         let _ = emit_chat_stream_event(
                             &app_handle,
                             &build_chat_stream_event(
-                                &request_id,
+                                &request_id_for_task,
                                 &first_session_id,
                                 ChatStreamPhase::AssistantStarted,
                                 None,
@@ -1492,7 +1556,7 @@ async fn stream_first_session_message_command(
                     let _ = emit_chat_stream_event(
                         &app_handle,
                         &build_chat_stream_event(
-                            &request_id,
+                            &request_id_for_task,
                             &first_session_id,
                             ChatStreamPhase::AssistantChunk,
                             None,
@@ -1509,7 +1573,7 @@ async fn stream_first_session_message_command(
                 |update| {
                     let _ = emit_run_progress_stream(
                         &app_handle,
-                        &request_id,
+                        &request_id_for_task,
                         &first_session_id,
                         &update,
                     );
@@ -1518,7 +1582,7 @@ async fn stream_first_session_message_command(
             .await;
 
             match result {
-                Ok(execution) => emit_execution_result_stream(&app_handle, &request_id, &execution),
+                Ok(execution) => emit_execution_result_stream(&app_handle, &request_id_for_task, &execution),
                 Err(error) => {
                     delete_failed_first_send_session(&runtime, &first_session_id).map_err(|e| e.to_string())?;
                     remove_session_attachment_storage(&storage_root, &first_session_id).map_err(|e| e.to_string())?;
@@ -1526,7 +1590,7 @@ async fn stream_first_session_message_command(
                     emit_chat_stream_event(
                         &app_handle,
                         &build_chat_stream_event(
-                            &request_id,
+                            &request_id_for_task,
                             &first_session_id,
                             ChatStreamPhase::Error,
                             None,
@@ -1548,7 +1612,9 @@ async fn stream_first_session_message_command(
         if let Err(error) = task {
             log::error!("stream_first_session_message_command failed: {}", error);
         }
+        remove_stream_request_task(&request_id_for_cleanup);
     });
+    register_stream_request_task(request_id.clone(), handle);
 
     Ok(session_id)
 }
@@ -1739,6 +1805,7 @@ pub fn run() {
             list_runs,
             list_sessions,
             list_session_selector_options,
+            cancel_stream_request_command,
             pick_attachments_command,
             rename_session_command,
             pin_session_command,
