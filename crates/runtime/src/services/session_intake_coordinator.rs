@@ -234,7 +234,7 @@ pub async fn decide_and_record_intake(
         SessionActionType::RequestClarification => "clarification_message",
         SessionActionType::ToolCall => "system_message",
         SessionActionType::SkillCall => "system_message",
-        SessionActionType::CreateRun => "system_message",
+        SessionActionType::CreateRun => "assistant_message",
         SessionActionType::Stop => "assistant_message",
     };
 
@@ -438,7 +438,7 @@ where
         SessionActionType::RequestClarification => "clarification_message",
         SessionActionType::ToolCall => "system_message",
         SessionActionType::SkillCall => "system_message",
-        SessionActionType::CreateRun => "system_message",
+        SessionActionType::CreateRun => "assistant_message",
         SessionActionType::Stop => "assistant_message",
     };
 

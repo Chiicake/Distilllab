@@ -509,7 +509,11 @@ fn emit_execution_result_stream(
                     .map(|run_id| format!(" run={}", run_id))
                     .unwrap_or_default()
             )),
-            None,
+            if result.action_type == "create_run" {
+                Some(result.assistant_text.clone())
+            } else {
+                None
+            },
             None,
             None,
             result.created_run_id.clone(),

@@ -431,6 +431,7 @@ pub(crate) fn format_session_messages_for_debug(messages: &[SessionMessage]) -> 
 
     messages
         .iter()
+        .filter(|message| message.message_type != "run_progress_message")
         .map(|message| {
             if message.message_type == "tool_result_message" {
                 let tool_header = serde_json::from_str::<serde_json::Value>(&message.data_json)
@@ -443,29 +444,6 @@ pub(crate) fn format_session_messages_for_debug(messages: &[SessionMessage]) -> 
                     .unwrap_or_else(|| "[Tool] unknown()".to_string());
 
                 format!("{}\n{}", tool_header, indent_block(&message.content))
-            } else if message.message_type == "run_progress_message" {
-                let run_header = serde_json::from_str::<serde_json::Value>(&message.data_json)
-                    .ok()
-                    .and_then(|value| {
-                        let run_progress = value.get("runProgress")?;
-                        let run_id = run_progress.get("runId").and_then(|v| v.as_str())?;
-                        let step_key = run_progress.get("stepKey").and_then(|v| v.as_str());
-                        let run_phase = run_progress
-                            .get("phase")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("state_changed");
-
-                        Some(match step_key {
-                            Some(key) => {
-                                format!("[Run] {} [{}] ({})", run_id, key, run_phase)
-                            }
-                            None => format!("[Run] {} ({})", run_id, run_phase),
-                        })
-                    })
-                    .unwrap_or_else(|| "[Run] unknown".to_string());
-
-                let run_body = format!("{}\n{}", message.content, message.data_json);
-                format!("{}\n{}", run_header, indent_block(&run_body))
             } else {
                 let role_header = match message.role {
                     schema::SessionMessageRole::User => "[User]",
@@ -566,10 +544,7 @@ async fn send_session_message_with_optional_provider_config(
         None
     };
     let created_run_id = execution_outcome.as_ref().map(|outcome| outcome.run.id.clone());
-    let materialize_result = execution_outcome
-        .as_ref()
-        .and_then(|outcome| outcome.materialize_result.clone());
-    let completion_summary_text = match (&provider_config, &execution_outcome) {
+    let _completion_summary_text = match (&provider_config, &execution_outcome) {
         (Some(provider_config), Some(execution_outcome)) => {
             append_run_completion_summary_message(
                 runtime,
@@ -582,19 +557,11 @@ async fn send_session_message_with_optional_provider_config(
         }
         _ => None,
     };
-
-    let final_assistant_content = match completion_summary_text {
-        Some(summary) => summary,
-        None => match &materialize_result {
-        Some(result) => format!("{}\n\n{}", decision.reply_text, result.summary),
-        None => decision.reply_text.clone(),
-        },
-    };
     update_session_message_run_and_content(
         &conn,
         &assistant_message_id,
         created_run_id.as_deref(),
-        &final_assistant_content,
+        &decision.reply_text,
     )?;
 
     Ok(decision)
@@ -658,9 +625,6 @@ async fn send_session_message_with_optional_provider_config_and_result(
         None
     };
     let created_run_id = execution_outcome.as_ref().map(|outcome| outcome.run.id.clone());
-    let materialize_result = execution_outcome
-        .as_ref()
-        .and_then(|outcome| outcome.materialize_result.clone());
     let completion_summary_text = match (&provider_config, &execution_outcome) {
         (Some(provider_config), Some(execution_outcome)) => {
             append_run_completion_summary_message(
@@ -674,19 +638,11 @@ async fn send_session_message_with_optional_provider_config_and_result(
         }
         _ => None,
     };
-
-    let final_assistant_content = match completion_summary_text.clone() {
-        Some(summary) => summary,
-        None => match &materialize_result {
-        Some(result) => format!("{}\n\n{}", decision.reply_text, result.summary),
-        None => decision.reply_text.clone(),
-        },
-    };
     update_session_message_run_and_content(
         &conn,
         &assistant_message_id,
         created_run_id.as_deref(),
-        &final_assistant_content,
+        &decision.reply_text,
     )?;
 
     let messages = list_session_messages_for_session(&conn, &session.id)?;
@@ -701,7 +657,7 @@ async fn send_session_message_with_optional_provider_config_and_result(
             .tool_result
             .as_ref()
             .and_then(|result| result.rendered_summary.clone().or(result.error_message.clone())),
-        assistant_text: final_assistant_content,
+        assistant_text: completion_summary_text.unwrap_or_else(|| decision.reply_text.clone()),
         timeline_text: format_session_messages_for_debug(&messages),
         created_run_id,
         run_status: execution_outcome
@@ -754,6 +710,7 @@ where
         )
     })?;
     let session_id_for_progress = session.id.clone();
+    let request_user_message = request.user_message.clone();
 
     let outcome = decide_and_record_intake_streaming(
         runtime,
@@ -802,19 +759,24 @@ where
         None
     };
     let created_run_id = execution_outcome.as_ref().map(|outcome| outcome.run.id.clone());
-    let materialize_result = execution_outcome
-        .as_ref()
-        .and_then(|outcome| outcome.materialize_result.clone());
-
-    let final_assistant_content = match &materialize_result {
-        Some(result) => format!("{}\n\n{}", decision.reply_text, result.summary),
-        None => decision.reply_text.clone(),
+    let completion_summary_text = match execution_outcome.as_ref() {
+        Some(execution_outcome) => {
+            append_run_completion_summary_message(
+                runtime,
+                &provider_config,
+                &session.id,
+                &request_user_message,
+                execution_outcome,
+            )
+            .await?
+        }
+        None => None,
     };
     update_session_message_run_and_content(
         &conn,
         &assistant_message_id,
         created_run_id.as_deref(),
-        &final_assistant_content,
+        &decision.reply_text,
     )?;
 
     let messages = list_session_messages_for_session(&conn, &session.id)?;
@@ -829,7 +791,7 @@ where
             .tool_result
             .as_ref()
             .and_then(|result| result.rendered_summary.clone().or(result.error_message.clone())),
-        assistant_text: final_assistant_content,
+        assistant_text: completion_summary_text.unwrap_or_else(|| decision.reply_text.clone()),
         timeline_text: format_session_messages_for_debug(&messages),
         created_run_id,
         run_status: execution_outcome
@@ -1170,6 +1132,7 @@ pub fn list_session_messages(
 #[cfg(test)]
 mod tests {
     use super::{
+        format_session_messages_for_debug,
         LlmSessionDebugRequest, SessionMessageRequest, create_demo_session,
         create_session, create_session_and_send_first_message_with_config,
         decide_demo_session_message, decide_llm_session_message,
@@ -1182,7 +1145,7 @@ mod tests {
     use memory::run_store::list_runs as list_persisted_runs;
     use memory::session_message_store::list_session_messages_for_session;
     use memory::session_store::get_session_by_id;
-    use schema::SessionIntake;
+    use schema::{SessionIntake, SessionMessage, SessionMessageRole};
     use std::sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicUsize, Ordering},
@@ -1788,7 +1751,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_session_message_links_assistant_system_message_to_created_run() {
+    async fn send_session_message_links_assistant_message_to_created_run() {
         let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
         let _env_guard = TestLlmEnvGuard::clear();
         let runtime = AppRuntime::new(format!(
@@ -1818,10 +1781,97 @@ mod tests {
 
         assert_eq!(runs.len(), 1);
         assert_eq!(messages.len(), 3);
-        assert_eq!(messages[1].message_type, "system_message");
+        assert_eq!(messages[1].message_type, "assistant_message");
         assert_eq!(messages[1].run_id.as_deref(), Some(runs[0].id.as_str()));
         assert_eq!(messages[2].message_type, "assistant_message");
         assert_eq!(messages[2].run_id.as_deref(), Some(runs[0].id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn send_session_message_create_run_keeps_handoff_reply_and_appends_completion_summary() {
+        let _guard = env_lock().lock().expect("env lock should succeed");
+
+        let runtime = AppRuntime::new(format!(
+            "/tmp/distilllab-runtime-session-run-handoff-order-{}.db",
+            Uuid::new_v4()
+        ));
+        let session = create_demo_session(&runtime).expect("runtime should create a demo session");
+        let provider_config = mock_distill_provider_config(
+            "Please distill these work notes into Distilllab",
+        )
+        .await;
+
+        super::send_session_message_with_optional_provider_config(
+            &runtime,
+            &session.id,
+            "Please distill these work notes into Distilllab",
+            vec![],
+            Some(provider_config),
+        )
+        .await
+        .expect("runtime should send a session message");
+
+        let conn = open_database(&runtime.database_path).expect("database should open");
+        let messages = list_session_messages_for_session(&conn, &session.id)
+            .expect("session messages should load");
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1].message_type, "assistant_message");
+        assert_eq!(
+            messages[1].content,
+            "I will start a distill run for this work material."
+        );
+        assert_eq!(messages[2].message_type, "assistant_message");
+        assert!(messages[2]
+            .content
+            .contains("The distill run completed and produced 2 insight assets"));
+    }
+
+    #[test]
+    fn format_session_messages_for_debug_omits_run_progress_messages() {
+        let timeline = format_session_messages_for_debug(&[
+            SessionMessage {
+                id: "message-user".to_string(),
+                session_id: "session-1".to_string(),
+                run_id: None,
+                message_type: "user_message".to_string(),
+                role: SessionMessageRole::User,
+                content: "Please distill this".to_string(),
+                data_json: "{}".to_string(),
+                created_at: "2026-04-05T00:00:00Z".to_string(),
+            },
+            SessionMessage {
+                id: "message-run-progress".to_string(),
+                session_id: "session-1".to_string(),
+                run_id: Some("run-1".to_string()),
+                message_type: "run_progress_message".to_string(),
+                role: SessionMessageRole::System,
+                content: "materialized 2 sources (0 skipped, 0 failed)".to_string(),
+                data_json: serde_json::json!({
+                    "runProgress": {
+                        "runId": "run-1",
+                        "phase": "step_finished"
+                    }
+                })
+                .to_string(),
+                created_at: "2026-04-05T00:00:01Z".to_string(),
+            },
+            SessionMessage {
+                id: "message-assistant".to_string(),
+                session_id: "session-1".to_string(),
+                run_id: None,
+                message_type: "assistant_message".to_string(),
+                role: SessionMessageRole::Assistant,
+                content: "I will start a distill run for this work material.".to_string(),
+                data_json: "{}".to_string(),
+                created_at: "2026-04-05T00:00:02Z".to_string(),
+            },
+        ]);
+
+        assert!(timeline.contains("[User]"));
+        assert!(timeline.contains("[Assistant]"));
+        assert!(!timeline.contains("[Run]"));
+        assert!(!timeline.contains("materialized 2 sources"));
     }
 
     #[tokio::test]
@@ -2005,7 +2055,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_session_message_appends_materialize_summary_to_system_message() {
+    async fn send_session_message_appends_run_completion_summary_message_to_timeline() {
         let _env_guard_lock = env_lock().lock().expect("env lock should acquire");
         let _env_guard = TestLlmEnvGuard::clear();
         let runtime = AppRuntime::new(format!(
@@ -2033,7 +2083,10 @@ mod tests {
             .expect("session messages should load");
 
         assert_eq!(messages.len(), 3);
-        assert!(messages[1].content.contains("produced 2 insight assets"));
+        assert_eq!(
+            messages[1].content,
+            "I will start a distill run for this work material."
+        );
         assert!(messages[2].content.contains("produced 2 insight assets"));
     }
 
@@ -2122,6 +2175,7 @@ mod tests {
         let runs = list_persisted_runs(&conn).expect("runs should load");
 
         assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].message_type, "assistant_message");
         assert!(runs.is_empty());
     }
 

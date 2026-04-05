@@ -167,6 +167,39 @@ function mergeRunSteps(
   return base;
 }
 
+function mergeTimelineWithRunCards(timelineMessages: ChatMessage[], streamMessages: ChatMessage[]) {
+  const runMessages = streamMessages.filter((message) => message.kind === 'run');
+  if (runMessages.length === 0) {
+    return timelineMessages;
+  }
+
+  const merged = [...timelineMessages];
+
+  for (const runMessage of runMessages) {
+    const existingIndex = merged.findIndex((message) => message.id === runMessage.id);
+    if (existingIndex >= 0) {
+      merged[existingIndex] = runMessage;
+      continue;
+    }
+
+    const handoffIndex = [...merged].findIndex(
+      (message) => message.id.startsWith('assistant-handoff-') || (
+        message.role === 'assistant'
+          && message.kind !== 'run'
+          && message.content.toLowerCase().includes('start a distill run')
+      ),
+    );
+
+    if (handoffIndex >= 0) {
+      merged.splice(handoffIndex + 1, 0, runMessage);
+    } else {
+      merged.push(runMessage);
+    }
+  }
+
+  return merged;
+}
+
 function sessionSummaryFromOption(option: SessionSelectorOption): ChatSessionSummary {
   return {
     sessionId: option.sessionId,
@@ -403,8 +436,23 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
           };
         }
         case 'decision_ready': {
+          const handoffMessage =
+            event.actionType === 'create_run' && event.assistantText
+              ? {
+                  id: `assistant-handoff-${event.requestId}`,
+                  role: 'assistant' as const,
+                  content: event.assistantText,
+                }
+              : null;
+
+          const nextMessages = handoffMessage
+            && !previous.messages.some((message) => message.id === handoffMessage.id)
+              ? [...previous.messages, handoffMessage]
+              : previous.messages;
+
           return {
             ...previous,
+            messages: nextMessages,
             activeRunLabel: event.createdRunId ?? (event.actionType === 'create_run' ? 'Active Run' : null),
             decisionSummary: event.statusText ?? previous.decisionSummary,
             streamStatuses: event.statusText
@@ -664,12 +712,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
         case 'completed': {
           activeRequestRef.current = null;
           const parsedTimeline = event.timelineText ? parseTimelineText(event.timelineText) : previous.messages;
-          const streamRunMessages = previous.messages.filter((message) => message.kind === 'run');
-          const timelineIds = new Set(parsedTimeline.map((message) => message.id));
-          const mergedMessages = [
-            ...parsedTimeline,
-            ...streamRunMessages.filter((message) => !timelineIds.has(message.id)),
-          ];
+          const mergedMessages = mergeTimelineWithRunCards(parsedTimeline, previous.messages);
 
           return {
             ...previous,
