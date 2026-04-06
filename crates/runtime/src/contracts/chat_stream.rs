@@ -29,17 +29,67 @@ pub enum RunProgressPhase {
     StepFinished,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveRunState {
+    Queued,
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveToolStatus {
+    Started,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveRunStepStatus {
+    Started,
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveToolEvent {
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub status: LiveToolStatus,
+    pub arguments_text: Option<String>,
+    pub result_text: Option<String>,
+    pub summary: String,
+    pub details: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveRunEvent {
+    pub run_id: String,
+    pub run_type: Option<String>,
+    pub state: LiveRunState,
+    pub progress_percent: Option<u8>,
+    pub detail_text: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunProgressUpdate {
     pub phase: RunProgressPhase,
     pub run_id: String,
     pub run_type: String,
-    pub run_state: String,
+    pub run_state: LiveRunState,
     pub progress_percent: Option<u8>,
     pub step_key: Option<String>,
     pub step_summary: Option<String>,
-    pub step_status: Option<String>,
+    pub step_status: Option<LiveRunStepStatus>,
     pub step_index: Option<u32>,
     pub steps_total: Option<u32>,
     pub detail_text: Option<String>,
@@ -59,6 +109,8 @@ pub struct ChatStreamEvent {
     pub timeline_text: Option<String>,
     pub error_text: Option<String>,
     pub created_run_id: Option<String>,
+    pub tool_event: Option<LiveToolEvent>,
+    pub run_event: Option<LiveRunEvent>,
     pub run_progress: Option<RunProgressUpdate>,
 }
 

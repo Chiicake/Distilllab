@@ -5,7 +5,8 @@ use runtime::{
     delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
     resolve_current_provider_model, save_app_config_to_path, set_current_provider_model,
     upsert_provider_entry, AppConfig, AppRuntime, ChatStreamEvent, ChatStreamPhase,
-    DesktopUiConfig, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
+    DesktopUiConfig, LiveRunEvent, LiveRunState, LiveRunStepStatus, LiveToolEvent,
+    LiveToolStatus, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
     ProviderOptions, RunProgressPhase, RunProgressUpdate, SessionIntakePreview,
     SessionMessageExecutionResult, SessionMessageRequest,
 };
@@ -619,14 +620,14 @@ fn normalize_structured_run_state(value: Option<&str>) -> String {
     }
 }
 
-fn normalize_structured_step_status(value: Option<&str>) -> String {
-    match value.unwrap_or_default().trim().to_lowercase().as_str() {
+fn normalize_structured_step_status(value: Option<&str>) -> Option<String> {
+    value.map(|status| match status.trim().to_lowercase().as_str() {
         "started" => "started".to_string(),
         "running" => "running".to_string(),
         "completed" | "finished" => "completed".to_string(),
         "failed" | "error" => "failed".to_string(),
         _ => "pending".to_string(),
-    }
+    })
 }
 
 fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<DesktopTimelineMessage> {
@@ -679,7 +680,8 @@ fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<
                             .to_string(),
                         status: normalize_structured_step_status(
                             progress.get("stepStatus").and_then(|value| value.as_str()),
-                        ),
+                        )
+                        .unwrap_or_else(|| "pending".to_string()),
                         index: progress
                             .get("stepIndex")
                             .and_then(|value| value.as_u64())
@@ -714,20 +716,30 @@ fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<
                 .collect::<Vec<_>>();
             steps.sort_by(|left, right| left.index.cmp(&right.index).then(left.key.cmp(&right.key)));
 
+            let latest_status_text = messages
+                .iter()
+                .max_by(|left, right| {
+                    (&left.created_at, &left.id).cmp(&(&right.created_at, &right.id))
+                })
+                .map(|message| message.content.clone())
+                .unwrap_or_else(|| anchor_message.content.clone());
+
             Some(DesktopTimelineMessage {
                 id: format!("run-card-{}", run_id),
                 role: SessionMessageRole::System.as_str().to_string(),
                 kind: "run".to_string(),
                 source_message_type: Some("run_progress_message".to_string()),
-                content: anchor_message.content.clone(),
+                content: latest_status_text.clone(),
                 summary: latest_progress
                     .get("stepSummary")
                     .and_then(|value| value.as_str())
-                    .map(str::to_string),
+                    .map(str::to_string)
+                    .or_else(|| Some(latest_status_text.clone())),
                 details: latest_progress
                     .get("detailText")
                     .and_then(|value| value.as_str())
-                    .map(str::to_string),
+                    .map(str::to_string)
+                    .or_else(|| Some(latest_status_text.clone())),
                 attachments: Vec::new(),
                 run_meta: Some(DesktopRunCardMeta {
                     run_id: run_id.clone(),
@@ -751,9 +763,9 @@ fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<
                         .get("stepSummary")
                         .and_then(|value| value.as_str())
                         .map(str::to_string),
-                    step_status: Some(normalize_structured_step_status(
+                    step_status: normalize_structured_step_status(
                         latest_progress.get("stepStatus").and_then(|value| value.as_str()),
-                    )),
+                    ),
                     step_index: latest_progress
                         .get("stepIndex")
                         .and_then(|value| value.as_u64())
@@ -784,10 +796,14 @@ fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::{
+        build_chat_stream_event_with_run_progress, build_live_run_event, build_live_tool_event,
         desktop_timeline_from_session_messages, format_session_messages_text,
         list_session_messages_structured_payload, normalize_live_run_progress_update,
     };
-    use runtime::{RunProgressPhase, RunProgressUpdate};
+    use runtime::{
+        ChatStreamPhase, LiveRunState, LiveRunStepStatus, LiveToolStatus, RunProgressPhase,
+        RunProgressUpdate,
+    };
     use schema::{SessionMessage, SessionMessageRole};
 
     fn session_message(
@@ -1579,18 +1595,18 @@ mod tests {
             phase: RunProgressPhase::StepFinished,
             run_id: "run-live".to_string(),
             run_type: "distill".to_string(),
-            run_state: "created".to_string(),
+            run_state: LiveRunState::Pending,
             progress_percent: Some(80),
             step_key: Some("draft".to_string()),
             step_summary: Some("Draft answer".to_string()),
-            step_status: Some("finished".to_string()),
+            step_status: Some(LiveRunStepStatus::Pending),
             step_index: Some(2),
             steps_total: Some(3),
             detail_text: Some("Draft complete".to_string()),
         });
 
-        assert_eq!(normalized.run_state, "queued");
-        assert_eq!(normalized.step_status.as_deref(), Some("completed"));
+        assert_eq!(normalized.run_state, LiveRunState::Pending);
+        assert_eq!(normalized.step_status, Some(LiveRunStepStatus::Pending));
     }
 
     #[test]
@@ -1599,18 +1615,172 @@ mod tests {
             phase: RunProgressPhase::StepStarted,
             run_id: "run-live-started".to_string(),
             run_type: "distill".to_string(),
-            run_state: "running".to_string(),
+            run_state: LiveRunState::Running,
             progress_percent: Some(25),
             step_key: Some("gather".to_string()),
             step_summary: Some("Gather material".to_string()),
-            step_status: Some("started".to_string()),
+            step_status: Some(LiveRunStepStatus::Started),
             step_index: Some(1),
             steps_total: Some(3),
             detail_text: Some("Collecting sources".to_string()),
         });
 
-        assert_eq!(normalized.run_state, "running");
-        assert_eq!(normalized.step_status.as_deref(), Some("started"));
+        assert_eq!(normalized.run_state, LiveRunState::Running);
+        assert_eq!(normalized.step_status, Some(LiveRunStepStatus::Started));
+    }
+
+    #[test]
+    fn emitted_tool_started_includes_structured_tool_event() {
+        let event = build_live_tool_event(
+            "tool-call-1",
+            "read_file",
+            LiveToolStatus::Started,
+            Some("{\"path\":\"notes.md\"}".to_string()),
+            None,
+        );
+
+        assert_eq!(event.tool_call_id, "tool-call-1");
+        assert_eq!(event.tool_name, "read_file");
+        assert_eq!(event.status, LiveToolStatus::Started);
+        assert_eq!(event.arguments_text.as_deref(), Some("{\"path\":\"notes.md\"}"));
+        assert_eq!(event.result_text, None);
+    }
+
+    #[test]
+    fn emitted_tool_finished_includes_structured_tool_event() {
+        let event = build_live_tool_event(
+            "tool-call-2",
+            "read_file",
+            LiveToolStatus::Failed,
+            Some("{\"path\":\"missing.md\"}".to_string()),
+            Some("file missing".to_string()),
+        );
+
+        assert_eq!(event.status, LiveToolStatus::Failed);
+        assert_eq!(event.result_text.as_deref(), Some("file missing"));
+        assert!(event.summary.contains("read_file"));
+        assert!(event.details.contains("status: failed"));
+    }
+
+    #[test]
+    fn emitted_run_started_includes_structured_run_event() {
+        let event = build_live_run_event(
+            "run-123",
+            Some("distill".to_string()),
+            LiveRunState::Queued,
+            Some(10),
+            Some("Queued for execution".to_string()),
+        );
+
+        assert_eq!(event.run_id, "run-123");
+        assert_eq!(event.run_type.as_deref(), Some("distill"));
+        assert_eq!(event.state, LiveRunState::Queued);
+        assert_eq!(event.progress_percent, Some(10));
+    }
+
+    #[test]
+    fn emitted_run_finished_includes_structured_run_event() {
+        let event = build_live_run_event(
+            "run-456",
+            Some("distill".to_string()),
+            LiveRunState::Failed,
+            Some(100),
+            Some("Run failed at draft step".to_string()),
+        );
+
+        assert_eq!(event.state, LiveRunState::Failed);
+        assert_eq!(event.detail_text.as_deref(), Some("Run failed at draft step"));
+    }
+
+    #[test]
+    fn live_run_progress_normalizes_legacy_aliases_to_supported_enum_values() {
+        let normalized = normalize_live_run_progress_update(&RunProgressUpdate {
+            phase: RunProgressPhase::StepFinished,
+            run_id: "run-live-alias".to_string(),
+            run_type: "distill".to_string(),
+            run_state: LiveRunState::Pending,
+            progress_percent: Some(90),
+            step_key: Some("draft".to_string()),
+            step_summary: Some("Draft answer".to_string()),
+            step_status: Some(LiveRunStepStatus::Pending),
+            step_index: Some(2),
+            steps_total: Some(3),
+            detail_text: Some("Draft complete".to_string()),
+        });
+
+        assert_eq!(normalized.run_state, LiveRunState::Pending);
+        assert_eq!(normalized.step_status, Some(LiveRunStepStatus::Pending));
+    }
+
+    #[test]
+    fn emitted_run_progress_event_keeps_run_progress_authoritative_when_run_event_conflicts() {
+        let event = build_chat_stream_event_with_run_progress(
+            "request-1",
+            "session-1",
+            ChatStreamPhase::RunProgress,
+            None,
+            None,
+            None,
+            Some("run state changed".to_string()),
+            None,
+            None,
+            None,
+            Some("run-authority".to_string()),
+            None,
+            normalize_live_run_progress_update(&RunProgressUpdate {
+                phase: RunProgressPhase::StateChanged,
+                run_id: "run-authority".to_string(),
+                run_type: "distill".to_string(),
+                run_state: LiveRunState::Failed,
+                progress_percent: Some(100),
+                step_key: None,
+                step_summary: None,
+                step_status: None,
+                step_index: None,
+                steps_total: None,
+                detail_text: Some("Run failed at draft step".to_string()),
+            }),
+        );
+
+        let run_progress = event.run_progress.as_ref().expect("run progress");
+        let run_event = event.run_event.as_ref().expect("run event");
+
+        assert_eq!(run_progress.run_state, LiveRunState::Failed);
+        assert_eq!(run_event.state, LiveRunState::Failed);
+        assert_eq!(run_event.detail_text.as_deref(), Some("Run failed at draft step"));
+    }
+
+    #[test]
+    fn emitted_run_progress_event_preserves_missing_step_status_when_no_step_context_exists() {
+        let event = build_chat_stream_event_with_run_progress(
+            "request-2",
+            "session-1",
+            ChatStreamPhase::RunProgress,
+            None,
+            None,
+            None,
+            Some("run state changed".to_string()),
+            None,
+            None,
+            None,
+            Some("run-no-step".to_string()),
+            None,
+            normalize_live_run_progress_update(&RunProgressUpdate {
+                phase: RunProgressPhase::StateChanged,
+                run_id: "run-no-step".to_string(),
+                run_type: "distill".to_string(),
+                run_state: LiveRunState::Running,
+                progress_percent: Some(55),
+                step_key: None,
+                step_summary: None,
+                step_status: None,
+                step_index: None,
+                steps_total: None,
+                detail_text: Some("Still running".to_string()),
+            }),
+        );
+
+        assert_eq!(event.run_progress.as_ref().expect("run progress").step_status, None);
     }
 }
 
@@ -1619,6 +1789,95 @@ fn indent_block(text: &str) -> String {
         .map(|line| format!("  {}", line))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn normalize_live_run_state(value: Option<&str>) -> LiveRunState {
+    match value.unwrap_or_default().trim().to_lowercase().as_str() {
+        "queued" | "created" => LiveRunState::Queued,
+        "running" => LiveRunState::Running,
+        "completed" | "finished" => LiveRunState::Completed,
+        "failed" | "error" => LiveRunState::Failed,
+        _ => LiveRunState::Pending,
+    }
+}
+
+fn normalize_live_run_step_status(value: Option<&str>) -> Option<LiveRunStepStatus> {
+    value.map(|status| match status.trim().to_lowercase().as_str() {
+        "started" => LiveRunStepStatus::Started,
+        "running" => LiveRunStepStatus::Running,
+        "completed" | "finished" => LiveRunStepStatus::Completed,
+        "failed" | "error" => LiveRunStepStatus::Failed,
+        _ => LiveRunStepStatus::Pending,
+    })
+}
+
+fn live_run_state_label(value: &LiveRunState) -> &'static str {
+    match value {
+        LiveRunState::Queued => "queued",
+        LiveRunState::Pending => "pending",
+        LiveRunState::Running => "running",
+        LiveRunState::Completed => "completed",
+        LiveRunState::Failed => "failed",
+    }
+}
+
+fn live_run_step_status_label(value: &LiveRunStepStatus) -> &'static str {
+    match value {
+        LiveRunStepStatus::Started => "started",
+        LiveRunStepStatus::Pending => "pending",
+        LiveRunStepStatus::Running => "running",
+        LiveRunStepStatus::Completed => "completed",
+        LiveRunStepStatus::Failed => "failed",
+    }
+}
+
+fn build_live_tool_event(
+    tool_call_id: &str,
+    tool_name: &str,
+    status: LiveToolStatus,
+    arguments_text: Option<String>,
+    result_text: Option<String>,
+) -> LiveToolEvent {
+    let status_label = match status {
+        LiveToolStatus::Started => "started",
+        LiveToolStatus::Succeeded => "success",
+        LiveToolStatus::Failed => "failed",
+    };
+    let summary = format!("{} · {}", tool_name, status_label);
+    let result_block = result_text.as_deref().unwrap_or("");
+    let details = format!(
+        "tool: {}\nstatus: {}\narguments: {}\n\nresult:\n{}",
+        tool_name,
+        status_label,
+        arguments_text.as_deref().unwrap_or("{}"),
+        result_block
+    );
+
+    LiveToolEvent {
+        tool_call_id: tool_call_id.to_string(),
+        tool_name: tool_name.to_string(),
+        status,
+        arguments_text,
+        result_text,
+        summary,
+        details,
+    }
+}
+
+fn build_live_run_event(
+    run_id: &str,
+    run_type: Option<String>,
+    state: LiveRunState,
+    progress_percent: Option<u8>,
+    detail_text: Option<String>,
+) -> LiveRunEvent {
+    LiveRunEvent {
+        run_id: run_id.to_string(),
+        run_type,
+        state,
+        progress_percent,
+        detail_text,
+    }
 }
 
 fn build_chat_stream_event(
@@ -1633,6 +1892,8 @@ fn build_chat_stream_event(
     timeline_text: Option<String>,
     error_text: Option<String>,
     created_run_id: Option<String>,
+    tool_event: Option<LiveToolEvent>,
+    run_event: Option<LiveRunEvent>,
 ) -> ChatStreamEvent {
     ChatStreamEvent {
         request_id: request_id.to_string(),
@@ -1646,6 +1907,8 @@ fn build_chat_stream_event(
         timeline_text,
         error_text,
         created_run_id,
+        tool_event,
+        run_event,
         run_progress: None,
     }
 }
@@ -1662,8 +1925,17 @@ fn build_chat_stream_event_with_run_progress(
     timeline_text: Option<String>,
     error_text: Option<String>,
     created_run_id: Option<String>,
+    tool_event: Option<LiveToolEvent>,
     run_progress: RunProgressUpdate,
 ) -> ChatStreamEvent {
+    let authoritative_run_event = Some(build_live_run_event(
+        &run_progress.run_id,
+        Some(run_progress.run_type.clone()),
+        run_progress.run_state.clone(),
+        run_progress.progress_percent,
+        run_progress.detail_text.clone(),
+    ));
+
     ChatStreamEvent {
         request_id: request_id.to_string(),
         session_id: session_id.to_string(),
@@ -1676,6 +1948,8 @@ fn build_chat_stream_event_with_run_progress(
         timeline_text,
         error_text,
         created_run_id,
+        tool_event,
+        run_event: authoritative_run_event,
         run_progress: Some(run_progress),
     }
 }
@@ -1695,7 +1969,7 @@ fn progress_status_text(update: &RunProgressUpdate) -> String {
         RunProgressPhase::StateChanged => format!(
             "run state: {} {} ({}){}",
             update.run_id,
-            update.run_state,
+            live_run_state_label(&update.run_state),
             percent,
             if detail.is_empty() {
                 "".to_string()
@@ -1742,11 +2016,13 @@ fn normalize_live_run_progress_update(update: &RunProgressUpdate) -> RunProgress
         phase: update.phase.clone(),
         run_id: update.run_id.clone(),
         run_type: update.run_type.clone(),
-        run_state: normalize_structured_run_state(Some(update.run_state.as_str())),
+        run_state: normalize_live_run_state(Some(live_run_state_label(&update.run_state))),
         progress_percent: update.progress_percent,
         step_key: update.step_key.clone(),
         step_summary: update.step_summary.clone(),
-        step_status: Some(normalize_structured_step_status(update.step_status.as_deref())),
+        step_status: normalize_live_run_step_status(
+            update.step_status.as_ref().map(live_run_step_status_label),
+        ),
         step_index: update.step_index,
         steps_total: update.steps_total,
         detail_text: update.detail_text.clone(),
@@ -1790,10 +2066,19 @@ fn emit_execution_result_stream(
             None,
             None,
             result.created_run_id.clone(),
+            None,
+            None,
         ),
     )?;
 
     if let Some(tool_name) = &result.tool_name {
+        let tool_started_event = build_live_tool_event(
+            &format!("tool-call-{}", request_id),
+            tool_name,
+            LiveToolStatus::Started,
+            None,
+            None,
+        );
         emit_chat_stream_event(
             app,
             &build_chat_stream_event(
@@ -1808,9 +2093,23 @@ fn emit_execution_result_stream(
                 None,
                 None,
                 result.created_run_id.clone(),
+                Some(tool_started_event),
+                None,
             ),
         )?;
 
+        let tool_finished_status = match result.tool_ok {
+            Some(true) => LiveToolStatus::Succeeded,
+            Some(false) => LiveToolStatus::Failed,
+            None => LiveToolStatus::Started,
+        };
+        let tool_finished_event = build_live_tool_event(
+            &format!("tool-call-{}", request_id),
+            tool_name,
+            tool_finished_status,
+            None,
+            result.tool_summary.clone(),
+        );
         emit_chat_stream_event(
             app,
             &build_chat_stream_event(
@@ -1841,11 +2140,20 @@ fn emit_execution_result_stream(
                 None,
                 None,
                 result.created_run_id.clone(),
+                Some(tool_finished_event),
+                None,
             ),
         )?;
     }
 
     if let Some(run_id) = &result.created_run_id {
+        let run_started_event = build_live_run_event(
+            run_id,
+            None,
+            LiveRunState::Queued,
+            None,
+            None,
+        );
         emit_chat_stream_event(
             app,
             &build_chat_stream_event(
@@ -1860,9 +2168,22 @@ fn emit_execution_result_stream(
                 None,
                 None,
                 result.created_run_id.clone(),
+                None,
+                Some(run_started_event),
             ),
         )?;
 
+        let run_finished_event = build_live_run_event(
+            run_id,
+            None,
+            result
+                .run_status
+                .as_deref()
+                .map(|status| normalize_live_run_state(Some(status)))
+                .unwrap_or(LiveRunState::Completed),
+            None,
+            result.run_status.clone(),
+        );
         emit_chat_stream_event(
             app,
             &build_chat_stream_event(
@@ -1880,6 +2201,8 @@ fn emit_execution_result_stream(
                 None,
                 None,
                 result.created_run_id.clone(),
+                None,
+                Some(run_finished_event),
             ),
         )?;
     }
@@ -1898,6 +2221,8 @@ fn emit_execution_result_stream(
             Some(result.timeline_text.clone()),
             None,
             result.created_run_id.clone(),
+            None,
+            None,
         ),
     )?;
 
@@ -1928,6 +2253,7 @@ fn emit_run_progress_stream(
             None,
             None,
             Some(normalized_update.run_id.clone()),
+            None,
             normalized_update,
         ),
     )
@@ -2227,6 +2553,8 @@ fn cancel_stream_request_command(app: tauri::AppHandle, payload: CancelStreamReq
             None,
             None,
             Some("request stopped".to_string()),
+            None,
+            None,
             None,
             None,
             None,
@@ -2536,6 +2864,8 @@ async fn stream_session_message_command(
                     None,
                     None,
                     None,
+                    None,
+                    None,
                 ),
             )?;
 
@@ -2561,6 +2891,8 @@ async fn stream_session_message_command(
                             None,
                             None,
                             Some(error.clone()),
+                            None,
+                            None,
                             None,
                         ),
                     )?;
@@ -2597,6 +2929,8 @@ async fn stream_session_message_command(
                                 None,
                                 None,
                                 None,
+                                None,
+                                None,
                             ),
                         );
                     }
@@ -2610,6 +2944,8 @@ async fn stream_session_message_command(
                             None,
                             None,
                             Some(chunk.to_string()),
+                            None,
+                            None,
                             None,
                             None,
                             None,
@@ -2646,6 +2982,8 @@ async fn stream_session_message_command(
                             None,
                             None,
                             Some(error_text.clone()),
+                            None,
+                            None,
                             None,
                         ),
                     )?;
@@ -2765,6 +3103,8 @@ async fn stream_first_session_message_command(
                     None,
                     None,
                     None,
+                    None,
+                    None,
                 ),
             )?;
 
@@ -2792,6 +3132,8 @@ async fn stream_first_session_message_command(
                             None,
                             None,
                             Some(error.clone()),
+                            None,
+                            None,
                             None,
                         ),
                     )?;
@@ -2828,6 +3170,8 @@ async fn stream_first_session_message_command(
                                 None,
                                 None,
                                 None,
+                                None,
+                                None,
                             ),
                         );
                     }
@@ -2841,6 +3185,8 @@ async fn stream_first_session_message_command(
                             None,
                             None,
                             Some(chunk.to_string()),
+                            None,
+                            None,
                             None,
                             None,
                             None,
@@ -2879,6 +3225,8 @@ async fn stream_first_session_message_command(
                             None,
                             None,
                             Some(error_text.clone()),
+                            None,
+                            None,
                             None,
                         ),
                     )?;

@@ -1,6 +1,7 @@
 use crate::app::AppRuntime;
 use crate::contracts::{
-    MaterializeSourcesResult, RunExecutionOutput, RunInput, RunProgressPhase, RunProgressUpdate,
+    LiveRunState, MaterializeSourcesResult, RunExecutionOutput, RunInput, RunProgressPhase,
+    RunProgressUpdate,
 };
 use crate::flows::execute_materialize_sources;
 use crate::runs::import_and_distill_step_definitions;
@@ -28,6 +29,15 @@ use uuid::Uuid;
 
 type RuntimeError = Box<dyn std::error::Error + Send + Sync>;
 
+fn live_run_state_from_run_state(state: &RunState) -> LiveRunState {
+    match state {
+        RunState::Pending => LiveRunState::Pending,
+        RunState::Running => LiveRunState::Running,
+        RunState::Completed => LiveRunState::Completed,
+        RunState::Failed => LiveRunState::Failed,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DistillRunExecutionOutcome {
     pub run: Run,
@@ -50,11 +60,17 @@ fn run_progress_update(
         phase,
         run_id: run.id.clone(),
         run_type: run.run_type.as_str().to_string(),
-        run_state: run.status.as_str().to_string(),
+        run_state: live_run_state_from_run_state(&run.status),
         progress_percent,
         step_key: step_key.map(str::to_string),
         step_summary: step_summary.map(str::to_string),
-        step_status: step_status.map(str::to_string),
+        step_status: step_status.and_then(|status| match status {
+            "started" => Some(crate::contracts::LiveRunStepStatus::Started),
+            "running" => Some(crate::contracts::LiveRunStepStatus::Running),
+            "completed" => Some(crate::contracts::LiveRunStepStatus::Completed),
+            "failed" => Some(crate::contracts::LiveRunStepStatus::Failed),
+            _ => None,
+        }),
         step_index,
         steps_total,
         detail_text: detail_text.map(str::to_string),

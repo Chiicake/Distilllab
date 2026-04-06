@@ -112,6 +112,26 @@ export type ChatStreamPhase =
   | 'completed'
   | 'error';
 
+export type LiveToolStatus = 'started' | 'succeeded' | 'failed';
+
+export type LiveToolEvent = {
+  toolCallId: string;
+  toolName: string;
+  status: LiveToolStatus;
+  argumentsText?: string | null;
+  resultText?: string | null;
+  summary: string;
+  details: string;
+};
+
+export type LiveRunEvent = {
+  runId: string;
+  runType?: string | null;
+  state: RunState;
+  progressPercent?: number | null;
+  detailText?: string | null;
+};
+
 export type RunProgressPhase = 'created' | 'state_changed' | 'step_started' | 'step_finished';
 
 export type RunProgressUpdate = {
@@ -132,6 +152,10 @@ export type ChatStreamEvent = {
   requestId: string;
   sessionId: string;
   phase: ChatStreamPhase;
+  // Compatibility rules for the live stream contract migration:
+  // - toolEvent/runEvent are the intended primary semantics fields for Task 3.
+  // - statusText/timelineText remain in active use until the reducer migration lands.
+  // - reducer callers must still handle missing structured payloads safely during migration.
   actionType?: string | null;
   intent?: string | null;
   chunkText?: string | null;
@@ -140,6 +164,8 @@ export type ChatStreamEvent = {
   timelineText?: string | null;
   errorText?: string | null;
   createdRunId?: string | null;
+  toolEvent?: LiveToolEvent | null;
+  runEvent?: LiveRunEvent | null;
   runProgress?: RunProgressUpdate | null;
 };
 

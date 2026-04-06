@@ -19,6 +19,8 @@ import type {
   ChatState,
   ChatStreamEvent,
   DesktopTimelineMessage,
+  LiveRunEvent,
+  LiveToolEvent,
   RunState,
   RunStepStatus,
 } from './types';
@@ -103,6 +105,42 @@ function buildLiveToolMessage(messageId: string, statusText: string, fallbackToo
   };
 }
 
+function liveToolStatusLabel(status: LiveToolEvent['status']): 'started' | 'success' | 'error' {
+  if (status === 'succeeded') {
+    return 'success';
+  }
+
+  if (status === 'failed') {
+    return 'error';
+  }
+
+  return 'started';
+}
+
+function buildLiveToolMessageFromEvent(messageId: string, toolEvent: LiveToolEvent): ChatMessage {
+  return {
+    id: messageId,
+    role: 'system',
+    kind: 'tool',
+    expandable: true,
+    content: toolEvent.resultText ?? toolEvent.summary,
+    summary: toolEvent.summary,
+    details: toolEvent.details,
+  };
+}
+
+function liveToolStatusText(toolEvent: LiveToolEvent, fallbackText: string | null | undefined): string {
+  if (toolEvent.summary.trim()) {
+    return toolEvent.summary;
+  }
+
+  if (fallbackText?.trim()) {
+    return fallbackText;
+  }
+
+  return `${toolEvent.toolName} · ${liveToolStatusLabel(toolEvent.status)}`;
+}
+
 function createRequestId() {
   return `request-${crypto.randomUUID()}`;
 }
@@ -139,6 +177,89 @@ function runFinishedStateFromStatusOrMeta(statusText: string, previousState: Run
   }
 
   return runStateFromStatusOrMeta(statusText, previousState, 'completed');
+}
+
+function liveRunStatusText(runEvent: LiveRunEvent, fallbackText: string | null | undefined, runIdFallback: string): string {
+  const runId = runEvent.runId || runIdFallback;
+  if (runEvent.detailText?.trim()) {
+    return runEvent.detailText;
+  }
+
+  if (runEvent.runType?.trim()) {
+    return `${runEvent.runType} · ${runEvent.state}`;
+  }
+
+  const label = runEvent.detailText?.trim();
+  if (label) {
+    return label;
+  }
+
+  if (fallbackText?.trim()) {
+    return fallbackText;
+  }
+
+  return `run ${runId} ${runEvent.state}`;
+}
+
+function buildLiveRunMessageFromEvent(
+  messageId: string,
+  runEvent: LiveRunEvent,
+  fallbackText: string | null | undefined,
+): ChatMessage {
+  const summary = runEvent.runType?.trim()
+    ? `${runEvent.runType} · ${runEvent.state}`
+    : `run ${runEvent.runId} ${runEvent.state}`;
+  const content = runEvent.detailText?.trim() || summary;
+  const detailsParts = [
+    `run: ${runEvent.runId}`,
+    `state: ${runEvent.state}`,
+    runEvent.runType ? `type: ${runEvent.runType}` : null,
+    typeof runEvent.progressPercent === 'number' ? `progress: ${runEvent.progressPercent}%` : null,
+    runEvent.detailText ? `detail: ${runEvent.detailText}` : null,
+    fallbackText?.trim() ? `statusText: ${fallbackText}` : null,
+  ].filter(Boolean);
+
+  return {
+    id: messageId,
+    role: 'system',
+    kind: 'run',
+    content,
+    expandable: true,
+    summary,
+    details: detailsParts.join('\n'),
+  };
+}
+
+function hasDetailedRunProgress(runMeta: ChatMessage['runMeta'] | undefined): boolean {
+  return Boolean(
+    runMeta
+    && (
+      (runMeta.steps?.length ?? 0) > 0
+      || runMeta.currentStepKey
+      || runMeta.stepStatus
+      || runMeta.stepSummary
+      || runMeta.detailText
+    ),
+  );
+}
+
+function resolveLifecycleRunState(
+  previousRunMeta: ChatMessage['runMeta'] | undefined,
+  lifecycleState: RunState,
+): RunState {
+  if (!previousRunMeta) {
+    return lifecycleState;
+  }
+
+  if (previousRunMeta.state === 'failed') {
+    return 'failed';
+  }
+
+  if (hasDetailedRunProgress(previousRunMeta)) {
+    return previousRunMeta.state;
+  }
+
+  return lifecycleState;
 }
 
 function runProgressFromState(state: RunState): number {
@@ -598,58 +719,97 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
         }
         case 'tool_started': {
           const rawStatus = event.statusText ?? 'Tool started.';
-          const toolMessage = buildLiveToolMessage(`system-tool-start-${event.requestId}`, rawStatus, 'tool');
+          const toolMessageId = event.toolEvent?.toolCallId
+            ? `tool-call-${event.toolEvent.toolCallId}`
+            : `system-tool-start-${event.requestId}`;
+          const toolMessage = event.toolEvent
+            ? buildLiveToolMessageFromEvent(toolMessageId, event.toolEvent)
+            : buildLiveToolMessage(`system-tool-start-${event.requestId}`, rawStatus, 'tool');
+          const toolStatus = event.toolEvent
+            ? liveToolStatusText(event.toolEvent, event.statusText)
+            : event.statusText ?? previous.lastToolStatus;
+          const filteredMessages = previous.messages.filter((message) => message.id !== toolMessageId);
 
           return {
             ...previous,
-            messages: [...previous.messages, toolMessage],
-            lastToolStatus: event.statusText ?? previous.lastToolStatus,
-            streamStatuses: event.statusText
-              ? [...previous.streamStatuses, event.statusText]
+            messages: [...filteredMessages, toolMessage],
+            lastToolStatus: toolStatus,
+            streamStatuses: toolStatus
+              ? [...previous.streamStatuses, toolStatus]
               : previous.streamStatuses,
           };
         }
         case 'tool_finished': {
           const rawStatus = event.statusText ?? 'Tool finished.';
-          const toolMessage = buildLiveToolMessage(`system-tool-finish-${event.requestId}`, rawStatus, 'tool');
+          const toolMessageId = event.toolEvent?.toolCallId
+            ? `tool-call-${event.toolEvent.toolCallId}`
+            : `system-tool-finish-${event.requestId}`;
+          const toolMessage = event.toolEvent
+            ? buildLiveToolMessageFromEvent(toolMessageId, event.toolEvent)
+            : buildLiveToolMessage(`system-tool-finish-${event.requestId}`, rawStatus, 'tool');
+          const toolStatus = event.toolEvent
+            ? liveToolStatusText(event.toolEvent, event.statusText)
+            : event.statusText ?? previous.lastToolStatus;
+          const filteredMessages = previous.messages.filter((message) => message.id !== toolMessageId);
 
           return {
             ...previous,
-            messages: [...previous.messages, toolMessage],
-            lastToolStatus: event.statusText ?? previous.lastToolStatus,
-            streamStatuses: event.statusText
-              ? [...previous.streamStatuses, event.statusText]
+            messages: [...filteredMessages, toolMessage],
+            lastToolStatus: toolStatus,
+            streamStatuses: toolStatus
+              ? [...previous.streamStatuses, toolStatus]
               : previous.streamStatuses,
           };
         }
         case 'run_started': {
-          const runId = event.createdRunId ?? 'run-active';
-          const statusText = event.statusText ?? 'Run started.';
+          const runId = event.runEvent?.runId ?? event.createdRunId ?? 'run-active';
+          const statusText = event.runEvent
+            ? liveRunStatusText(event.runEvent, event.statusText, runId)
+            : event.statusText ?? 'Run started.';
           const previousRunMeta = previous.messages.find((message) => message.id === `run-card-${runId}`)?.runMeta;
-          const state = runStateFromStatusOrMeta(statusText, previousRunMeta?.state, 'queued');
-          const runMessage: ChatMessage = {
-            id: `run-card-${runId}`,
-            role: 'system',
-            kind: 'run',
-            content: statusText,
-            expandable: true,
-            summary: statusText,
-            details: statusText,
-            runMeta: {
-              runId,
-              state,
-              progressPercent: runProgressFromState(state),
-              runType: previousRunMeta?.runType ?? null,
-              stepKey: previousRunMeta?.stepKey ?? null,
-              stepSummary: previousRunMeta?.stepSummary ?? null,
-              stepStatus: previousRunMeta?.stepStatus ?? null,
-              stepIndex: previousRunMeta?.stepIndex ?? null,
-              stepsTotal: previousRunMeta?.stepsTotal ?? null,
-              detailText: previousRunMeta?.detailText ?? null,
-              currentStepKey: previousRunMeta?.currentStepKey ?? null,
-              steps: previousRunMeta?.steps ?? [],
-            },
-          };
+          const lifecycleState = event.runEvent?.state ?? runStateFromStatusOrMeta(statusText, previousRunMeta?.state, 'queued');
+          const state = resolveLifecycleRunState(previousRunMeta, lifecycleState);
+          const runMessage = event.runEvent
+            ? {
+                ...buildLiveRunMessageFromEvent(`run-card-${runId}`, event.runEvent, event.statusText),
+                runMeta: {
+                  runId,
+                  state,
+                  progressPercent: event.runEvent.progressPercent ?? runProgressFromState(state),
+                  runType: event.runEvent.runType ?? previousRunMeta?.runType ?? null,
+                  stepKey: previousRunMeta?.stepKey ?? null,
+                  stepSummary: previousRunMeta?.stepSummary ?? null,
+                  stepStatus: previousRunMeta?.stepStatus ?? null,
+                  stepIndex: previousRunMeta?.stepIndex ?? null,
+                  stepsTotal: previousRunMeta?.stepsTotal ?? null,
+                  detailText: event.runEvent.detailText ?? previousRunMeta?.detailText ?? null,
+                  currentStepKey: previousRunMeta?.currentStepKey ?? null,
+                  steps: previousRunMeta?.steps ?? [],
+                },
+              }
+            : {
+                id: `run-card-${runId}`,
+                role: 'system' as const,
+                kind: 'run' as const,
+                content: statusText,
+                expandable: true,
+                summary: statusText,
+                details: statusText,
+                runMeta: {
+                  runId,
+                  state,
+                  progressPercent: runProgressFromState(state),
+                  runType: previousRunMeta?.runType ?? null,
+                  stepKey: previousRunMeta?.stepKey ?? null,
+                  stepSummary: previousRunMeta?.stepSummary ?? null,
+                  stepStatus: previousRunMeta?.stepStatus ?? null,
+                  stepIndex: previousRunMeta?.stepIndex ?? null,
+                  stepsTotal: previousRunMeta?.stepsTotal ?? null,
+                  detailText: previousRunMeta?.detailText ?? null,
+                  currentStepKey: previousRunMeta?.currentStepKey ?? null,
+                  steps: previousRunMeta?.steps ?? [],
+                },
+              };
 
           const filteredMessages = previous.messages.filter((message) => message.id !== runMessage.id);
 
@@ -735,33 +895,54 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
           };
         }
         case 'run_finished': {
-          const runId = event.createdRunId ?? 'run-active';
-          const statusText = event.statusText ?? 'Run finished.';
+          const runId = event.runEvent?.runId ?? event.createdRunId ?? 'run-active';
+          const statusText = event.runEvent
+            ? liveRunStatusText(event.runEvent, event.statusText, runId)
+            : event.statusText ?? 'Run finished.';
           const previousRunMeta = previous.messages.find((message) => message.id === `run-card-${runId}`)?.runMeta;
-          const state = runFinishedStateFromStatusOrMeta(statusText, previousRunMeta?.state);
-          const runMessage: ChatMessage = {
-            id: `run-card-${runId}`,
-            role: 'system',
-            kind: 'run',
-            content: statusText,
-            expandable: true,
-            summary: statusText,
-            details: statusText,
-            runMeta: {
-              runId,
-              state,
-              progressPercent: runProgressFromState(state),
-              runType: previousRunMeta?.runType ?? null,
-              stepKey: previousRunMeta?.stepKey ?? null,
-              stepSummary: previousRunMeta?.stepSummary ?? null,
-              stepStatus: previousRunMeta?.stepStatus ?? null,
-              stepIndex: previousRunMeta?.stepIndex ?? null,
-              stepsTotal: previousRunMeta?.stepsTotal ?? null,
-              detailText: previousRunMeta?.detailText ?? null,
-              currentStepKey: previousRunMeta?.currentStepKey ?? null,
-              steps: previousRunMeta?.steps ?? [],
-            },
-          };
+          const lifecycleState = event.runEvent?.state ?? runFinishedStateFromStatusOrMeta(statusText, previousRunMeta?.state);
+          const state = resolveLifecycleRunState(previousRunMeta, lifecycleState);
+          const runMessage = event.runEvent
+            ? {
+                ...buildLiveRunMessageFromEvent(`run-card-${runId}`, event.runEvent, event.statusText),
+                runMeta: {
+                  runId,
+                  state,
+                  progressPercent: event.runEvent.progressPercent ?? runProgressFromState(state),
+                  runType: event.runEvent.runType ?? previousRunMeta?.runType ?? null,
+                  stepKey: previousRunMeta?.stepKey ?? null,
+                  stepSummary: previousRunMeta?.stepSummary ?? null,
+                  stepStatus: previousRunMeta?.stepStatus ?? null,
+                  stepIndex: previousRunMeta?.stepIndex ?? null,
+                  stepsTotal: previousRunMeta?.stepsTotal ?? null,
+                  detailText: event.runEvent.detailText ?? previousRunMeta?.detailText ?? null,
+                  currentStepKey: previousRunMeta?.currentStepKey ?? null,
+                  steps: previousRunMeta?.steps ?? [],
+                },
+              }
+            : {
+                id: `run-card-${runId}`,
+                role: 'system' as const,
+                kind: 'run' as const,
+                content: statusText,
+                expandable: true,
+                summary: statusText,
+                details: statusText,
+                runMeta: {
+                  runId,
+                  state,
+                  progressPercent: runProgressFromState(state),
+                  runType: previousRunMeta?.runType ?? null,
+                  stepKey: previousRunMeta?.stepKey ?? null,
+                  stepSummary: previousRunMeta?.stepSummary ?? null,
+                  stepStatus: previousRunMeta?.stepStatus ?? null,
+                  stepIndex: previousRunMeta?.stepIndex ?? null,
+                  stepsTotal: previousRunMeta?.stepsTotal ?? null,
+                  detailText: previousRunMeta?.detailText ?? null,
+                  currentStepKey: previousRunMeta?.currentStepKey ?? null,
+                  steps: previousRunMeta?.steps ?? [],
+                },
+              };
 
           const filteredMessages = previous.messages.filter((message) => message.id !== runMessage.id);
 
