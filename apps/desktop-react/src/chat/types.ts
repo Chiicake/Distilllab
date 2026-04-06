@@ -118,6 +118,7 @@ export type LiveToolEvent = {
   toolCallId: string;
   toolName: string;
   status: LiveToolStatus;
+  content: string;
   argumentsText?: string | null;
   resultText?: string | null;
   summary: string;
@@ -130,6 +131,9 @@ export type LiveRunEvent = {
   state: RunState;
   progressPercent?: number | null;
   detailText?: string | null;
+  content?: string;
+  summary?: string;
+  details?: string;
 };
 
 export type RunProgressPhase = 'created' | 'state_changed' | 'step_started' | 'step_finished';

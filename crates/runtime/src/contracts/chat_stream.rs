@@ -63,6 +63,7 @@ pub struct LiveToolEvent {
     pub tool_call_id: String,
     pub tool_name: String,
     pub status: LiveToolStatus,
+    pub content: String,
     pub arguments_text: Option<String>,
     pub result_text: Option<String>,
     pub summary: String,
@@ -77,6 +78,9 @@ pub struct LiveRunEvent {
     pub state: LiveRunState,
     pub progress_percent: Option<u8>,
     pub detail_text: Option<String>,
+    pub content: String,
+    pub summary: String,
+    pub details: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
