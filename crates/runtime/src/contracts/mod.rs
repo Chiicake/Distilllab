@@ -5,8 +5,8 @@ pub mod session_intake;
 pub mod source_materialization;
 
 pub use chat_stream::{
-    ChatStreamEvent, ChatStreamPhase, RunProgressPhase, RunProgressUpdate,
-    SessionMessageExecutionResult,
+    ChatStreamEvent, ChatStreamPhase, LiveRunEvent, LiveRunState, LiveRunStepStatus, LiveToolEvent,
+    LiveToolStatus, RunProgressPhase, RunProgressUpdate, SessionMessageExecutionResult,
 };
 pub use run_output::{RunExecutionOutput, RunResultContext};
 pub use session::{LlmSessionDebugRequest, SessionMessageRequest};

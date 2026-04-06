@@ -15,7 +15,8 @@ pub use config::{
     set_current_provider_model, upsert_provider_entry,
 };
 pub use contracts::{
-    ChatStreamEvent, ChatStreamPhase, DistillRunStepPreview, LlmSessionDebugRequest,
+    ChatStreamEvent, ChatStreamPhase, DistillRunStepPreview, LiveRunEvent, LiveRunState,
+    LiveRunStepStatus, LiveToolEvent, LiveToolStatus, LlmSessionDebugRequest,
     MaterializeDedupePolicy, MaterializeFailure, MaterializeSkip, MaterializeSourcesInput,
     MaterializeSourcesResult, MaterializedSourceRef, RunExecutionOutput,
     RunHandoffPreview, RunResultContext,

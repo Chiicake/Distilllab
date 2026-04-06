@@ -206,6 +206,16 @@ fn indent_block(text: &str) -> String {
         .join("\n")
 }
 
+fn live_run_state_label(state: &crate::contracts::LiveRunState) -> &'static str {
+    match state {
+        crate::contracts::LiveRunState::Queued => "queued",
+        crate::contracts::LiveRunState::Pending => "pending",
+        crate::contracts::LiveRunState::Running => "running",
+        crate::contracts::LiveRunState::Completed => "completed",
+        crate::contracts::LiveRunState::Failed => "failed",
+    }
+}
+
 fn run_progress_status_text(update: &RunProgressUpdate) -> String {
     let percent = update
         .progress_percent
@@ -221,7 +231,7 @@ fn run_progress_status_text(update: &RunProgressUpdate) -> String {
         crate::contracts::RunProgressPhase::StateChanged => format!(
             "run state: {} {} ({}){}",
             update.run_id,
-            update.run_state,
+            live_run_state_label(&update.run_state),
             percent,
             if detail.is_empty() {
                 "".to_string()
