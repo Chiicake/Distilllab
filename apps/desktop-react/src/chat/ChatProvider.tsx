@@ -11,6 +11,8 @@ import {
 } from 'react';
 
 import { getTauriInvoke, getTauriListen, loadTauriEventApi } from './tauri';
+import { resolveLifecycleRunState } from './runLifecycleState';
+import { deriveCompletedActiveRunLabel, liveToolStatusLabel, toolStatusFromText } from './chatStreamState';
 import { desktopTimelineToChatMessages } from './timeline';
 import { parseTimelineText } from './timelineTextLegacy';
 import type {
@@ -72,25 +74,12 @@ const INITIAL_STATE: ChatState = {
   liveAssistantText: '',
 };
 
-function summarizeToolStatus(statusText: string): string {
-  const compact = statusText.replace(/\s+/g, ' ').trim();
-  if (compact.length <= 120) {
-    return compact;
-  }
-
-  return `${compact.slice(0, 117)}...`;
-}
-
-function toolStatusFromText(statusText: string): 'success' | 'error' {
-  return /error|failed|failure/i.test(statusText) ? 'error' : 'success';
-}
-
 function toolNameFromStatusText(statusText: string, fallback: string): string {
   const match = statusText.match(/^tool\s+(?:started|finished):\s+(.+)$/i);
   return match?.[1]?.trim() || fallback;
 }
 
-function buildLiveToolMessage(messageId: string, statusText: string, fallbackToolName: string): ChatMessage {
+function buildCompatibilityToolMessage(messageId: string, statusText: string, fallbackToolName: string): ChatMessage {
   const toolName = toolNameFromStatusText(statusText, fallbackToolName);
   const status = toolStatusFromText(statusText);
 
@@ -105,25 +94,13 @@ function buildLiveToolMessage(messageId: string, statusText: string, fallbackToo
   };
 }
 
-function liveToolStatusLabel(status: LiveToolEvent['status']): 'started' | 'success' | 'error' {
-  if (status === 'succeeded') {
-    return 'success';
-  }
-
-  if (status === 'failed') {
-    return 'error';
-  }
-
-  return 'started';
-}
-
 function buildLiveToolMessageFromEvent(messageId: string, toolEvent: LiveToolEvent): ChatMessage {
   return {
     id: messageId,
     role: 'system',
     kind: 'tool',
     expandable: true,
-    content: toolEvent.resultText ?? toolEvent.summary,
+    content: toolEvent.content,
     summary: toolEvent.summary,
     details: toolEvent.details,
   };
@@ -181,24 +158,19 @@ function runFinishedStateFromStatusOrMeta(statusText: string, previousState: Run
 
 function liveRunStatusText(runEvent: LiveRunEvent, fallbackText: string | null | undefined, runIdFallback: string): string {
   const runId = runEvent.runId || runIdFallback;
+  if (runEvent.content?.trim()) {
+    return runEvent.content;
+  }
+
   if (runEvent.detailText?.trim()) {
     return runEvent.detailText;
-  }
-
-  if (runEvent.runType?.trim()) {
-    return `${runEvent.runType} · ${runEvent.state}`;
-  }
-
-  const label = runEvent.detailText?.trim();
-  if (label) {
-    return label;
   }
 
   if (fallbackText?.trim()) {
     return fallbackText;
   }
 
-  return `run ${runId} ${runEvent.state}`;
+  return runEvent.summary?.trim() || `run ${runId} ${runEvent.state}`;
 }
 
 function buildLiveRunMessageFromEvent(
@@ -206,18 +178,18 @@ function buildLiveRunMessageFromEvent(
   runEvent: LiveRunEvent,
   fallbackText: string | null | undefined,
 ): ChatMessage {
-  const summary = runEvent.runType?.trim()
-    ? `${runEvent.runType} · ${runEvent.state}`
-    : `run ${runEvent.runId} ${runEvent.state}`;
-  const content = runEvent.detailText?.trim() || summary;
-  const detailsParts = [
-    `run: ${runEvent.runId}`,
-    `state: ${runEvent.state}`,
-    runEvent.runType ? `type: ${runEvent.runType}` : null,
-    typeof runEvent.progressPercent === 'number' ? `progress: ${runEvent.progressPercent}%` : null,
-    runEvent.detailText ? `detail: ${runEvent.detailText}` : null,
-    fallbackText?.trim() ? `statusText: ${fallbackText}` : null,
-  ].filter(Boolean);
+  const summary = runEvent.summary?.trim()
+    || (runEvent.runType?.trim() ? `${runEvent.runType} · ${runEvent.state}` : `run ${runEvent.runId} ${runEvent.state}`);
+  const content = runEvent.content?.trim() || runEvent.detailText?.trim() || fallbackText?.trim() || summary;
+  const details = runEvent.details?.trim()
+    || [
+      `run: ${runEvent.runId}`,
+      `state: ${runEvent.state}`,
+      runEvent.runType ? `type: ${runEvent.runType}` : null,
+      typeof runEvent.progressPercent === 'number' ? `progress: ${runEvent.progressPercent}%` : null,
+      runEvent.detailText ? `detail: ${runEvent.detailText}` : null,
+      fallbackText?.trim() ? `statusText: ${fallbackText}` : null,
+    ].filter(Boolean).join('\n');
 
   return {
     id: messageId,
@@ -226,40 +198,8 @@ function buildLiveRunMessageFromEvent(
     content,
     expandable: true,
     summary,
-    details: detailsParts.join('\n'),
+    details,
   };
-}
-
-function hasDetailedRunProgress(runMeta: ChatMessage['runMeta'] | undefined): boolean {
-  return Boolean(
-    runMeta
-    && (
-      (runMeta.steps?.length ?? 0) > 0
-      || runMeta.currentStepKey
-      || runMeta.stepStatus
-      || runMeta.stepSummary
-      || runMeta.detailText
-    ),
-  );
-}
-
-function resolveLifecycleRunState(
-  previousRunMeta: ChatMessage['runMeta'] | undefined,
-  lifecycleState: RunState,
-): RunState {
-  if (!previousRunMeta) {
-    return lifecycleState;
-  }
-
-  if (previousRunMeta.state === 'failed') {
-    return 'failed';
-  }
-
-  if (hasDetailedRunProgress(previousRunMeta)) {
-    return previousRunMeta.state;
-  }
-
-  return lifecycleState;
 }
 
 function runProgressFromState(state: RunState): number {
@@ -627,7 +567,11 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
             return {
               ...previous,
               messages,
-              activeRunLabel: event.createdRunId ?? previous.activeRunLabel,
+              activeRunLabel: deriveCompletedActiveRunLabel(
+                messages,
+                event.createdRunId,
+                previous.activeRunLabel,
+              ),
               streamStatuses: [...previous.streamStatuses, 'timeline synchronized'],
             };
           });
@@ -724,7 +668,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
             : `system-tool-start-${event.requestId}`;
           const toolMessage = event.toolEvent
             ? buildLiveToolMessageFromEvent(toolMessageId, event.toolEvent)
-            : buildLiveToolMessage(`system-tool-start-${event.requestId}`, rawStatus, 'tool');
+            : buildCompatibilityToolMessage(`system-tool-start-${event.requestId}`, rawStatus, 'tool');
           const toolStatus = event.toolEvent
             ? liveToolStatusText(event.toolEvent, event.statusText)
             : event.statusText ?? previous.lastToolStatus;
@@ -746,7 +690,7 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
             : `system-tool-finish-${event.requestId}`;
           const toolMessage = event.toolEvent
             ? buildLiveToolMessageFromEvent(toolMessageId, event.toolEvent)
-            : buildLiveToolMessage(`system-tool-finish-${event.requestId}`, rawStatus, 'tool');
+            : buildCompatibilityToolMessage(`system-tool-finish-${event.requestId}`, rawStatus, 'tool');
           const toolStatus = event.toolEvent
             ? liveToolStatusText(event.toolEvent, event.statusText)
             : event.statusText ?? previous.lastToolStatus;
@@ -845,6 +789,17 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
             .filter(Boolean)
             .join(' - ');
           const statusText = event.statusText ?? (fallbackStatus || `run ${runId} progress`);
+          const runPresentation = event.runEvent
+            ? buildLiveRunMessageFromEvent(`run-card-${runId}`, event.runEvent, event.statusText)
+            : {
+                id: `run-card-${runId}`,
+                role: 'system' as const,
+                kind: 'run' as const,
+                content: statusText,
+                expandable: true,
+                summary: statusText,
+                details: statusText,
+              };
 
           const previousRunMessage = previous.messages.find((message) => message.id === `run-card-${runId}`);
           const previousRunMeta = previousRunMessage?.runMeta;
@@ -865,10 +820,10 @@ export default function ChatProvider({ children }: { children: ReactNode }) {
             id: `run-card-${runId}`,
             role: 'system',
             kind: 'run',
-            content: statusText,
+            content: runPresentation.content,
             expandable: true,
-            summary: statusText,
-            details: statusText,
+            summary: runPresentation.summary,
+            details: runPresentation.details,
             runMeta: {
               runId,
               state: runState,

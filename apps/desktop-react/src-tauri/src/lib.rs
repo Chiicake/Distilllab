@@ -428,6 +428,20 @@ struct DesktopTimelineMessage {
     created_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolPresentation {
+    content: String,
+    summary: String,
+    details: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunPresentation {
+    content: String,
+    summary: String,
+    details: String,
+}
+
 fn desktop_timeline_from_session_messages(messages: &[SessionMessage]) -> Vec<DesktopTimelineMessage> {
     let run_anchor_messages = earliest_run_progress_message_by_run_id(messages);
     let run_cards = desktop_run_cards_from_progress_messages(messages)
@@ -572,6 +586,66 @@ fn desktop_message_from_session_message(message: &SessionMessage) -> Option<Desk
     })
 }
 
+fn live_tool_status_label(status: &LiveToolStatus) -> &'static str {
+    match status {
+        LiveToolStatus::Started => "started",
+        LiveToolStatus::Succeeded => "success",
+        LiveToolStatus::Failed => "failed",
+    }
+}
+
+fn persisted_tool_status_from_message_data(
+    data: Option<&serde_json::Value>,
+    content: &str,
+) -> LiveToolStatus {
+    match data
+        .and_then(|value| value.get("status"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_lowercase())
+    {
+        Some(status) if matches!(status.as_str(), "started" | "running") => LiveToolStatus::Started,
+        Some(status) if matches!(status.as_str(), "failed" | "error") => LiveToolStatus::Failed,
+        Some(status) if matches!(status.as_str(), "succeeded" | "success" | "completed" | "finished") => {
+            LiveToolStatus::Succeeded
+        }
+        Some(_) | None => {
+            let content_lower = content.to_lowercase();
+            if content_lower.contains("error")
+                || content_lower.contains("failed")
+                || content_lower.contains("failure")
+            {
+                LiveToolStatus::Failed
+            } else {
+                LiveToolStatus::Succeeded
+            }
+        }
+    }
+}
+
+fn build_tool_presentation(
+    tool_name: &str,
+    status: LiveToolStatus,
+    arguments_text: Option<&str>,
+    result_text: Option<&str>,
+) -> ToolPresentation {
+    let status_label = live_tool_status_label(&status);
+    let content = result_text.unwrap_or("Tool result unavailable.").to_string();
+    let summary = format!("{} · {}", tool_name, status_label);
+    let details = format!(
+        "tool: {}\nstatus: {}\narguments: {}\n\nresult:\n{}",
+        tool_name,
+        status_label,
+        arguments_text.unwrap_or("{}"),
+        content
+    );
+
+    ToolPresentation {
+        content,
+        summary,
+        details,
+    }
+}
+
 fn desktop_tool_message_from_session_message(message: &SessionMessage) -> DesktopTimelineMessage {
     let data = serde_json::from_str::<serde_json::Value>(&message.data_json).ok();
     let tool_name = data
@@ -585,25 +659,23 @@ fn desktop_tool_message_from_session_message(message: &SessionMessage) -> Deskto
         .and_then(|value| value.get("arguments"))
         .and_then(|value| serde_json::to_string(value).ok())
         .unwrap_or_else(|| "{}".to_string());
-    let content_lower = message.content.to_lowercase();
-    let tool_succeeded = !content_lower.contains("error")
-        && !content_lower.contains("failed")
-        && !content_lower.contains("failure");
-    let status_label = if tool_succeeded { "success" } else { "error" };
-    let summary = Some(format!("{} · {}", tool_name, status_label));
-    let details = Some(format!(
-        "tool: {}\nstatus: {}\narguments: {}\n\nresult:\n{}",
-        tool_name, status_label, arguments, message.content
-    ));
+    // Historical persisted rows only store raw tool metadata plus result content, so when a
+    // status field is absent we still need to infer it here. The bridge owns that fallback.
+    let presentation = build_tool_presentation(
+        tool_name,
+        persisted_tool_status_from_message_data(data.as_ref(), &message.content),
+        Some(arguments.as_str()),
+        Some(message.content.as_str()).filter(|value| !value.is_empty()),
+    );
 
     DesktopTimelineMessage {
         id: message.id.clone(),
         role: message.role.as_str().to_string(),
         kind: "tool".to_string(),
         source_message_type: Some(message.message_type.clone()),
-        content: message.content.clone(),
-        summary,
-        details,
+        content: presentation.content,
+        summary: Some(presentation.summary),
+        details: Some(presentation.details),
         attachments: Vec::new(),
         run_meta: None,
         created_at: message.created_at.clone(),
@@ -628,6 +700,86 @@ fn normalize_structured_step_status(value: Option<&str>) -> Option<String> {
         "failed" | "error" => "failed".to_string(),
         _ => "pending".to_string(),
     })
+}
+
+fn run_step_status_text(phase: &RunProgressPhase) -> &'static str {
+    match phase {
+        RunProgressPhase::Created | RunProgressPhase::StateChanged => "progress updated",
+        RunProgressPhase::StepStarted => "step started",
+        RunProgressPhase::StepFinished => "step finished",
+    }
+}
+
+fn build_run_presentation(
+    run_id: &str,
+    run_type: Option<&str>,
+    state: &LiveRunState,
+    progress_percent: Option<u8>,
+    detail_text: Option<&str>,
+    phase: Option<&RunProgressPhase>,
+    step_key: Option<&str>,
+    step_summary: Option<&str>,
+    status_text: Option<&str>,
+) -> RunPresentation {
+    let summary = match (step_summary.filter(|value| !value.trim().is_empty()), run_type) {
+        (Some(summary), _) => summary.to_string(),
+        (None, Some(run_type)) if !run_type.trim().is_empty() => run_type.to_string(),
+        _ => format!("run {}", run_id),
+    };
+
+    let content = status_text
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            detail_text
+                .filter(|value| !value.trim().is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| match run_type {
+            Some(run_type) if !run_type.trim().is_empty() => {
+                format!("{} · {}", run_type, live_run_state_label(state))
+            }
+            _ => format!("run {} {}", run_id, live_run_state_label(state)),
+        });
+
+    let mut detail_lines = vec![
+        format!("run: {}", run_id),
+        format!("state: {}", live_run_state_label(state)),
+    ];
+
+    if let Some(run_type) = run_type.filter(|value| !value.trim().is_empty()) {
+        detail_lines.push(format!("type: {}", run_type));
+    }
+
+    if let Some(progress_percent) = progress_percent {
+        detail_lines.push(format!("progress: {}%", progress_percent));
+    }
+
+    if let Some(phase) = phase {
+        detail_lines.push(format!("phase: {}", run_step_status_text(phase)));
+    }
+
+    if let Some(step_key) = step_key.filter(|value| !value.trim().is_empty()) {
+        detail_lines.push(format!("stepKey: {}", step_key));
+    }
+
+    if let Some(step_summary) = step_summary.filter(|value| !value.trim().is_empty()) {
+        detail_lines.push(format!("stepSummary: {}", step_summary));
+    }
+
+    if let Some(detail_text) = detail_text.filter(|value| !value.trim().is_empty()) {
+        detail_lines.push(format!("detail: {}", detail_text));
+    }
+
+    if let Some(status_text) = status_text.filter(|value| !value.trim().is_empty()) {
+        detail_lines.push(format!("statusText: {}", status_text));
+    }
+
+    RunPresentation {
+        content,
+        summary,
+        details: detail_lines.join("\n"),
+    }
 }
 
 fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<DesktopTimelineMessage> {
@@ -723,23 +875,44 @@ fn desktop_run_cards_from_progress_messages(messages: &[SessionMessage]) -> Vec<
                 })
                 .map(|message| message.content.clone())
                 .unwrap_or_else(|| anchor_message.content.clone());
+            let latest_progress_phase = latest_progress
+                .get("phase")
+                .and_then(|value| value.as_str())
+                .map(|value| match value {
+                    "created" => RunProgressPhase::Created,
+                    "state_changed" => RunProgressPhase::StateChanged,
+                    "step_started" => RunProgressPhase::StepStarted,
+                    "step_finished" => RunProgressPhase::StepFinished,
+                    _ => RunProgressPhase::StateChanged,
+                });
+            let run_state = normalize_live_run_state(
+                latest_progress.get("runState").and_then(|value| value.as_str()),
+            );
+            let run_presentation = build_run_presentation(
+                &run_id,
+                latest_progress.get("runType").and_then(|value| value.as_str()),
+                &run_state,
+                latest_progress
+                    .get("progressPercent")
+                    .and_then(|value| value.as_u64())
+                    .and_then(|value| u8::try_from(value).ok()),
+                latest_progress.get("detailText").and_then(|value| value.as_str()),
+                latest_progress_phase.as_ref(),
+                latest_progress.get("stepKey").and_then(|value| value.as_str()),
+                latest_progress
+                    .get("stepSummary")
+                    .and_then(|value| value.as_str()),
+                Some(latest_status_text.as_str()),
+            );
 
             Some(DesktopTimelineMessage {
                 id: format!("run-card-{}", run_id),
                 role: SessionMessageRole::System.as_str().to_string(),
                 kind: "run".to_string(),
                 source_message_type: Some("run_progress_message".to_string()),
-                content: latest_status_text.clone(),
-                summary: latest_progress
-                    .get("stepSummary")
-                    .and_then(|value| value.as_str())
-                    .map(str::to_string)
-                    .or_else(|| Some(latest_status_text.clone())),
-                details: latest_progress
-                    .get("detailText")
-                    .and_then(|value| value.as_str())
-                    .map(str::to_string)
-                    .or_else(|| Some(latest_status_text.clone())),
+                content: run_presentation.content,
+                summary: Some(run_presentation.summary),
+                details: Some(run_presentation.details),
                 attachments: Vec::new(),
                 run_meta: Some(DesktopRunCardMeta {
                     run_id: run_id.clone(),
@@ -1481,10 +1654,10 @@ mod tests {
 
         assert_eq!(timeline.len(), 1);
         assert_eq!(timeline[0].content, "Tool failed: file missing");
-        assert_eq!(timeline[0].summary.as_deref(), Some("read_file · error"));
+        assert_eq!(timeline[0].summary.as_deref(), Some("read_file · failed"));
         let details = timeline[0].details.as_deref().expect("tool details");
         assert!(details.contains("tool: read_file"));
-        assert!(details.contains("status: error"));
+        assert!(details.contains("status: failed"));
         assert!(details.contains("missing.txt"));
         assert!(details.contains("Tool failed: file missing"));
     }
@@ -1644,6 +1817,8 @@ mod tests {
         assert_eq!(event.status, LiveToolStatus::Started);
         assert_eq!(event.arguments_text.as_deref(), Some("{\"path\":\"notes.md\"}"));
         assert_eq!(event.result_text, None);
+        assert_eq!(event.content, "Tool result unavailable.");
+        assert_eq!(event.details, "tool: read_file\nstatus: started\narguments: {\"path\":\"notes.md\"}\n\nresult:\nTool result unavailable.");
     }
 
     #[test]
@@ -1657,9 +1832,73 @@ mod tests {
         );
 
         assert_eq!(event.status, LiveToolStatus::Failed);
+        assert_eq!(event.content, "file missing");
         assert_eq!(event.result_text.as_deref(), Some("file missing"));
         assert!(event.summary.contains("read_file"));
         assert!(event.details.contains("status: failed"));
+    }
+
+    #[test]
+    fn persisted_and_live_tool_presentations_match_for_failed_tool_results() {
+        let timeline = desktop_timeline_from_session_messages(&[session_message(
+            "message-tool-failed",
+            None,
+            "tool_result_message",
+            SessionMessageRole::System,
+            "file missing",
+            serde_json::json!({
+                "tool_name": "read_file",
+                "arguments": {
+                    "path": "missing.md"
+                },
+                "status": "failed"
+            }),
+            "2026-04-05T00:00:07Z",
+        )]);
+        let persisted = &timeline[0];
+        let live = build_live_tool_event(
+            "tool-call-parity-failed",
+            "read_file",
+            LiveToolStatus::Failed,
+            Some("{\"path\":\"missing.md\"}".to_string()),
+            Some("file missing".to_string()),
+        );
+
+        assert_eq!(persisted.summary.as_deref(), Some(live.summary.as_str()));
+        assert_eq!(persisted.details.as_deref(), Some(live.details.as_str()));
+        assert_eq!(persisted.content, live.result_text.expect("live result text"));
+    }
+
+    #[test]
+    fn persisted_and_live_tool_presentations_share_unknown_result_text() {
+        let timeline = desktop_timeline_from_session_messages(&[session_message(
+            "message-tool-missing-result",
+            None,
+            "tool_result_message",
+            SessionMessageRole::System,
+            "",
+            serde_json::json!({
+                "tool_name": "read_file",
+                "arguments": {
+                    "path": "notes.md"
+                },
+                "status": "succeeded"
+            }),
+            "2026-04-05T00:00:08Z",
+        )]);
+        let persisted = &timeline[0];
+        let live = build_live_tool_event(
+            "tool-call-parity-unknown",
+            "read_file",
+            LiveToolStatus::Succeeded,
+            Some("{\"path\":\"notes.md\"}".to_string()),
+            None,
+        );
+
+        assert_eq!(persisted.summary.as_deref(), Some(live.summary.as_str()));
+        assert_eq!(persisted.details.as_deref(), Some(live.details.as_str()));
+        assert_eq!(persisted.content, "Tool result unavailable.");
+        assert_eq!(persisted.content, live.details.lines().last().expect("unknown result line"));
     }
 
     #[test]
@@ -1670,6 +1909,10 @@ mod tests {
             LiveRunState::Queued,
             Some(10),
             Some("Queued for execution".to_string()),
+            Some(RunProgressPhase::Created),
+            None,
+            None,
+            Some("run created: run-123 (distill)".to_string()),
         );
 
         assert_eq!(event.run_id, "run-123");
@@ -1686,10 +1929,129 @@ mod tests {
             LiveRunState::Failed,
             Some(100),
             Some("Run failed at draft step".to_string()),
+            Some(RunProgressPhase::StateChanged),
+            Some("draft".to_string()),
+            Some("Draft answer".to_string()),
+            Some("run state: run-456 failed (100%) - Run failed at draft step".to_string()),
         );
 
         assert_eq!(event.state, LiveRunState::Failed);
         assert_eq!(event.detail_text.as_deref(), Some("Run failed at draft step"));
+    }
+
+    #[test]
+    fn persisted_and_live_run_presentations_match_for_created_run_semantics() {
+        let timeline = desktop_timeline_from_session_messages(&[session_message(
+            "progress-created",
+            Some("run-bridge-created"),
+            "run_progress_message",
+            SessionMessageRole::System,
+            "run created: run-bridge-created (distill)",
+            serde_json::json!({
+                "statusText": "run created: run-bridge-created (distill)",
+                "runProgress": {
+                    "phase": "created",
+                    "runId": "run-bridge-created",
+                    "runType": "distill",
+                    "runState": "queued",
+                    "progressPercent": 10,
+                    "detailText": "Queued for execution"
+                }
+            }),
+            "2026-04-05T00:00:09Z",
+        )]);
+        let persisted = &timeline[0];
+        let live = serde_json::to_value(build_live_run_event(
+            "run-bridge-created",
+            Some("distill".to_string()),
+            LiveRunState::Queued,
+            Some(10),
+            Some("Queued for execution".to_string()),
+            Some(RunProgressPhase::Created),
+            None,
+            None,
+            Some("run created: run-bridge-created (distill)".to_string()),
+        ))
+        .expect("live run event json");
+
+        assert_eq!(persisted.content, live["content"].as_str().expect("live content"));
+        assert_eq!(persisted.summary.as_deref(), live["summary"].as_str());
+        assert_eq!(persisted.details.as_deref(), live["details"].as_str());
+    }
+
+    #[test]
+    fn persisted_and_live_run_presentations_match_latest_meaningful_status_text_semantics() {
+        let timeline = desktop_timeline_from_session_messages(&[
+            session_message(
+                "progress-started",
+                Some("run-bridge-progress"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run step started: run-bridge-progress [draft] (40%) - Starting draft",
+                serde_json::json!({
+                    "statusText": "run step started: run-bridge-progress [draft] (40%) - Starting draft",
+                    "runProgress": {
+                        "phase": "step_started",
+                        "runId": "run-bridge-progress",
+                        "runType": "distill",
+                        "runState": "running",
+                        "progressPercent": 40,
+                        "stepKey": "draft",
+                        "stepSummary": "Draft answer",
+                        "stepStatus": "started",
+                        "stepIndex": 1,
+                        "stepsTotal": 2,
+                        "detailText": "Starting draft"
+                    }
+                }),
+                "2026-04-05T00:00:10Z",
+            ),
+            session_message(
+                "progress-finished",
+                Some("run-bridge-progress"),
+                "run_progress_message",
+                SessionMessageRole::System,
+                "run step finished: run-bridge-progress [draft] (80%) - Draft complete",
+                serde_json::json!({
+                    "statusText": "run step finished: run-bridge-progress [draft] (80%) - Draft complete",
+                    "runProgress": {
+                        "phase": "step_finished",
+                        "runId": "run-bridge-progress",
+                        "runType": "distill",
+                        "runState": "running",
+                        "progressPercent": 80,
+                        "stepKey": "draft",
+                        "stepSummary": "Draft answer",
+                        "stepStatus": "completed",
+                        "stepIndex": 1,
+                        "stepsTotal": 2,
+                        "detailText": "Draft complete"
+                    }
+                }),
+                "2026-04-05T00:00:11Z",
+            ),
+        ]);
+        let persisted = &timeline[0];
+        let live = serde_json::to_value(build_live_run_event(
+            "run-bridge-progress",
+            Some("distill".to_string()),
+            LiveRunState::Running,
+            Some(80),
+            Some("Draft complete".to_string()),
+            Some(RunProgressPhase::StepFinished),
+            Some("draft".to_string()),
+            Some("Draft answer".to_string()),
+            Some("run step finished: run-bridge-progress [draft] (80%) - Draft complete".to_string()),
+        ))
+        .expect("live run event json");
+
+        assert_eq!(
+            persisted.content,
+            "run step finished: run-bridge-progress [draft] (80%) - Draft complete"
+        );
+        assert_eq!(persisted.content, live["content"].as_str().expect("live content"));
+        assert_eq!(persisted.summary.as_deref(), live["summary"].as_str());
+        assert_eq!(persisted.details.as_deref(), live["details"].as_str());
     }
 
     #[test]
@@ -1838,29 +2200,22 @@ fn build_live_tool_event(
     arguments_text: Option<String>,
     result_text: Option<String>,
 ) -> LiveToolEvent {
-    let status_label = match status {
-        LiveToolStatus::Started => "started",
-        LiveToolStatus::Succeeded => "success",
-        LiveToolStatus::Failed => "failed",
-    };
-    let summary = format!("{} · {}", tool_name, status_label);
-    let result_block = result_text.as_deref().unwrap_or("");
-    let details = format!(
-        "tool: {}\nstatus: {}\narguments: {}\n\nresult:\n{}",
+    let presentation = build_tool_presentation(
         tool_name,
-        status_label,
-        arguments_text.as_deref().unwrap_or("{}"),
-        result_block
+        status.clone(),
+        arguments_text.as_deref(),
+        result_text.as_deref(),
     );
 
     LiveToolEvent {
         tool_call_id: tool_call_id.to_string(),
         tool_name: tool_name.to_string(),
         status,
+        content: presentation.content,
         arguments_text,
         result_text,
-        summary,
-        details,
+        summary: presentation.summary,
+        details: presentation.details,
     }
 }
 
@@ -1870,13 +2225,32 @@ fn build_live_run_event(
     state: LiveRunState,
     progress_percent: Option<u8>,
     detail_text: Option<String>,
+    phase: Option<RunProgressPhase>,
+    step_key: Option<String>,
+    step_summary: Option<String>,
+    status_text: Option<String>,
 ) -> LiveRunEvent {
+    let presentation = build_run_presentation(
+        run_id,
+        run_type.as_deref(),
+        &state,
+        progress_percent,
+        detail_text.as_deref(),
+        phase.as_ref(),
+        step_key.as_deref(),
+        step_summary.as_deref(),
+        status_text.as_deref(),
+    );
+
     LiveRunEvent {
         run_id: run_id.to_string(),
         run_type,
         state,
         progress_percent,
         detail_text,
+        content: presentation.content,
+        summary: presentation.summary,
+        details: presentation.details,
     }
 }
 
@@ -1934,6 +2308,10 @@ fn build_chat_stream_event_with_run_progress(
         run_progress.run_state.clone(),
         run_progress.progress_percent,
         run_progress.detail_text.clone(),
+        Some(run_progress.phase.clone()),
+        run_progress.step_key.clone(),
+        run_progress.step_summary.clone(),
+        status_text.clone(),
     ));
 
     ChatStreamEvent {
@@ -2153,6 +2531,10 @@ fn emit_execution_result_stream(
             LiveRunState::Queued,
             None,
             None,
+            Some(RunProgressPhase::Created),
+            None,
+            None,
+            Some(format!("run started: {}", run_id)),
         );
         emit_chat_stream_event(
             app,
@@ -2183,6 +2565,13 @@ fn emit_execution_result_stream(
                 .unwrap_or(LiveRunState::Completed),
             None,
             result.run_status.clone(),
+            Some(RunProgressPhase::StateChanged),
+            None,
+            None,
+            Some(match result.run_status.as_deref() {
+                Some(status) => format!("run {} status: {}", run_id, status),
+                None => format!("run {} finished", run_id),
+            }),
         );
         emit_chat_stream_event(
             app,
