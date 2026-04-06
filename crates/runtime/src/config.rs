@@ -1,10 +1,15 @@
 use directories::ProjectDirs;
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 type ConfigError = Box<dyn std::error::Error + Send + Sync>;
+
+const DEFAULT_MAX_AGENT_CONCURRENCY: u8 = 4;
+const MIN_MAX_AGENT_CONCURRENCY: u8 = 1;
+const MAX_MAX_AGENT_CONCURRENCY: u8 = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
@@ -16,7 +21,7 @@ pub struct AppConfig {
     pub distilllab: DistilllabConfigSection,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DistilllabConfigSection {
     #[serde(rename = "currentProvider")]
     pub current_provider: Option<String>,
@@ -24,6 +29,23 @@ pub struct DistilllabConfigSection {
     pub current_model: Option<String>,
     #[serde(rename = "desktopUi", default, skip_serializing_if = "Option::is_none")]
     pub desktop_ui: Option<DesktopUiConfig>,
+    #[serde(
+        rename = "maxAgentConcurrency",
+        default = "default_max_agent_concurrency",
+        deserialize_with = "deserialize_max_agent_concurrency"
+    )]
+    pub max_agent_concurrency: u8,
+}
+
+impl Default for DistilllabConfigSection {
+    fn default() -> Self {
+        Self {
+            current_provider: None,
+            current_model: None,
+            desktop_ui: None,
+            max_agent_concurrency: default_max_agent_concurrency(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -80,9 +102,31 @@ pub struct ResolvedProviderModel {
     pub api_key: Option<String>,
 }
 
+fn default_max_agent_concurrency() -> u8 {
+    DEFAULT_MAX_AGENT_CONCURRENCY
+}
+
+fn deserialize_max_agent_concurrency<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = i64::deserialize(deserializer)?;
+    Ok(value.clamp(0, u8::MAX as i64) as u8)
+}
+
+fn normalize_max_agent_concurrency(value: u8) -> u8 {
+    value.clamp(MIN_MAX_AGENT_CONCURRENCY, MAX_MAX_AGENT_CONCURRENCY)
+}
+
+fn normalize_app_config(config: &mut AppConfig) {
+    config.distilllab.max_agent_concurrency =
+        normalize_max_agent_concurrency(config.distilllab.max_agent_concurrency);
+}
+
 pub fn load_app_config_from_path(path: &Path) -> Result<AppConfig, ConfigError> {
     let content = fs::read_to_string(path)?;
-    let config = serde_json::from_str::<AppConfig>(&content)?;
+    let mut config = serde_json::from_str::<AppConfig>(&content)?;
+    normalize_app_config(&mut config);
     Ok(config)
 }
 
@@ -98,7 +142,10 @@ pub fn save_app_config_to_path(config: &AppConfig, path: &Path) -> Result<(), Co
         fs::create_dir_all(parent)?;
     }
 
-    let content = serde_json::to_string_pretty(config)?;
+    let mut normalized = config.clone();
+    normalize_app_config(&mut normalized);
+
+    let content = serde_json::to_string_pretty(&normalized)?;
     fs::write(path, content)?;
     Ok(())
 }
@@ -668,6 +715,136 @@ mod tests {
             persisted.distilllab.desktop_ui,
             updated.distilllab.desktop_ui
         );
+    }
+
+    #[test]
+    fn loads_missing_max_agent_concurrency_with_default_of_four() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.json");
+
+        fs::write(
+            &config_path,
+            r#"{
+                "distilllab": {
+                    "currentProvider": "ice"
+                }
+            }"#,
+        )
+        .expect("config file should be written");
+
+        let config = load_app_config_from_path(&config_path).expect("config should load");
+
+        assert_eq!(config.distilllab.max_agent_concurrency, 4);
+    }
+
+    #[test]
+    fn loads_max_agent_concurrency_below_min_clamped_to_one() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.json");
+
+        fs::write(
+            &config_path,
+            r#"{
+                "distilllab": {
+                    "maxAgentConcurrency": 0
+                }
+            }"#,
+        )
+        .expect("config file should be written");
+
+        let config = load_app_config_from_path(&config_path).expect("config should load");
+
+        assert_eq!(config.distilllab.max_agent_concurrency, 1);
+    }
+
+    #[test]
+    fn loads_max_agent_concurrency_above_max_clamped_to_sixteen() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.json");
+
+        fs::write(
+            &config_path,
+            r#"{
+                "distilllab": {
+                    "maxAgentConcurrency": 99
+                }
+            }"#,
+        )
+        .expect("config file should be written");
+
+        let config = load_app_config_from_path(&config_path).expect("config should load");
+
+        assert_eq!(config.distilllab.max_agent_concurrency, 16);
+    }
+
+    #[test]
+    fn loads_max_agent_concurrency_over_u8_range_clamped_to_sixteen() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.json");
+
+        fs::write(
+            &config_path,
+            r#"{
+                "distilllab": {
+                    "maxAgentConcurrency": 256
+                }
+            }"#,
+        )
+        .expect("config file should be written");
+
+        let config = load_app_config_from_path(&config_path).expect("config should load");
+
+        assert_eq!(config.distilllab.max_agent_concurrency, 16);
+    }
+
+    #[test]
+    fn loads_negative_max_agent_concurrency_clamped_to_one() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.json");
+
+        fs::write(
+            &config_path,
+            r#"{
+                "distilllab": {
+                    "maxAgentConcurrency": -1
+                }
+            }"#,
+        )
+        .expect("config file should be written");
+
+        let config = load_app_config_from_path(&config_path).expect("config should load");
+
+        assert_eq!(config.distilllab.max_agent_concurrency, 1);
+    }
+
+    #[test]
+    fn saves_and_loads_valid_max_agent_concurrency_without_changing_it() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.json");
+
+        let mut config = super::AppConfig::default();
+        config.distilllab.max_agent_concurrency = 7;
+
+        save_app_config_to_path(&config, &config_path).expect("config should save");
+
+        let saved = fs::read_to_string(&config_path).expect("config file should exist");
+        assert!(saved.contains("\"maxAgentConcurrency\": 7"));
+
+        let reloaded = load_app_config_from_path(&config_path).expect("config should reload");
+
+        assert_eq!(reloaded.distilllab.max_agent_concurrency, 7);
     }
 
     #[test]

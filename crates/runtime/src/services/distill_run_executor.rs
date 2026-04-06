@@ -291,23 +291,31 @@ where
                 let config = llm_provider_config.clone();
                 let client_clone = client.clone();
                 let run_id = run.id.clone();
+                let runtime = runtime.clone();
 
                 tasks.spawn(async move {
-                    let output = run_chunk_extraction_agent(
-                        &client_clone,
-                        &config,
-                        &ChunkExtractionInput {
-                            run_id,
-                            source_id: source_id.clone(),
-                            source_type,
-                            source_title,
-                            source_text,
-                            distill_goal,
-                        },
-                    )
-                    .await?;
+                    runtime
+                        .with_agent_dispatch_permit(|| async move {
+                            let output = run_chunk_extraction_agent(
+                                &client_clone,
+                                &config,
+                                &ChunkExtractionInput {
+                                    run_id,
+                                    source_id: source_id.clone(),
+                                    source_type,
+                                    source_title,
+                                    source_text,
+                                    distill_goal,
+                                },
+                            )
+                            .await?;
 
-                    Ok::<(String, Vec<ChunkDraft>), agent::AgentError>((source_id, output.chunks))
+                            Ok::<(String, Vec<ChunkDraft>), agent::AgentError>((
+                                source_id,
+                                output.chunks,
+                            ))
+                        })
+                        .await
                 });
             }
 
@@ -706,4 +714,420 @@ where
         materialize_result,
         output: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create_and_execute_from_decision_with_progress;
+    use crate::app::AppRuntime;
+    use crate::contracts::RunInput;
+    use agent::{
+        LlmProviderConfig, RunCreationRequest, SessionActionType, SessionAgentDecision,
+        SessionIntent, SessionNextAction,
+    };
+    use schema::AttachmentRef;
+    use std::fs;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::net::TcpListener;
+    use tokio::sync::Semaphore;
+    use tokio::task::JoinHandle;
+    use tokio::time::{Duration, Instant};
+    use uuid::Uuid;
+
+    struct ChunkRequestGate {
+        started: AtomicUsize,
+        in_flight: AtomicUsize,
+        max_in_flight: AtomicUsize,
+        release_permits: Semaphore,
+    }
+
+    impl ChunkRequestGate {
+        fn new() -> Self {
+            Self {
+                started: AtomicUsize::new(0),
+                in_flight: AtomicUsize::new(0),
+                max_in_flight: AtomicUsize::new(0),
+                release_permits: Semaphore::new(0),
+            }
+        }
+
+        fn started(&self) -> usize {
+            self.started.load(Ordering::SeqCst)
+        }
+
+        fn in_flight(&self) -> usize {
+            self.in_flight.load(Ordering::SeqCst)
+        }
+
+        fn max_in_flight(&self) -> usize {
+            self.max_in_flight.load(Ordering::SeqCst)
+        }
+
+        fn release(&self, permits: usize) {
+            self.release_permits.add_permits(permits);
+        }
+    }
+
+    fn mock_distill_decision() -> SessionAgentDecision {
+        SessionAgentDecision {
+            intent: SessionIntent::DistillMaterial,
+            primary_object_type: Some("material".to_string()),
+            primary_object_id: None,
+            action_type: SessionActionType::CreateRun,
+            next_action: SessionNextAction::CreateRun(RunCreationRequest {
+                run_type: "import_and_distill".to_string(),
+                reasoning_summary: None,
+            }),
+            run_creation: Some(RunCreationRequest {
+                run_type: "import_and_distill".to_string(),
+                reasoning_summary: None,
+            }),
+            reply_text: "I will start a distill run for this work material.".to_string(),
+            suggested_run_type: Some("import_and_distill".to_string()),
+            session_summary: Some("Preparing to distill work material".to_string()),
+            tool_invocation: None,
+            skill_selection: None,
+            should_continue_planning: true,
+            failure_hint: Some("clarify_or_stop".to_string()),
+        }
+    }
+
+    fn build_run_input(attachment_paths: &[String]) -> RunInput {
+        RunInput {
+            session_id: format!("session-{}", Uuid::new_v4()),
+            trigger_message: "Please distill these work notes".to_string(),
+            attachment_refs: attachment_paths
+                .iter()
+                .enumerate()
+                .map(|(index, path)| AttachmentRef {
+                    attachment_id: format!("attachment-{}", index + 1),
+                    kind: "file_path".to_string(),
+                    name: format!("notes-{}.md", index + 1),
+                    mime_type: "text/markdown".to_string(),
+                    path_or_locator: path.clone(),
+                    size: 64,
+                    metadata_json: "{}".to_string(),
+                })
+                .collect(),
+            current_object_type: None,
+            current_object_id: None,
+            decision_summary: "Distill work material via import_and_distill".to_string(),
+        }
+    }
+
+    fn create_test_attachments(count: usize) -> Vec<String> {
+        (0..count)
+            .map(|index| {
+                let path = format!(
+                    "/tmp/distilllab-run-executor-concurrency-{}-{}.md",
+                    Uuid::new_v4(),
+                    index
+                );
+                fs::write(
+                    &path,
+                    format!("# Notes {}\nship the first prototype next week", index + 1),
+                )
+                .expect("attachment fixture should write");
+                path
+            })
+            .collect()
+    }
+
+    fn cleanup_files(paths: &[String]) {
+        for path in paths {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    fn mock_response_for_request(request_text: &str) -> String {
+        if request_text.contains("AssetExtractionAgent") {
+            return r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"assets\":[{\"title\":\"Prototype launch readiness\",\"summary\":\"The launch is gated by scope finalization and clear coordination before next week.\"}]}"
+                        }
+                    }
+                ]
+            }"#
+            .to_string();
+        }
+
+        if request_text.contains("ProjectResolutionAgent") {
+            return r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"decision\":\"create_new_project\",\"title\":\"Prototype Program\",\"summary\":\"Prototype planning, scope, and delivery work.\",\"reasoning_summary\":\"The extracted work belongs to a distinct prototype-focused body of work.\"}"
+                        }
+                    }
+                ]
+            }"#
+            .to_string();
+        }
+
+        if request_text.contains("WorkItemExtractionAgent") {
+            return r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"work_items\":[{\"title\":\"Finalize prototype scope\",\"summary\":\"Scope must be finalized before distillation output is shared.\",\"work_item_type\":\"note\"}]}"
+                        }
+                    }
+                ]
+            }"#
+            .to_string();
+        }
+
+        if request_text.contains("ChunkExtractionAgent") {
+            return r#"{
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"chunks\":[{\"title\":\"Progress update\",\"summary\":\"A concrete work update was captured.\",\"content\":\"Captured chunk content\"}]}"
+                        }
+                    }
+                ]
+            }"#
+            .to_string();
+        }
+
+        panic!("unexpected request: {request_text}");
+    }
+
+    async fn spawn_chunk_gated_provider(gate: Arc<ChunkRequestGate>) -> LlmProviderConfig {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener
+                    .accept()
+                    .await
+                    .expect("server should accept connection");
+                let gate = gate.clone();
+
+                tokio::spawn(async move {
+                    let mut buffer = vec![0_u8; 8192];
+                    let bytes_read = tokio::io::AsyncReadExt::read(&mut stream, &mut buffer)
+                        .await
+                        .expect("server should read request");
+                    let request_text = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+
+                    if request_text.contains("ChunkExtractionAgent") {
+                        gate.started.fetch_add(1, Ordering::SeqCst);
+                        let current = gate.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                        gate.max_in_flight.fetch_max(current, Ordering::SeqCst);
+                        let permit = gate
+                            .release_permits
+                            .acquire()
+                            .await
+                            .expect("chunk gate should acquire release permit");
+                        drop(permit);
+                        gate.in_flight.fetch_sub(1, Ordering::SeqCst);
+                    }
+
+                    let response_body = mock_response_for_request(&request_text);
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        response_body.len(),
+                        response_body
+                    );
+
+                    tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes())
+                        .await
+                        .expect("server should write response");
+                });
+            }
+        });
+
+        LlmProviderConfig {
+            provider_kind: "openai_compatible".to_string(),
+            base_url: format!("http://{}", address),
+            model: "gpt-test".to_string(),
+            api_key: None,
+        }
+    }
+
+    async fn wait_until(label: &str, mut condition: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if condition() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("timed out waiting for condition: {label}");
+    }
+
+    async fn start_distill_run(
+        runtime: AppRuntime,
+        provider_config: LlmProviderConfig,
+        run_input: RunInput,
+    ) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            create_and_execute_from_decision_with_progress(
+                &runtime,
+                Some(&provider_config),
+                &mock_distill_decision(),
+                run_input,
+                |_| {},
+            )
+            .await
+            .expect("distill run should complete");
+        })
+    }
+
+    #[tokio::test]
+    async fn runtime_path_limit_one_forces_serial_execution() {
+        let db_path = format!("/tmp/distilllab-run-executor-serial-{}.db", Uuid::new_v4());
+        let runtime = AppRuntime::new(db_path.clone());
+        runtime.set_max_agent_concurrency(1);
+        let gate = Arc::new(ChunkRequestGate::new());
+        let provider_config = spawn_chunk_gated_provider(gate.clone()).await;
+        let attachments = create_test_attachments(2);
+        let handle = start_distill_run(runtime, provider_config, build_run_input(&attachments)).await;
+
+        wait_until("first chunk request starts", || gate.started() >= 1).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert_eq!(gate.started(), 1);
+        assert_eq!(gate.max_in_flight(), 1);
+
+        gate.release(1);
+        wait_until("second chunk request starts", || gate.started() >= 2).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert_eq!(gate.max_in_flight(), 1);
+
+        gate.release(1);
+        wait_until("third chunk request starts", || gate.started() >= 3).await;
+        gate.release(1);
+        handle.await.expect("run task should finish");
+
+        cleanup_files(&attachments);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn runtime_path_limit_two_never_exceeds_two_in_flight_launches() {
+        let db_path = format!("/tmp/distilllab-run-executor-limit-two-{}.db", Uuid::new_v4());
+        let runtime = AppRuntime::new(db_path.clone());
+        runtime.set_max_agent_concurrency(2);
+        let gate = Arc::new(ChunkRequestGate::new());
+        let provider_config = spawn_chunk_gated_provider(gate.clone()).await;
+        let attachments = create_test_attachments(2);
+        let handle = start_distill_run(runtime, provider_config, build_run_input(&attachments)).await;
+
+        wait_until("two chunk requests start", || gate.started() >= 2).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert_eq!(gate.in_flight(), 2);
+        assert_eq!(gate.max_in_flight(), 2);
+        assert_eq!(gate.started(), 2);
+
+        gate.release(2);
+        wait_until("third chunk request starts", || gate.started() >= 3).await;
+        assert_eq!(gate.max_in_flight(), 2);
+
+        gate.release(1);
+        handle.await.expect("run task should finish");
+
+        cleanup_files(&attachments);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn runtime_path_queued_work_waits_and_resumes_after_release() {
+        let db_path = format!("/tmp/distilllab-run-executor-queued-{}.db", Uuid::new_v4());
+        let runtime = AppRuntime::new(db_path.clone());
+        runtime.set_max_agent_concurrency(1);
+        let gate = Arc::new(ChunkRequestGate::new());
+        let provider_config = spawn_chunk_gated_provider(gate.clone()).await;
+        let attachments = create_test_attachments(2);
+        let handle = start_distill_run(runtime, provider_config, build_run_input(&attachments)).await;
+
+        wait_until("first chunk request starts", || gate.started() >= 1).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert_eq!(gate.started(), 1);
+
+        gate.release(1);
+        wait_until("second chunk request starts after release", || gate.started() >= 2).await;
+        gate.release(1);
+        wait_until("third chunk request starts after second release", || gate.started() >= 3).await;
+        gate.release(1);
+        handle.await.expect("run task should finish");
+
+        cleanup_files(&attachments);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn runtime_path_limit_changes_only_affect_subsequently_started_work() {
+        let db_path = format!("/tmp/distilllab-run-executor-change-{}.db", Uuid::new_v4());
+        let runtime = AppRuntime::new(db_path.clone());
+        runtime.set_max_agent_concurrency(1);
+        let gate = Arc::new(ChunkRequestGate::new());
+        let provider_config = spawn_chunk_gated_provider(gate.clone()).await;
+        let attachments = create_test_attachments(2);
+        let handle = start_distill_run(runtime.clone(), provider_config, build_run_input(&attachments)).await;
+
+        wait_until("first chunk request starts", || gate.started() >= 1).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert_eq!(gate.started(), 1);
+
+        runtime.set_max_agent_concurrency(2);
+        wait_until("second chunk request starts after increasing limit", || gate.started() >= 2)
+            .await;
+        assert_eq!(gate.max_in_flight(), 2);
+
+        gate.release(2);
+        wait_until("third chunk request starts after prior work releases", || gate.started() >= 3)
+            .await;
+        gate.release(1);
+        handle.await.expect("run task should finish");
+
+        cleanup_files(&attachments);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn runtime_path_lowering_limit_does_not_interrupt_already_running_work() {
+        let db_path = format!("/tmp/distilllab-run-executor-lower-{}.db", Uuid::new_v4());
+        let runtime = AppRuntime::new(db_path.clone());
+        runtime.set_max_agent_concurrency(2);
+        let gate = Arc::new(ChunkRequestGate::new());
+        let provider_config = spawn_chunk_gated_provider(gate.clone()).await;
+        let attachments = create_test_attachments(2);
+        let handle = start_distill_run(runtime.clone(), provider_config, build_run_input(&attachments)).await;
+
+        wait_until("two chunk requests start", || gate.started() >= 2).await;
+        assert_eq!(gate.in_flight(), 2);
+
+        runtime.set_max_agent_concurrency(1);
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert!(gate.started() >= 2);
+        assert_eq!(gate.in_flight(), 2);
+
+        gate.release(1);
+        wait_until(
+            "third chunk request starts after one already-queued request completes",
+            || gate.started() >= 3,
+        )
+        .await;
+        assert_eq!(gate.max_in_flight(), 2);
+
+        gate.release(1);
+        gate.release(1);
+        handle.await.expect("run task should finish");
+
+        cleanup_files(&attachments);
+        let _ = fs::remove_file(db_path);
+    }
 }
