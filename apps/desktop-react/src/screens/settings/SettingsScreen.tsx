@@ -1,7 +1,9 @@
 import type { SettingsSection } from '../../app-state/screen-state';
 import { useChatAppearance, type ChatFontSize } from '../../chat/ChatAppearanceProvider';
 import { useI18n } from '../../i18n/I18nProvider';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import DebugPanel from './DebugPanel';
+import { parseRequestedMaxAgentConcurrency } from './maxAgentConcurrencyInput';
 import SettingsSidebar from './SettingsSidebar';
 
 const chatFontSizeOptions: Array<{ value: ChatFontSize; label: string; description: string }> = [
@@ -16,9 +18,111 @@ type SettingsScreenProps = {
   showLeftSidebar: boolean;
 };
 
+type TauriInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+
+type MaxAgentConcurrencyPayload = {
+  maxAgentConcurrency: number;
+};
+
+function resolveTauriInvoke(): TauriInvoke | null {
+  const tauriInternals = (window as typeof window & {
+    __TAURI_INTERNALS__?: {
+      invoke?: TauriInvoke;
+    };
+  }).__TAURI_INTERNALS__;
+
+  return tauriInternals?.invoke ?? null;
+}
+
+function parseErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
 function WorkspaceSettingsView() {
   const { locale, localeOptions, setLocale, t } = useI18n();
   const { chatFontSize, setChatFontSize } = useChatAppearance();
+  const invoke = useMemo(resolveTauriInvoke, []);
+  const [maxAgentConcurrencyInput, setMaxAgentConcurrencyInput] = useState('');
+  const [savedMaxAgentConcurrency, setSavedMaxAgentConcurrency] = useState<number | null>(null);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [isLoadingConcurrency, setIsLoadingConcurrency] = useState(true);
+  const [isSavingConcurrency, setIsSavingConcurrency] = useState(false);
+
+  const bridgeMissingText = t('settings.debug.output.bridgeMissing');
+
+  const loadMaxAgentConcurrency = useCallback(async () => {
+    if (!invoke) {
+      setStatusMessage(bridgeMissingText);
+      setIsLoadingConcurrency(false);
+      return;
+    }
+
+    setIsLoadingConcurrency(true);
+    setStatusMessage(t('settings.field.maxAgentConcurrencyLoading'));
+
+    try {
+      const response = await invoke<string>('load_max_agent_concurrency_command');
+      const payload = JSON.parse(response) as MaxAgentConcurrencyPayload;
+      const normalizedValue = String(payload.maxAgentConcurrency);
+
+      setSavedMaxAgentConcurrency(payload.maxAgentConcurrency);
+      setMaxAgentConcurrencyInput(normalizedValue);
+      setStatusMessage(t('settings.field.maxAgentConcurrencyLoaded'));
+    } catch (error) {
+      setStatusMessage(`${t('settings.debug.output.errorPrefix')}${parseErrorMessage(error)}`);
+    } finally {
+      setIsLoadingConcurrency(false);
+    }
+  }, [bridgeMissingText, invoke, t]);
+
+  useEffect(() => {
+    void loadMaxAgentConcurrency();
+  }, [loadMaxAgentConcurrency]);
+
+  const handleSaveMaxAgentConcurrency = useCallback(async () => {
+    if (!invoke) {
+      setStatusMessage(bridgeMissingText);
+      return;
+    }
+
+    const requestedValue = parseRequestedMaxAgentConcurrency(maxAgentConcurrencyInput);
+    if (requestedValue === null) {
+      setStatusMessage(t('settings.field.maxAgentConcurrencyInvalid'));
+      return;
+    }
+
+    setIsSavingConcurrency(true);
+    setStatusMessage(t('settings.field.maxAgentConcurrencySaving'));
+
+    try {
+      const response = await invoke<string>('save_max_agent_concurrency_command', {
+        maxAgentConcurrency: requestedValue,
+      });
+      const payload = JSON.parse(response) as MaxAgentConcurrencyPayload;
+      const normalizedValue = String(payload.maxAgentConcurrency);
+
+      setSavedMaxAgentConcurrency(payload.maxAgentConcurrency);
+      setMaxAgentConcurrencyInput(normalizedValue);
+      setStatusMessage(t('settings.field.maxAgentConcurrencySaved'));
+    } catch (error) {
+      setStatusMessage(`${t('settings.debug.output.errorPrefix')}${parseErrorMessage(error)}`);
+    } finally {
+      setIsSavingConcurrency(false);
+    }
+  }, [bridgeMissingText, invoke, maxAgentConcurrencyInput, t]);
+
+  const handleDiscardMaxAgentConcurrency = useCallback(() => {
+    if (savedMaxAgentConcurrency === null) {
+      return;
+    }
+
+    setMaxAgentConcurrencyInput(String(savedMaxAgentConcurrency));
+    setStatusMessage(t('settings.field.maxAgentConcurrencyReset'));
+  }, [savedMaxAgentConcurrency, t]);
 
   return (
     <div className="w-full max-w-3xl space-y-16">
@@ -204,6 +308,61 @@ function WorkspaceSettingsView() {
                 );
               })}
             </div>
+          </div>
+        </section>
+
+        <section className="space-y-6">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-widest text-secondary-dim">
+              07 / {t('settings.section.agentCapacity')}
+            </span>
+          </div>
+          <div className="rounded-sm border-l-2 border-primary bg-surface-container p-8">
+            <div className="flex items-start justify-between gap-8">
+              <div>
+                <h4 className="font-semibold text-on-surface">{t('settings.field.maxAgentConcurrency')}</h4>
+                <p className="text-sm text-on-surface-variant">{t('settings.field.maxAgentConcurrencyHint')}</p>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
+                {savedMaxAgentConcurrency === null ? t('settings.field.maxAgentConcurrencyPending') : savedMaxAgentConcurrency}
+              </span>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-end">
+              <label className="flex-1">
+                <span className="mb-3 block font-label text-sm font-semibold uppercase tracking-wider text-on-surface-variant">
+                  {t('settings.field.maxAgentConcurrencyInputLabel')}
+                </span>
+                <input
+                  className="w-full rounded-sm border-0 bg-surface-container-low p-4 font-body text-on-surface outline-none transition-all focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  inputMode="numeric"
+                  onChange={(event) => setMaxAgentConcurrencyInput(event.target.value)}
+                  type="number"
+                  value={maxAgentConcurrencyInput}
+                />
+              </label>
+
+              <button
+                className="rounded-sm border border-outline-variant/40 px-6 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-on-surface-variant transition-colors hover:border-primary/40 hover:text-on-surface disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isLoadingConcurrency || isSavingConcurrency || savedMaxAgentConcurrency === null}
+                onClick={handleDiscardMaxAgentConcurrency}
+                type="button"
+              >
+                {t('settings.action.discard')}
+              </button>
+
+              <button
+                className="rounded-sm bg-gradient-to-br from-primary to-primary-container px-8 py-3 text-xs font-bold uppercase tracking-widest text-on-primary shadow-lg transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isLoadingConcurrency || isSavingConcurrency}
+                onClick={handleSaveMaxAgentConcurrency}
+                type="button"
+              >
+                {isSavingConcurrency ? t('settings.field.maxAgentConcurrencySavingButton') : t('settings.field.maxAgentConcurrencySaveButton')}
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-on-surface-variant/70">{t('settings.field.maxAgentConcurrencyNormalizationHint')}</p>
+            <p className="mt-2 text-xs text-on-surface-variant/70">{statusMessage}</p>
           </div>
         </section>
 

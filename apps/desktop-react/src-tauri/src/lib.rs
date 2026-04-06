@@ -122,6 +122,16 @@ struct DesktopUiPreferences {
     show_debug_panel: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MaxAgentConcurrencyPayload {
+    max_agent_concurrency: u8,
+}
+
+fn requested_max_agent_concurrency_to_config_value(requested_value: i64) -> u8 {
+    requested_value.clamp(0, u8::MAX as i64) as u8
+}
+
 impl Default for DesktopUiPreferences {
     fn default() -> Self {
         Self {
@@ -210,6 +220,40 @@ fn save_desktop_ui_preferences_to_path(
     config.distilllab.desktop_ui = Some(desktop_ui_config_from_preferences(&preferences));
     save_app_config_to_path(&config, config_path).map_err(|e| e.to_string())?;
     load_desktop_ui_preferences_from_path(config_path)
+}
+
+fn load_max_agent_concurrency_from_path(config_path: &std::path::Path) -> Result<String, String> {
+    let max_agent_concurrency = if config_path.exists() {
+        load_app_config_from_path(config_path)
+            .map_err(|e| e.to_string())?
+            .distilllab
+            .max_agent_concurrency
+    } else {
+        AppConfig::default().distilllab.max_agent_concurrency
+    };
+
+    serde_json::to_string(&MaxAgentConcurrencyPayload {
+        max_agent_concurrency,
+    })
+    .map_err(|e| e.to_string())
+}
+
+fn save_max_agent_concurrency_to_path(
+    config_path: &std::path::Path,
+    requested_value: i64,
+) -> Result<String, String> {
+    let mut config = if config_path.exists() {
+        load_app_config_from_path(config_path).map_err(|e| e.to_string())?
+    } else {
+        AppConfig {
+            schema: Some("https://opencode.ai/config.json".to_string()),
+            ..Default::default()
+        }
+    };
+
+    config.distilllab.max_agent_concurrency = requested_max_agent_concurrency_to_config_value(requested_value);
+    save_app_config_to_path(&config, config_path).map_err(|e| e.to_string())?;
+    load_max_agent_concurrency_from_path(config_path)
 }
 
 fn format_action_type(action_type: &SessionActionType) -> &'static str {
@@ -971,13 +1015,122 @@ mod tests {
     use super::{
         build_chat_stream_event_with_run_progress, build_live_run_event, build_live_tool_event,
         desktop_timeline_from_session_messages, format_session_messages_text,
-        list_session_messages_structured_payload, normalize_live_run_progress_update,
+        list_session_messages_structured_payload, load_max_agent_concurrency_command,
+        normalize_live_run_progress_update, save_max_agent_concurrency_command,
     };
     use runtime::{
-        ChatStreamPhase, LiveRunState, LiveRunStepStatus, LiveToolStatus, RunProgressPhase,
-        RunProgressUpdate,
+        default_app_config_path, load_app_config_from_path, ChatStreamPhase, LiveRunState, LiveRunStepStatus,
+        LiveToolStatus, RunProgressPhase, RunProgressUpdate,
     };
     use schema::{SessionMessage, SessionMessageRole};
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn temp_config_dir() -> std::path::PathBuf {
+        let unique_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("distilllab-desktop-react-test-{unique_id}"));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        temp_dir
+    }
+
+    fn with_test_config_home<T>(test: impl FnOnce(std::path::PathBuf) -> T) -> T {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let config_home = temp_config_dir();
+        let previous_xdg = std::env::var_os("XDG_CONFIG_HOME");
+
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", &config_home);
+        }
+
+        let result = test(config_home.clone());
+
+        unsafe {
+            match previous_xdg {
+                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+        }
+
+        result
+    }
+
+    #[test]
+    fn load_max_agent_concurrency_command_returns_default_when_config_has_no_value() {
+        with_test_config_home(|_| {
+            let config_path = default_app_config_path().expect("config path should resolve");
+            let config_parent = config_path.parent().expect("config path should have parent");
+            std::fs::create_dir_all(config_parent).expect("config parent should be created");
+
+            std::fs::write(
+                &config_path,
+                r#"{
+                    "distilllab": {
+                        "currentProvider": "ice"
+                    }
+                }"#,
+            )
+            .expect("config file should be written");
+
+            let payload = load_max_agent_concurrency_command().expect("value should load");
+            let value: serde_json::Value = serde_json::from_str(&payload).expect("payload should be valid json");
+
+            assert_eq!(value, serde_json::json!({ "maxAgentConcurrency": 4 }));
+        });
+    }
+
+    #[test]
+    fn save_max_agent_concurrency_command_persists_and_returns_normalized_value() {
+        with_test_config_home(|_| {
+            let config_path = default_app_config_path().expect("config path should resolve");
+
+            let saved_low = save_max_agent_concurrency_command(0).expect("low value should save");
+            let saved_low_value: serde_json::Value =
+                serde_json::from_str(&saved_low).expect("low payload should be valid json");
+            assert_eq!(saved_low_value, serde_json::json!({ "maxAgentConcurrency": 1 }));
+
+            let persisted_low = load_app_config_from_path(&config_path).expect("config should reload after low save");
+            assert_eq!(persisted_low.distilllab.max_agent_concurrency, 1);
+
+            let saved_high = save_max_agent_concurrency_command(i64::from(u8::MAX))
+                .expect("high value should save");
+            let saved_high_value: serde_json::Value =
+                serde_json::from_str(&saved_high).expect("high payload should be valid json");
+            assert_eq!(saved_high_value, serde_json::json!({ "maxAgentConcurrency": 16 }));
+
+            let persisted_high = load_app_config_from_path(&config_path).expect("config should reload after high save");
+            assert_eq!(persisted_high.distilllab.max_agent_concurrency, 16);
+        });
+    }
+
+    #[test]
+    fn save_max_agent_concurrency_command_normalizes_negative_and_large_inputs() {
+        with_test_config_home(|_| {
+            let config_path = default_app_config_path().expect("config path should resolve");
+
+            let saved_negative =
+                save_max_agent_concurrency_command(-1).expect("negative value should save");
+            let saved_negative_value: serde_json::Value =
+                serde_json::from_str(&saved_negative).expect("negative payload should be valid json");
+            assert_eq!(saved_negative_value, serde_json::json!({ "maxAgentConcurrency": 1 }));
+
+            let saved_large = save_max_agent_concurrency_command(999).expect("large value should save");
+            let saved_large_value: serde_json::Value =
+                serde_json::from_str(&saved_large).expect("large payload should be valid json");
+            assert_eq!(saved_large_value, serde_json::json!({ "maxAgentConcurrency": 16 }));
+
+            let persisted = load_app_config_from_path(&config_path).expect("config should reload after saves");
+            assert_eq!(persisted.distilllab.max_agent_concurrency, 16);
+        });
+    }
 
     fn session_message(
         id: &str,
@@ -3702,6 +3855,18 @@ fn save_desktop_ui_preferences_command(preferences: DesktopUiPreferences) -> Res
 }
 
 #[tauri::command]
+fn load_max_agent_concurrency_command() -> Result<String, String> {
+    let (config_path, _) = load_or_create_app_config()?;
+    load_max_agent_concurrency_from_path(&config_path)
+}
+
+#[tauri::command]
+fn save_max_agent_concurrency_command(max_agent_concurrency: i64) -> Result<String, String> {
+    let (config_path, _) = load_or_create_app_config()?;
+    save_max_agent_concurrency_to_path(&config_path, max_agent_concurrency)
+}
+
+#[tauri::command]
 fn save_llm_config_command(form: ConfigBarForm) -> Result<String, String> {
     let (config_path, _) = load_or_create_app_config()?;
     let provider_key = form.current_provider.trim();
@@ -3857,6 +4022,8 @@ pub fn run() {
             load_llm_config_json_command,
             load_desktop_ui_preferences_command,
             save_desktop_ui_preferences_command,
+            load_max_agent_concurrency_command,
+            save_max_agent_concurrency_command,
             save_llm_config_command,
             import_opencode_providers_command,
             create_provider_command,
