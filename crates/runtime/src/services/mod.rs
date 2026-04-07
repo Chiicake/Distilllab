@@ -1,4 +1,5 @@
 pub mod asset_service;
+pub mod canvas_projection_service;
 pub mod chunk_service;
 pub mod distill_run_executor;
 pub mod project_service;
@@ -10,26 +11,29 @@ pub mod tool_executor;
 pub mod work_item_service;
 
 pub use asset_service::{build_demo_assets, list_assets};
+pub use canvas_projection_service::{
+    CanvasDetailViewDto, CanvasGlobalViewDto, load_canvas_detail_view, load_canvas_global_view,
+};
 pub use chunk_service::{chunk_demo_source, list_chunks_for_source};
 pub use distill_run_executor::{create_and_execute_from_decision, DistillRunExecutionOutcome};
 pub use project_service::{group_demo_project, list_projects};
 pub use run_service::{create_demo_run, list_runs};
 pub use session_intake_coordinator::{
-    decide_and_record_intake, decide_and_record_intake_streaming, IntakeDecisionOutcome,
+    IntakeDecisionOutcome, decide_and_record_intake, decide_and_record_intake_streaming,
 };
 pub use session_service::{
     create_demo_session, create_session, create_session_and_send_first_message_with_config,
-    delete_failed_first_send_session, delete_session_and_related,
-    decide_llm_session_message_with_config, list_session_messages, list_sessions,
-    pin_session, rename_session,
-    preview_session_intake, preview_session_intake_with_config, send_session_message,
-    send_session_message_with_config, send_session_message_with_config_and_result,
+    decide_llm_session_message_with_config, delete_failed_first_send_session,
+    delete_session_and_related, list_session_messages, list_sessions, pin_session,
+    preview_session_intake, preview_session_intake_with_config, rename_session,
+    send_session_message, send_session_message_with_config,
+    send_session_message_with_config_and_result,
     send_session_message_with_config_and_result_streaming,
     send_session_message_with_config_and_result_streaming_with_progress,
 };
 pub use source_service::{
-    create_attachment_source, create_demo_source, create_message_source,
-    find_source_for_run_origin, list_sources, list_sources_for_run, read_source_text,
+    create_attachment_source, create_demo_source, create_message_source, find_source_for_run_origin,
+    list_sources, list_sources_for_run, read_source_text,
 };
 pub use tool_executor::{ToolExecutionError, ToolExecutor};
 pub use work_item_service::{extract_demo_work_items, list_work_items};

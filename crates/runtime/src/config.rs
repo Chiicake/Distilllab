@@ -54,6 +54,12 @@ pub struct DesktopUiConfig {
     pub locale: String,
     #[serde(rename = "showDebugPanel")]
     pub show_debug_panel: bool,
+    #[serde(
+        rename = "lastOpenedCanvasProjectId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_opened_canvas_project_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -676,6 +682,7 @@ mod tests {
             theme: "dark".to_string(),
             locale: "zh-CN".to_string(),
             show_debug_panel: false,
+            last_opened_canvas_project_id: None,
         });
         save_app_config_to_path(&config, &config_path).expect("seed config should save");
 
@@ -707,6 +714,7 @@ mod tests {
                 theme: "dark".to_string(),
                 locale: "zh-CN".to_string(),
                 show_debug_panel: false,
+                last_opened_canvas_project_id: None,
             })
         );
 
@@ -714,6 +722,37 @@ mod tests {
         assert_eq!(
             persisted.distilllab.desktop_ui,
             updated.distilllab.desktop_ui
+        );
+    }
+
+    #[test]
+    fn saves_and_loads_last_opened_canvas_project_id_in_desktop_ui_config() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("distilllab-config-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.json");
+
+        let mut config = super::AppConfig::default();
+        config.distilllab.desktop_ui = Some(DesktopUiConfig {
+            theme: "dark".to_string(),
+            locale: "en-US".to_string(),
+            show_debug_panel: false,
+            last_opened_canvas_project_id: Some("project-remembered".to_string()),
+        });
+
+        save_app_config_to_path(&config, &config_path).expect("config should save");
+
+        let saved = fs::read_to_string(&config_path).expect("config file should exist");
+        assert!(saved.contains("\"lastOpenedCanvasProjectId\": \"project-remembered\""));
+
+        let reloaded = load_app_config_from_path(&config_path).expect("config should reload");
+        assert_eq!(
+            reloaded
+                .distilllab
+                .desktop_ui
+                .as_ref()
+                .and_then(|desktop_ui| desktop_ui.last_opened_canvas_project_id.as_deref()),
+            Some("project-remembered")
         );
     }
 

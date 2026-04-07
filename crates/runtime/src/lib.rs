@@ -26,11 +26,13 @@ pub use contracts::{
 pub use flows::{build_import_and_distill_handoff_preview, execute_materialize_sources};
 pub use services::{
     build_demo_assets, chunk_demo_source, create_demo_run, create_demo_session,
+    CanvasDetailViewDto, CanvasGlobalViewDto,
     create_session, create_session_and_send_first_message_with_config,
     delete_failed_first_send_session, delete_session_and_related,
     create_demo_source, decide_llm_session_message_with_config, extract_demo_work_items,
     group_demo_project, list_assets, list_chunks_for_source, list_projects,
     list_session_messages, list_sessions, list_sources, list_work_items, list_runs,
+    load_canvas_detail_view, load_canvas_global_view,
     pin_session, rename_session,
     preview_session_intake, preview_session_intake_with_config, send_session_message,
     send_session_message_with_config, send_session_message_with_config_and_result,

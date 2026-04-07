@@ -4,7 +4,8 @@ use runtime::{
     create_session, default_app_config_path, delete_failed_first_send_session,
     delete_provider_entry, import_providers_from_opencode_path, load_app_config_from_path,
     resolve_current_provider_model, save_app_config_to_path, set_current_provider_model,
-    upsert_provider_entry, AppConfig, AppRuntime, ChatStreamEvent, ChatStreamPhase,
+    upsert_provider_entry, AppConfig, AppRuntime, CanvasDetailViewDto, CanvasGlobalViewDto,
+    ChatStreamEvent, ChatStreamPhase,
     DesktopUiConfig, LiveRunEvent, LiveRunState, LiveRunStepStatus, LiveToolEvent,
     LiveToolStatus, LlmSessionDebugRequest, ModelConfigEntry, ProviderConfigEntry,
     ProviderOptions, RunProgressPhase, RunProgressUpdate, SessionIntakePreview,
@@ -183,11 +184,16 @@ fn desktop_ui_preferences_from_config(config: &AppConfig) -> DesktopUiPreference
     }
 }
 
-fn desktop_ui_config_from_preferences(preferences: &DesktopUiPreferences) -> DesktopUiConfig {
+fn desktop_ui_config_from_preferences(
+    preferences: &DesktopUiPreferences,
+    existing_config: Option<&DesktopUiConfig>,
+) -> DesktopUiConfig {
     DesktopUiConfig {
         theme: preferences.theme.clone(),
         locale: preferences.locale.clone(),
         show_debug_panel: preferences.show_debug_panel,
+        last_opened_canvas_project_id: existing_config
+            .and_then(|config| config.last_opened_canvas_project_id.clone()),
     }
 }
 
@@ -217,7 +223,11 @@ fn save_desktop_ui_preferences_to_path(
         }
     };
 
-    config.distilllab.desktop_ui = Some(desktop_ui_config_from_preferences(&preferences));
+    let existing_desktop_ui = config.distilllab.desktop_ui.clone();
+    config.distilllab.desktop_ui = Some(desktop_ui_config_from_preferences(
+        &preferences,
+        existing_desktop_ui.as_ref(),
+    ));
     save_app_config_to_path(&config, config_path).map_err(|e| e.to_string())?;
     load_desktop_ui_preferences_from_path(config_path)
 }
@@ -1015,12 +1025,14 @@ mod tests {
     use super::{
         build_chat_stream_event_with_run_progress, build_live_run_event, build_live_tool_event,
         desktop_timeline_from_session_messages, format_session_messages_text,
+        load_canvas_global_view, load_canvas_object_detail,
         list_session_messages_structured_payload, load_max_agent_concurrency_command,
         normalize_live_run_progress_update, save_max_agent_concurrency_command,
     };
     use runtime::{
-        default_app_config_path, load_app_config_from_path, ChatStreamPhase, LiveRunState, LiveRunStepStatus,
-        LiveToolStatus, RunProgressPhase, RunProgressUpdate,
+        build_demo_assets, default_app_config_path, group_demo_project, load_app_config_from_path,
+        ChatStreamPhase, LiveRunState,
+        LiveRunStepStatus, LiveToolStatus, RunProgressPhase, RunProgressUpdate, AppRuntime,
     };
     use schema::{SessionMessage, SessionMessageRole};
     use std::sync::{Mutex, OnceLock};
@@ -1040,27 +1052,283 @@ mod tests {
         temp_dir
     }
 
-    fn with_test_config_home<T>(test: impl FnOnce(std::path::PathBuf) -> T) -> T {
-        let _guard = env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let config_home = temp_config_dir();
-        let previous_xdg = std::env::var_os("XDG_CONFIG_HOME");
+    struct TestConfigHomeGuard {
+        _lock_guard: std::sync::MutexGuard<'static, ()>,
+        previous_xdg: Option<std::ffi::OsString>,
+    }
 
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", &config_home);
-        }
+    impl TestConfigHomeGuard {
+        fn new(config_home: &std::path::Path) -> Self {
+            let lock_guard = env_lock()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let previous_xdg = std::env::var_os("XDG_CONFIG_HOME");
 
-        let result = test(config_home.clone());
+            unsafe {
+                std::env::set_var("XDG_CONFIG_HOME", config_home);
+            }
 
-        unsafe {
-            match previous_xdg {
-                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
-                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            Self {
+                _lock_guard: lock_guard,
+                previous_xdg,
             }
         }
+    }
 
+    impl Drop for TestConfigHomeGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match self.previous_xdg.as_ref() {
+                    Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+                    None => std::env::remove_var("XDG_CONFIG_HOME"),
+                }
+            }
+        }
+    }
+
+    struct CanvasCommandRuntimeGuard {
+        _lock_guard: std::sync::MutexGuard<'static, ()>,
+        original_dir: std::path::PathBuf,
+        temp_dir: std::path::PathBuf,
+        database_path: std::path::PathBuf,
+    }
+
+    impl CanvasCommandRuntimeGuard {
+        fn new(temp_dir: std::path::PathBuf) -> Self {
+            let lock_guard = env_lock()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let original_dir = std::env::current_dir().expect("current dir should resolve");
+            let database_path = temp_dir.join("distilllab-dev.db");
+
+            std::env::set_current_dir(&temp_dir).expect("test dir should become current dir");
+
+            Self {
+                _lock_guard: lock_guard,
+                original_dir,
+                temp_dir,
+                database_path,
+            }
+        }
+    }
+
+    impl Drop for CanvasCommandRuntimeGuard {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.original_dir).expect("original dir should be restored");
+            let _ = std::fs::remove_file(&self.database_path);
+            let _ = std::fs::remove_dir_all(&self.temp_dir);
+        }
+    }
+
+    fn with_test_config_home<T>(test: impl FnOnce(std::path::PathBuf) -> T) -> T {
+        let config_home = temp_config_dir();
+        let _guard = TestConfigHomeGuard::new(&config_home);
+
+        test(config_home)
+    }
+
+    fn with_canvas_command_runtime<T>(test: impl FnOnce(&AppRuntime) -> T) -> T {
+        let temp_dir = temp_config_dir();
+        let guard = CanvasCommandRuntimeGuard::new(temp_dir.clone());
+        let database_path = guard.database_path.clone();
+        let runtime = AppRuntime::new(database_path.to_string_lossy().to_string());
+
+        let result = test(&runtime);
+        drop(guard);
         result
+    }
+
+    #[test]
+    fn with_test_config_home_restores_xdg_config_home_after_panic() {
+        let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let panic_result = std::panic::catch_unwind(|| {
+            with_test_config_home(|_| panic!("expected panic inside config helper"));
+        });
+
+        assert!(panic_result.is_err());
+        assert_eq!(std::env::var_os("XDG_CONFIG_HOME"), original_xdg);
+    }
+
+    #[test]
+    fn with_canvas_command_runtime_restores_current_dir_after_panic() {
+        let expected_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let panic_result = std::panic::catch_unwind(|| {
+            with_canvas_command_runtime(|_| panic!("expected panic inside runtime helper"));
+        });
+
+        assert!(panic_result.is_err());
+        assert_eq!(
+            std::env::current_dir().expect("current dir should still resolve"),
+            expected_dir
+        );
+    }
+
+    #[test]
+    fn load_canvas_global_view_command_returns_runtime_canvas_dto_shape() {
+        with_canvas_command_runtime(|runtime| {
+            let (_source, _chunks, _work_items, project, assets) =
+                build_demo_assets(runtime).expect("demo assets should build");
+
+            let projection =
+                load_canvas_global_view(Some(project.id.clone())).expect("projection should load");
+
+            assert_eq!(projection.current_project_id.as_deref(), Some(project.id.as_str()));
+            assert!(projection.graph.nodes.iter().any(|node| node.id == project.id && node.node_type == "project"));
+            assert!(projection
+                .graph
+                .nodes
+                .iter()
+                .any(|node| node.id == assets[0].id && node.node_type == "asset"));
+            assert!(projection
+                .graph
+                .nodes
+                .iter()
+                .all(|node| matches!(node.node_type.as_str(), "project" | "work_item" | "asset")));
+            assert!(!projection
+                .graph
+                .nodes
+                .iter()
+                .any(|node| node.node_type == "source" || node.node_type == "chunk"));
+            assert_eq!(
+                projection.inspectors_by_node_id[&project.id].node_type,
+                "project"
+            );
+
+            let serialized = serde_json::to_value(&projection).expect("projection should serialize");
+            assert!(serialized.get("currentProjectId").is_some());
+            assert!(serialized.get("inspectorsByNodeId").is_some());
+            assert!(serialized.get("current_project_id").is_none());
+            assert!(serialized.get("inspectors_by_node_id").is_none());
+
+            let first_node = serialized["graph"]["nodes"]
+                .as_array()
+                .and_then(|nodes| nodes.first())
+                .expect("graph should include nodes");
+            assert!(first_node.get("nodeType").is_some());
+            assert!(first_node.get("node_type").is_none());
+        });
+    }
+
+    #[test]
+    fn load_canvas_object_detail_command_returns_typed_detail_payloads() {
+        with_canvas_command_runtime(|runtime| {
+            let (source, chunks, _work_items, project, assets) =
+                build_demo_assets(runtime).expect("demo assets should build");
+
+            let project_projection = load_canvas_object_detail(
+                "project".to_string(),
+                project.id.clone(),
+                None,
+            )
+            .expect("project detail should load");
+            assert_eq!(project_projection.focus_node_type, "project");
+            assert_eq!(project_projection.focus_node_id, project.id);
+
+            let asset_projection = load_canvas_object_detail(
+                "asset".to_string(),
+                assets[0].id.clone(),
+                None,
+            )
+            .expect("asset detail should load");
+            assert_eq!(asset_projection.focus_node_type, "asset");
+            assert_eq!(
+                asset_projection.inspectors_by_node_id[&assets[0].id]
+                    .fields
+                    .get("projectId")
+                    .map(String::as_str),
+                Some(project.id.as_str())
+            );
+
+            let source_projection = load_canvas_object_detail(
+                "source".to_string(),
+                source.id.clone(),
+                Some(project.id.clone()),
+            )
+            .expect("source detail should load");
+            assert_eq!(source_projection.focus_node_type, "source");
+            assert_eq!(
+                source_projection.inspectors_by_node_id[&source.id]
+                    .fields
+                    .get("title")
+                    .map(String::as_str),
+                Some(source.title.as_str())
+            );
+
+            let chunk_projection = load_canvas_object_detail(
+                "chunk".to_string(),
+                chunks[0].id.clone(),
+                Some(project.id.clone()),
+            )
+            .expect("chunk detail should load");
+            assert_eq!(chunk_projection.focus_node_type, "chunk");
+            assert_eq!(
+                chunk_projection.inspectors_by_node_id[&chunks[0].id]
+                    .fields
+                    .get("parentSource")
+                    .map(String::as_str),
+                Some(source.id.as_str())
+            );
+
+            let serialized =
+                serde_json::to_value(&chunk_projection).expect("detail projection should serialize");
+            assert!(serialized.get("focusNodeId").is_some());
+            assert!(serialized.get("focusNodeType").is_some());
+            assert!(serialized.get("inspectorsByNodeId").is_some());
+            assert!(serialized.get("focus_node_id").is_none());
+            assert!(serialized.get("focus_node_type").is_none());
+
+            let first_edge = serialized["graph"]["edges"]
+                .as_array()
+                .and_then(|edges| edges.first())
+                .expect("detail graph should include edges");
+            assert!(first_edge.get("edgeType").is_some());
+            assert!(first_edge.get("edge_type").is_none());
+        });
+    }
+
+    #[test]
+    fn load_canvas_object_detail_command_keeps_source_and_chunk_project_context_contextual() {
+        with_canvas_command_runtime(|runtime| {
+            let (source, chunks, _work_items, project) =
+                group_demo_project(runtime).expect("demo project should build");
+            let source_projection = load_canvas_object_detail(
+                "source".to_string(),
+                source.id.clone(),
+                Some(project.id.clone()),
+            )
+            .expect("source detail should load");
+
+            assert!(source_projection
+                .graph
+                .nodes
+                .iter()
+                .any(|node| node.id == project.id && node.node_type == "project"));
+            assert_eq!(
+                source_projection.inspectors_by_node_id[&source.id]
+                    .fields
+                    .get("parentProject"),
+                None
+            );
+
+            let chunk_projection = load_canvas_object_detail(
+                "chunk".to_string(),
+                chunks[0].id.clone(),
+                Some(project.id.clone()),
+            )
+            .expect("chunk detail should load");
+
+            assert!(chunk_projection
+                .graph
+                .nodes
+                .iter()
+                .any(|node| node.id == source.id && node.node_type == "source"));
+            assert_eq!(
+                chunk_projection.inspectors_by_node_id[&chunks[0].id]
+                    .fields
+                    .get("parentProject"),
+                None
+            );
+        });
     }
 
     #[test]
@@ -2907,6 +3175,23 @@ fn build_provider_entry_from_form(form: &ConfigBarForm) -> Result<ProviderConfig
 }
 
 #[tauri::command]
+fn load_canvas_global_view(project_id: Option<String>) -> Result<CanvasGlobalViewDto, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    runtime::load_canvas_global_view(&runtime, project_id.as_deref()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_canvas_object_detail(
+    object_type: String,
+    object_id: String,
+    project_id: Option<String>,
+) -> Result<CanvasDetailViewDto, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    runtime::load_canvas_detail_view(&runtime, &object_type, &object_id, project_id.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn create_demo_run() -> Result<String, String> {
     let runtime = AppRuntime::new("distilllab-dev.db".to_string());
     let run = runtime::create_demo_run(&runtime).map_err(|e| e.to_string())?;
@@ -3264,6 +3549,27 @@ fn list_projects() -> Result<String, String> {
         .join("\n");
 
     Ok(summary)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CanvasProjectListItemDto {
+    id: String,
+    name: String,
+}
+
+#[tauri::command]
+fn list_canvas_projects() -> Result<Vec<CanvasProjectListItemDto>, String> {
+    let runtime = AppRuntime::new("distilllab-dev.db".to_string());
+    let projects = runtime::list_projects(&runtime).map_err(|e| e.to_string())?;
+
+    Ok(projects
+        .into_iter()
+        .map(|project| CanvasProjectListItemDto {
+            id: project.id,
+            name: project.name,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -3990,6 +4296,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            load_canvas_global_view,
+            load_canvas_object_detail,
             create_demo_run,
             create_demo_session,
             create_session_command,
@@ -4011,6 +4319,7 @@ pub fn run() {
             list_work_items,
             group_demo_project,
             list_projects,
+            list_canvas_projects,
             build_demo_assets,
             list_assets,
             test_current_provider_command,
