@@ -1,12 +1,12 @@
-/local/
-/docs/
+local/
+docs
 .idea
 *.db
-/.claude
+.claude
 CLAUDE.md
 .impeccable.md
-
+.superpowers
 # Added by cargo
 
-/target
-/.worktrees/
+target
+.worktrees
